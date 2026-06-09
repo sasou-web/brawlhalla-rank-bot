@@ -1,0 +1,26 @@
+{
+  "name": "brawlhalla-rank-bot",
+  "version": "1.0.0",
+  "description": "Bot Discord qui attribue automatiquement des roles selon le rank Brawlhalla (1v1 et 2v2).",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "check": "node scripts/check.js",
+    "test": "node --test",
+    "ci": "npm run check && npm test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.60",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.7",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Xray BrawlBot — Dashboard</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <!-- Chargement -->
+    <div id="loading" class="loading"><div class="spinner"></div></div>
+
+    <!-- Écran de connexion / accès refusé -->
+    <div id="login" class="login-wrap" style="display: none">
+      <div class="login-card">
+        <div class="logo">🎮</div>
+        <h1>Xray BrawlBot</h1>
+        <p>Le dashboard pour piloter ton serveur Brawlhalla. Réservé aux administrateurs.</p>
+        <div id="login-error" class="error-banner" style="display: none"></div>
+        <ul class="login-features">
+          <li><span class="fi">🏆</span> Tournois, bracket & scores en direct</li>
+          <li><span class="fi">⭐</span> Niveaux, récompenses & rôles auto</li>
+          <li><span class="fi">📱</span> TikTok, clips, bienvenue & vocaux temporaires</li>
+        </ul>
+        <a class="btn-discord" href="/login">
+          <span style="font-size: 20px">🔗</span> Se connecter avec Discord
+        </a>
+      </div>
+    </div>
+
+    <!-- Application -->
+    <div id="app" class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="badge">🎮</div>
+          <div>
+            <div class="brand-name" id="guild-name">Serveur</div>
+            <div class="brand-sub">Dashboard</div>
+          </div>
+        </div>
+        <nav id="nav"></nav>
+        <div class="sidebar-foot">
+          <div class="user-chip">
+            <img id="user-avatar" src="" alt="" />
+            <div>
+              <div class="u-name" id="user-name"></div>
+              <div class="u-role">Administrateur</div>
+            </div>
+          </div>
+          <a class="logout" href="/logout">Se déconnecter</a>
+        </div>
+      </aside>
+      <main class="main" id="content"></main>
+    </div>
+
+    <div id="toast"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
