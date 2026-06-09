@@ -97,6 +97,10 @@ export const commandsData = [
     .setDescription("Vérifie l'état de l'API Brawlhalla et la latence du bot.")
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("Liste les commandes les plus utiles du bot.")
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("stats")
     .setDescription("Fiche joueur Brawlhalla (vue d'ensemble · onglets : Ranked, Légendes, Équipes).")
     .addUserOption((o) => o.setName("membre").setDescription("Membre lié (defaut : toi).").setRequired(false))
@@ -387,6 +391,7 @@ export async function handleChatInput(interaction, ctx) {
     case "delier": return handleDelier(interaction, ctx);
     case "top": return handleTop(interaction, ctx);
     case "ping": return handlePing(interaction, ctx);
+    case "help": return handleHelp(interaction, ctx);
     case "stats": return handleStats(interaction, ctx);
     case "rank": return handleRank(interaction, ctx);
     case "legendes": return handleLegendes(interaction, ctx);
@@ -1486,7 +1491,48 @@ async function handlePing(interaction, ctx) {
   return interaction.editReply({ embeds: [embed] });
 }
 
-// ---------- /reset-saison (admin) ----------
+// ---------- /help ----------
+
+async function handleHelp(interaction, ctx) {
+  const embed = new EmbedBuilder()
+    .setColor(0x7c5cff)
+    .setTitle("🐾 Aide — les commandes essentielles")
+    .setDescription("Voici l'essentiel pour bien démarrer. La plupart des commandes acceptent un **membre**, un **pseudo** ou un **Brawlhalla ID**.")
+    .addFields(
+      {
+        name: "🎮 Ton compte",
+        value: [
+          "`/lier` — Relie ton compte Brawlhalla et reçois tes **rôles de rank** automatiquement.",
+          "`/delier` — Retire la liaison de ton compte.",
+        ].join("\n"),
+      },
+      {
+        name: "📊 Tes stats",
+        value: [
+          "`/carte` — Ta **carte profil** en image (rank, winrate, main, Glory).",
+          "`/rank` — Le détail de ton **Ranked** 1v1 & 2v2.",
+          "`/stats` — Ta **fiche complète** (légendes, équipes…).",
+          "`/progression` — La **courbe** de ton rating au fil du temps.",
+          "`/versus` — **Compare-toi** à un autre joueur.",
+        ].join("\n"),
+      },
+      {
+        name: "🏆 Classements",
+        value: [
+          "`/top` — Classement des **membres liés** du serveur.",
+          "`/leaderboard` — Le **top 10 officiel** Brawlhalla.",
+          "`/niveau` · `/classement-niveaux` — Ton **XP** et le top du serveur.",
+        ].join("\n"),
+      },
+      {
+        name: "🎟️ Tournoi",
+        value: "`/bracket` — Affiche le **bracket** du tournoi en cours.",
+      },
+    )
+    .setFooter({ text: "Astuce : commence par /lier pour débloquer tes rôles et tes stats." });
+
+  return interaction.reply({ embeds: [embed], flags: EPHEMERAL });
+}
 
 async function handleResetSeason(interaction, ctx) {
   const row = new ActionRowBuilder().addComponents(
