@@ -1,0 +1,15 @@
+# Normalisation des fins de ligne.
+# Par défaut : git gère automatiquement (LF en interne).
+* text=auto
+
+# Les scripts shell DOIVENT rester en LF (sinon ils cassent sous Linux : "$'\r': command not found").
+*.sh text eol=lf
+
+# Les fichiers de code restent en LF côté dépôt (cohérent serveur Linux).
+*.js text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.css text eol=lf
+*.html text eol=lf
