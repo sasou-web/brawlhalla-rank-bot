@@ -468,3 +468,195 @@ body.light .ss-opt.sel { color: var(--text); }
   transition: transform 0.12s ease;
 }
 .accent-dot:hover { transform: scale(1.15); }
+
+/* ════════════════════════════════════════════════════════════════
+   🐾 MODE CATGIRL — thème kawaii rose/pastel + nuit néon
+   Activé via body.catgirl (et body.catgirl.light pour le pastel).
+   Tout est cloisonné sous .catgirl pour ne rien casser ailleurs.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ---- Palette nuit néon (catgirl sombre, par défaut) ---- */
+body.catgirl {
+  --bg: #140e1d;
+  --surface: #1d1529;
+  --surface-2: #271a37;
+  --surface-3: #352145;
+  --border: #422c54;
+  --text: #ffe9f8;
+  --muted: #c79ad9;
+  --accent: #ff79c6;
+  --accent-2: #b388ff;
+  --accent-grad: linear-gradient(135deg, #ff8fd6, #b388ff 55%, #7ad6ff);
+  --green: #5cf0a8;
+  --red: #ff6b9d;
+  --radius: 22px;
+  --shadow: 0 14px 50px rgba(255, 121, 198, 0.22);
+  font-family: "Quicksand", "Baloo 2", "Inter", -apple-system, sans-serif;
+  background:
+    radial-gradient(820px 520px at 12% -8%, rgba(255, 121, 198, 0.16), transparent 60%),
+    radial-gradient(720px 520px at 92% 6%, rgba(179, 136, 255, 0.16), transparent 60%),
+    var(--bg);
+}
+
+/* ---- Palette pastel (catgirl + clair) ---- */
+body.catgirl.light {
+  --bg: #fff1f8;
+  --surface: #ffffff;
+  --surface-2: #fff6fb;
+  --surface-3: #ffe6f4;
+  --border: #ffd4ea;
+  --text: #5a2842;
+  --muted: #c47aa4;
+  --accent: #ff5fb0;
+  --accent-2: #b07bff;
+  --accent-grad: linear-gradient(135deg, #ff8ed1, #b07bff);
+  --shadow: 0 14px 44px rgba(255, 95, 176, 0.18);
+  background:
+    radial-gradient(820px 520px at 12% -8%, rgba(255, 142, 209, 0.28), transparent 60%),
+    radial-gradient(720px 520px at 92% 6%, rgba(176, 123, 255, 0.22), transparent 60%),
+    var(--bg);
+}
+
+/* Titres en police ronde joueuse */
+body.catgirl h1,
+body.catgirl h2,
+body.catgirl h3,
+body.catgirl .brand-name,
+body.catgirl .h-name,
+body.catgirl .stat .val,
+body.catgirl .card-section-title { font-family: "Baloo 2", "Quicksand", sans-serif; letter-spacing: 0; }
+
+/* Coins très arrondis & survols moelleux */
+body.catgirl .card,
+body.catgirl .stat,
+body.catgirl .trn-hero { border-radius: var(--radius); }
+body.catgirl .card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* Boutons rebondissants */
+body.catgirl .btn-save,
+body.catgirl .tbtn.primary,
+body.catgirl .modal-btn.primary {
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(255, 121, 198, 0.4);
+}
+body.catgirl .btn-save:hover,
+body.catgirl .tbtn:hover { transform: translateY(-2px) scale(1.02); }
+
+/* Navigation : pastille active toute douce */
+body.catgirl .nav-item { border-radius: 14px; }
+body.catgirl .nav-item.active { background: linear-gradient(135deg, rgba(255,121,198,.22), rgba(179,136,255,.18)); color: #fff; }
+body.catgirl.light .nav-item.active { color: var(--text); }
+body.catgirl .nav-item.active::before { background: var(--accent-grad); width: 4px; }
+
+/* Toggles roses */
+body.catgirl .toggle input:checked + .slider { background: var(--accent); box-shadow: 0 0 12px rgba(255,121,198,.6); }
+
+/* Badge marque : oreilles de chat */
+body.catgirl .brand .badge,
+body.catgirl .login-card .logo { position: relative; overflow: visible; border-radius: 30% 30% 38% 38%; }
+body.catgirl .brand .badge::before,
+body.catgirl .brand .badge::after,
+body.catgirl .login-card .logo::before,
+body.catgirl .login-card .logo::after {
+  content: ""; position: absolute; top: -42%; width: 0; height: 0;
+  border-left: 11px solid transparent; border-right: 11px solid transparent;
+  border-bottom: 20px solid var(--accent);
+}
+body.catgirl .login-card .logo::before,
+body.catgirl .login-card .logo::after { border-left-width: 20px; border-right-width: 20px; border-bottom-width: 36px; top: -40%; }
+body.catgirl .brand .badge::before { left: 3px; transform: rotate(-20deg); }
+body.catgirl .brand .badge::after { right: 3px; transform: rotate(20deg); }
+body.catgirl .login-card .logo::before { left: 8px; transform: rotate(-22deg); }
+body.catgirl .login-card .logo::after { right: 8px; transform: rotate(22deg); }
+
+/* Scrollbar mignonne */
+body.catgirl ::-webkit-scrollbar { width: 12px; height: 12px; }
+body.catgirl ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+body.catgirl ::-webkit-scrollbar-track { background: transparent; }
+
+/* Toast nyan */
+body.catgirl #toast { border-radius: 999px; border-width: 2px; font-weight: 600; }
+body.catgirl #toast.ok { border-color: var(--accent); }
+
+/* ---- Sparkles flottants (fond) ---- */
+.cat-sparkles { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; display: none; }
+body.catgirl .cat-sparkles { display: block; }
+.cat-sparkles .spk { position: absolute; font-size: 16px; opacity: 0; animation: spkFloat linear infinite; filter: drop-shadow(0 0 6px rgba(255,121,198,.6)); }
+@keyframes spkFloat {
+  0% { transform: translateY(20px) scale(.6) rotate(0deg); opacity: 0; }
+  20% { opacity: .9; }
+  80% { opacity: .9; }
+  100% { transform: translateY(-110vh) scale(1) rotate(220deg); opacity: 0; }
+}
+
+/* Traînée de curseur (cœurs/étoiles) */
+.cat-trail { position: fixed; pointer-events: none; z-index: 9999; font-size: 16px; transform: translate(-50%, -50%); animation: trailPop .8s ease-out forwards; }
+@keyframes trailPop { 0% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 100% { opacity: 0; transform: translate(-50%,-160%) scale(.3); } }
+
+/* ════ Mascotte neko flottante ════ */
+.cat-mascot { position: fixed; right: 22px; bottom: 22px; z-index: 70; width: 132px; display: none; user-select: none; }
+body.catgirl .cat-mascot.show { display: block; animation: mascotIn .5s cubic-bezier(.2,1.3,.4,1); }
+@keyframes mascotIn { from { transform: translateY(40px) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+.cat-mascot .cm-img {
+  width: 132px; height: 132px; object-fit: cover; cursor: pointer;
+  border-radius: 26px; border: 3px solid var(--accent);
+  box-shadow: var(--shadow);
+  animation: mascotBob 3.4s ease-in-out infinite;
+  background: var(--surface-2);
+}
+.cat-mascot .cm-img:hover { transform: scale(1.05) rotate(-2deg); }
+@keyframes mascotBob { 0%,100% { translate: 0 0; } 50% { translate: 0 -8px; } }
+.cat-mascot .cm-close {
+  position: absolute; top: -8px; left: -8px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--surface-3); border: 2px solid var(--accent); color: var(--text);
+  font-size: 13px; line-height: 1; display: grid; place-items: center; cursor: pointer; z-index: 2;
+}
+.cat-bubble {
+  position: absolute; bottom: calc(100% + 12px); right: 0; max-width: 230px; min-width: 120px;
+  background: var(--surface); color: var(--text); border: 2px solid var(--accent);
+  border-radius: 18px; padding: 11px 14px; font-size: 13px; font-weight: 600; line-height: 1.4;
+  box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s;
+}
+.cat-bubble.show { opacity: 1; transform: none; }
+.cat-bubble::after {
+  content: ""; position: absolute; top: 100%; right: 30px;
+  border: 9px solid transparent; border-top-color: var(--accent);
+}
+.cat-bubble .cb-gif { width: 100%; border-radius: 12px; margin-top: 8px; display: block; }
+
+/* Bouton bascule du mode catgirl (sidebar) */
+.catgirl-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin-top: 8px; padding: 10px; border-radius: 12px; font-size: 13px; font-weight: 700;
+  background: linear-gradient(135deg, rgba(255,121,198,.16), rgba(179,136,255,.14));
+  border: 1px solid var(--border); color: var(--text); transition: transform .15s, border-color .15s;
+}
+.catgirl-toggle:hover { transform: translateY(-1px); border-color: var(--accent); }
+body.catgirl .catgirl-toggle { background: var(--accent-grad); color: #fff; border: 0; box-shadow: 0 6px 18px rgba(255,121,198,.4); }
+
+/* ════ Galerie Neko (exploite l'API) ════ */
+.neko-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 14px; }
+.neko-cell { position: relative; border-radius: 16px; overflow: hidden; border: 2px solid var(--border); background: var(--surface-2); aspect-ratio: 3/4; cursor: pointer; transition: transform .18s, border-color .18s; }
+.neko-cell:hover { transform: translateY(-3px) rotate(-1deg); border-color: var(--accent); box-shadow: var(--shadow); }
+.neko-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.neko-cell .nk-credit { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; font-size: 10px; color: #fff; background: linear-gradient(to top, rgba(0,0,0,.75), transparent); opacity: 0; transition: opacity .18s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.neko-cell:hover .nk-credit { opacity: 1; }
+.neko-cat-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+.neko-chip { padding: 7px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all .15s; }
+.neko-chip:hover { color: var(--text); border-color: var(--accent); }
+.neko-chip.active { background: var(--accent-grad); color: #fff; border: 0; }
+
+/* Visionneuse plein écran d'une image neko */
+.neko-viewer-img { max-width: 100%; max-height: 70vh; border-radius: 16px; display: block; margin: 0 auto; }
+
+/* Carte "carte de membre neko" — petit gadget fun */
+body.catgirl .stat { background: linear-gradient(160deg, var(--surface), var(--surface-2)); }
+body.catgirl .stat::after { content: "🐾"; position: absolute; top: 12px; right: 14px; font-size: 16px; opacity: .35; }
+body.catgirl .stat { position: relative; overflow: hidden; }
+
+/* Login : ambiance catgirl */
+body.catgirl .login-card { border-radius: 28px; border: 2px solid var(--accent); }
+body.catgirl .login-features .fi { background: var(--accent-grad); }
+.login-neko { width: 110px; height: 110px; object-fit: cover; border-radius: 24px; border: 3px solid var(--accent); box-shadow: var(--shadow); margin: 0 auto 18px; display: none; }
+body.catgirl .login-neko { display: block; }
+body.catgirl .login-card .logo { display: none; }
