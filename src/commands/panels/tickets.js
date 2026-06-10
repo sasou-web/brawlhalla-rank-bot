@@ -26,6 +26,7 @@ import {
   setTicketClaim,
   countOpenByOwner,
   buildTicketPanelPayload,
+  parseColor,
 } from "../../tickets.js";
 import { EPHEMERAL, logAudit } from "../shared.js";
 
@@ -204,6 +205,7 @@ export async function handleTicketsButton(interaction, ctx) {
 
   // ---- Boutons dans un salon de ticket ----
   if (id === "tck_claim") return claimTicket(interaction);
+  if (id === "tck_transcript") return sendTranscriptNow(interaction);
   if (id === "tck_close") return askCloseTicket(interaction);
   if (id === "tck_close_confirm") return closeTicket(interaction);
   if (id === "tck_close_cancel") {
@@ -299,6 +301,24 @@ async function openTicket(interaction, topicId) {
   return interaction.showModal(modal);
 }
 
+// Description de bienvenue affichée dans le salon de ticket (avec lien ToS éventuel).
+function buildTicketWelcome(cfg) {
+  let d = cfg.ticketWelcome || "Merci de patienter, un membre du staff va prendre en charge ton ticket.";
+  if (cfg.tosUrl) d += ` Merci de respecter nos [Terms of Service](${cfg.tosUrl}).`;
+  return d;
+}
+
+// Champs de l'embed de ticket : motif, demande du membre, et infos complémentaires.
+function buildTicketFields(topic, subject, cfg) {
+  const fields = [
+    { name: "📌 Motif", value: topic ? `${topic.emoji || "•"} ${topic.label}` : "Général" },
+    { name: "📝 Demande", value: subject.slice(0, 1024) },
+  ];
+  const info = (topic && topic.message) || cfg.ticketInfo;
+  if (info && info.trim()) fields.push({ name: "ℹ️ Informations", value: info.slice(0, 1024) });
+  return fields;
+}
+
 async function createTicketChannel(interaction, topicId, subject) {
   const guild = interaction.guild;
   const cfg = await getTicketConfig(guild.id);
@@ -371,18 +391,17 @@ async function createTicketChannel(interaction, topicId, subject) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle(`🎫 Ticket #${number}`)
-    .setColor(0x5865f2)
-    .addFields(
-      { name: "Ouvert par", value: `<@${interaction.user.id}>`, inline: true },
-      { name: "Motif", value: topic ? `${topic.emoji} ${topic.label}` : "Général", inline: true },
-      { name: "Demande", value: subject.slice(0, 1024) },
-    )
-    .setFooter({ text: "Le staff te répondra ici. Utilise les boutons pour gérer ce ticket." })
+    .setColor(parseColor(cfg.panelColor))
+    .setTitle((cfg.ticketTitle || "🎫 Support Ticket").slice(0, 256))
+    .setDescription(buildTicketWelcome(cfg).slice(0, 4000))
+    .addFields(buildTicketFields(topic, subject, cfg))
+    .setFooter({ text: `Ticket #${number} • Ouvert par ${interaction.user.tag}` })
     .setTimestamp();
+  if (cfg.thumbnailUrl) embed.setThumbnail(cfg.thumbnailUrl);
 
   const controls = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("tck_claim").setLabel("Prendre en charge").setEmoji("🙋").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("tck_claim").setLabel("Prendre en charge").setEmoji("🙋").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("tck_transcript").setLabel("Transcript").setEmoji("📄").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("tck_close").setLabel("Fermer").setEmoji("🔒").setStyle(ButtonStyle.Danger),
   );
 
@@ -423,6 +442,31 @@ async function claimTicket(interaction) {
   }
   await setTicketClaim(interaction.guild.id, interaction.channel.id, interaction.user.id);
   return interaction.reply({ content: `🙋 <@${interaction.user.id}> prend ce ticket en charge.` });
+}
+
+// Génère et envoie un transcript sans fermer le ticket (bouton « Transcript »).
+async function sendTranscriptNow(interaction) {
+  const t = await ticketContext(interaction);
+  if (!t) return;
+  const cfg = await getTicketConfig(interaction.guild.id);
+  if (interaction.user.id !== t.ownerId && !isStaff(interaction, cfg)) {
+    return interaction.reply({ content: "Réservé à l'auteur du ticket ou au staff.", flags: EPHEMERAL });
+  }
+  await interaction.deferReply({ flags: EPHEMERAL });
+  const transcript = await buildTranscript(interaction.channel, t);
+  const file = new AttachmentBuilder(Buffer.from(transcript, "utf-8"), {
+    name: `ticket-${String(t.number).padStart(4, "0")}.txt`,
+  });
+  const logCh = cfg.logChannelId
+    ? await interaction.guild.channels.fetch(cfg.logChannelId).catch(() => null)
+    : null;
+  if (logCh?.isTextBased?.()) {
+    await logCh
+      .send({ content: `📄 Transcript du ticket #${t.number} (demandé par <@${interaction.user.id}>)`, files: [file] })
+      .catch(() => {});
+    return interaction.editReply(`Transcript envoyé dans <#${cfg.logChannelId}>. ✅`);
+  }
+  return interaction.editReply({ content: "📄 Transcript du ticket :", files: [file] });
 }
 
 async function askCloseTicket(interaction) {

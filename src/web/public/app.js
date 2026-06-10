@@ -847,11 +847,13 @@ function topicsEditor(cfg) {
       const emo = el("input", { type: "text", value: t.emoji || "", placeholder: "🎫", style: "max-width:70px" });
       const lab = el("input", { type: "text", value: t.label || "", placeholder: "Support" });
       const desc = el("input", { type: "text", value: t.description || "", placeholder: "Description courte (affichée dans le menu)" });
+      const msg = el("input", { type: "text", value: t.message || "", placeholder: "Message affiché à l'ouverture du ticket (optionnel)", style: "flex:1 1 100%" });
       emo.addEventListener("input", () => (cfg.topics[i].emoji = emo.value.trim()));
       lab.addEventListener("input", () => (cfg.topics[i].label = lab.value));
       desc.addEventListener("input", () => (cfg.topics[i].description = desc.value));
+      msg.addEventListener("input", () => (cfg.topics[i].message = msg.value));
       list.append(
-        el("div", { class: "hub-row", style: "flex-wrap:wrap" }, emo, lab, desc,
+        el("div", { class: "hub-row", style: "flex-wrap:wrap" }, emo, lab, desc, msg,
           el("button", { class: "icon-btn", onclick: () => { cfg.topics.splice(i, 1); redraw(); setDirty(true); } }, "🗑")),
       );
     });
@@ -901,10 +903,19 @@ function renderTickets(content) {
   c2.append(fieldRow("Texte du menu déroulant", "Placeholder affiché sur le menu de motifs.", textInput(cfg, "selectPlaceholder", "Choisis un motif")));
   content.append(c2);
 
+  // Embed affiché DANS le salon de ticket créé
+  const cTicket = el("div", { class: "card" },
+    el("h3", {}, "Message du ticket créé"),
+    el("div", { class: "card-sub" }, "Embed posté dans le salon privé à l'ouverture (titre, message d'accueil, infos). La vignette et la couleur sont reprises de l'apparence ci-dessus."));
+  cTicket.append(fieldRow("Titre du ticket", "", textInput(cfg, "ticketTitle", "🎫 Support Ticket")));
+  cTicket.append(fieldRow("Message d'accueil", "Affiché en haut du ticket. Le lien Terms of Service est ajouté automatiquement s'il est défini.", textareaInput(cfg, "ticketWelcome", "Merci de patienter, un membre du staff va prendre en charge ton ticket.")));
+  cTicket.append(fieldRow("Informations complémentaires", "Bloc « Informations » par défaut (un motif peut le remplacer par son propre message).", textareaInput(cfg, "ticketInfo", "")));
+  content.append(cTicket);
+
   // Motifs (options du menu déroulant)
   const c3 = el("div", { class: "card" },
     el("h3", {}, "Motifs du menu déroulant"),
-    el("div", { class: "card-sub" }, "Chaque motif = une option du menu (emoji + nom + description). Ex : Buy, Support, Replace."));
+    el("div", { class: "card-sub" }, "Chaque motif = une option du menu (emoji + nom + description). Le 4ᵉ champ « message » s'affiche à l'ouverture du ticket pour ce motif (ex : réponse auto). Ex : Buy, Support, Replace."));
   c3.append(topicsEditor(cfg));
   content.append(c3);
 

@@ -14,7 +14,8 @@ const KEY = "tickets";
  *   panelTitle, panelDescription,                // texte du panneau public
  *   panelColor, bannerUrl, thumbnailUrl,         // apparence (couleur, grande image, vignette)
  *   rulesText, tosUrl, selectPlaceholder,        // règles à lire, lien CGU, placeholder du menu
- *   topics: [ { id, label, emoji, description } ],// motifs proposes (vide = bouton unique)
+ *   ticketTitle, ticketWelcome, ticketInfo,      // embed AFFICHÉ DANS le salon de ticket créé
+ *   topics: [ { id, label, emoji, description, message } ],// motifs (message = info à l'ouverture)
  *   counter,                                     // numero incremental du prochain ticket
  *   open: { [channelId]: { ownerId, number, topic, claimedBy, createdTs } }
  * } } }
@@ -36,6 +37,10 @@ const DEFAULT_CONFIG = {
   rulesText: "",
   tosUrl: "",
   selectPlaceholder: "Choisis un motif pour ouvrir un ticket",
+  // Embed posté DANS le salon de ticket à sa création.
+  ticketTitle: "🎫 Support Ticket",
+  ticketWelcome: "Merci de patienter, un membre du staff va prendre en charge ton ticket dès que possible.",
+  ticketInfo: "",
   topics: [],
   counter: 1,
 };
@@ -94,6 +99,7 @@ function normalizeTopics(arr) {
     label: String((t && t.label) || "Ticket").slice(0, 80),
     emoji: t && t.emoji ? String(t.emoji).slice(0, 40) : "🎫",
     description: String((t && t.description) || "").slice(0, 100),
+    message: String((t && t.message) || "").slice(0, 1000),
   }));
 }
 
@@ -176,7 +182,7 @@ export async function countOpenByOwner(guildId, ownerId) {
 // ====================================================================
 
 // Couleur hex ("#5865f2") ou nombre -> entier pour EmbedBuilder. Repli sur le bleu Discord.
-function parseColor(c) {
+export function parseColor(c) {
   if (typeof c === "number" && Number.isFinite(c)) return c;
   if (typeof c === "string") {
     const n = parseInt(c.replace(/^#/, ""), 16);
