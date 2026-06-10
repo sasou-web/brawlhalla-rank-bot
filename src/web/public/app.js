@@ -203,6 +203,7 @@ const NAV = [
   { id: "tempvoice", label: "Vocaux temporaires", ico: "🔊" },
   { id: "vocrank", label: "Vocaux par rank", ico: "🎙️" },
   { id: "tournament", label: "Tournoi", ico: "🏆" },
+  { id: "combos", label: "Combos", ico: "🥊" },
 ];
 
 function renderApp() {
@@ -612,6 +613,7 @@ function renderSection(id) {
   if (id === "welcome") return renderWelcome(content);
   if (id === "vocrank") return renderVocRank(content);
   if (id === "tournament") return renderTournament(content);
+  if (id === "combos") return renderCombos(content);
 
   const cfg = structuredClone(CONFIG[id] || {});
   const schema = sectionSchema(id, cfg);
@@ -727,6 +729,70 @@ function renderVocRank(content) {
     btn.disabled = false;
   });
   content.append(el("div", { class: "save-bar" }, btn));
+}
+
+// ----- Page Combos (admin) -----
+async function renderCombos(content) {
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "🥊 Combos Brawlhalla" }),
+      el("p", {}, "Base de true combos (source BrawlDatabase) que les membres parcourent via /combos.")),
+  );
+
+  const card = el("div", { class: "card" }, el("h3", {}, "Base de données"));
+  const body = el("div", { class: "card-sub" }, "Chargement…");
+  card.append(body);
+
+  const upd = el("button", { class: "tbtn", style: "margin-top:14px" }, "🔄 Mettre à jour la base");
+  upd.addEventListener("click", async () => {
+    upd.disabled = true;
+    const old = upd.textContent;
+    upd.textContent = "⏳ Récupération depuis BrawlDB…";
+    try {
+      const r = await api("/api/combos/refresh", "POST", {});
+      toast(`Base mise à jour : ${r.count} combos ✅`, "ok");
+      renderSection("combos");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+      upd.disabled = false;
+      upd.textContent = old;
+    }
+  });
+  card.append(el("div", {}, upd));
+  content.append(card);
+
+  // Publier le panneau interactif dans un salon
+  const pubState = { channelId: "" };
+  const pubCard = el("div", { class: "card" },
+    el("h3", {}, "Publier le panneau"),
+    el("div", { class: "card-sub" }, "Poste un panneau /combos interactif dans un salon : les membres choisissent l'arme et parcourent les combos (vidéo intégrée)."));
+  pubCard.append(fieldRow("Salon", "", channelSelect(pubState, "channelId", "textann")));
+  const pub = el("button", { class: "tbtn primary", style: "margin-top:6px" }, "📌 Publier le panneau");
+  pub.addEventListener("click", async () => {
+    if (!pubState.channelId) return toast("Choisis un salon.", "err");
+    pub.disabled = true;
+    try {
+      await api("/api/combos/publish", "POST", { channelId: pubState.channelId });
+      toast("Panneau publié ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    pub.disabled = false;
+  });
+  pubCard.append(el("div", {}, pub));
+  content.append(pubCard);
+
+  try {
+    const info = await api("/api/combos");
+    body.innerHTML = "";
+    const date = info.scrapedAt ? new Date(info.scrapedAt).toLocaleString("fr-FR") : "—";
+    body.append(
+      el("div", { style: "font-size:15px" }, el("b", {}, String(info.count)), ` combos · ${Object.keys(info.byWeapon || {}).length} armes`),
+      el("div", { class: "card-sub", style: "margin-top:4px" }, "Dernière mise à jour : " + date),
+    );
+  } catch (e) {
+    body.textContent = "Erreur : " + e.message;
+  }
 }
 
 function renderOverview(content) {

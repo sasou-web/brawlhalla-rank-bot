@@ -32,6 +32,7 @@ import {
 import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
+import { combosInfo, refreshCombos, buildCombosMessage, weaponsWithCombos } from "../combos.js";
 import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
 import { getPlayerProfile } from "../brawlhalla.js";
@@ -579,6 +580,39 @@ export function startWebServer(client) {
   app.delete("/api/tournament/history/:id", requireAdmin, async (req, res) => {
     await deleteHistoryEntry(G, req.params.id);
     res.json({ ok: true });
+  });
+
+  // ---- Combos (BrawlDatabase) ----
+  app.get("/api/combos", requireAdmin, async (req, res) => {
+    try {
+      res.json(await combosInfo());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/combos/refresh", requireAdmin, async (req, res) => {
+    try {
+      const r = await refreshCombos();
+      res.json(r);
+    } catch (err) {
+      res.status(500).json({ error: "Mise à jour impossible : " + err.message });
+    }
+  });
+
+  app.post("/api/combos/publish", requireAdmin, async (req, res) => {
+    try {
+      const channelId = req.body?.channelId;
+      if (!channelId) return res.status(400).json({ error: "Choisis un salon." });
+      const weapons = await weaponsWithCombos();
+      if (!weapons.length) return res.status(400).json({ error: "Base de combos vide — mets-la à jour d'abord." });
+      const ch = await client.channels.fetch(channelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      await ch.send(await buildCombosMessage(weapons[0], 0));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ---- Frontend statique ----

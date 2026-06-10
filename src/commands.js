@@ -73,7 +73,7 @@ import {
 import { buildSignupPayload, refreshSignupPanel, buildModAlert, buildMatchPayload, refreshMatchMessage, tournamentAnnounce, buildMatchResultEmbed } from "./tournamentUI.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { renderBracketImage } from "./bracketImage.js";
-import { loadCombos, combosFor, weaponsWithCombos, weaponLabel, weaponEmoji, WEAPON_META } from "./combos.js";
+import { loadCombos, weaponsWithCombos, WEAPON_META, buildCombosMessage } from "./combos.js";
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const LIER_COOLDOWN_MS = 30_000;
@@ -1551,73 +1551,25 @@ async function handleHelp(interaction, ctx) {
 
 // ---------- /combos ----------
 
-// Construit le panneau d'un combo (vidéo + stats + menu arme + navigation).
-async function buildCombosPayload(weapon, index) {
-  const list = await combosFor(weapon);
-  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [] };
-  const i = Math.max(0, Math.min(index, list.length - 1));
-  const c = list[i];
-
-  const embed = new EmbedBuilder()
-    .setColor(0xf1c40f)
-    .setTitle(`${weaponEmoji(weapon)} ${weaponLabel(weapon)} — ${c.notation}`)
-    .setURL(c.url)
-    .addFields(
-      { name: "🎯 Facilité", value: `${c.usability}/10`, inline: true },
-      { name: "💥 Dégâts", value: String(c.damage), inline: true },
-      { name: "✋ Dextérité", value: String(c.dexterity), inline: true },
-      { name: "📊 Dégâts moyens", value: String(c.avgDamage), inline: true },
-    )
-    .setFooter({ text: `Combo ${i + 1}/${list.length} · trié par facilité · source BrawlDatabase.com` });
-
-  const weapons = await weaponsWithCombos();
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId("cb_weapon")
-    .setPlaceholder(`${weaponLabel(weapon)} — choisir une arme`)
-    .addOptions(
-      weapons.map((w) => ({
-        label: weaponLabel(w),
-        value: w,
-        emoji: weaponEmoji(w),
-        default: w === weapon,
-      })),
-    );
-
-  const nav = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`cb_nav:${weapon}:${i - 1}`).setLabel("◀").setStyle(ButtonStyle.Secondary).setDisabled(i === 0),
-    new ButtonBuilder().setCustomId("cb_count").setLabel(`${i + 1}/${list.length}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId(`cb_nav:${weapon}:${i + 1}`).setLabel("▶").setStyle(ButtonStyle.Secondary).setDisabled(i >= list.length - 1),
-    new ButtonBuilder().setLabel("BrawlDB").setStyle(ButtonStyle.Link).setURL(c.url),
-  );
-
-  // L'URL .mp4 dans le contenu → Discord l'affiche en lecteur vidéo intégré.
-  return {
-    content: c.video,
-    embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(menu), nav],
-    allowedMentions: { parse: [] },
-  };
-}
-
 async function handleCombos(interaction) {
   const combos = await loadCombos();
   if (!combos.length) {
-    return interaction.reply({ content: "La base de combos est vide. Un admin doit lancer `node scripts/scrape-combos.js`.", flags: EPHEMERAL });
+    return interaction.reply({ content: "La base de combos est vide. Un admin doit la mettre à jour depuis le dashboard (section Combos) ou lancer `node scripts/scrape-combos.js`.", flags: EPHEMERAL });
   }
   const opt = interaction.options.getString("arme");
   const weapons = await weaponsWithCombos();
   const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
-  return interaction.reply(await buildCombosPayload(weapon, 0));
+  return interaction.reply(await buildCombosMessage(weapon, 0));
 }
 
 // Composants du panneau combos : changement d'arme + navigation.
 async function handleCombosSelect(interaction) {
   const weapon = interaction.values[0];
-  return interaction.update(await buildCombosPayload(weapon, 0));
+  return interaction.update(await buildCombosMessage(weapon, 0));
 }
 async function handleCombosNav(interaction) {
   const [, weapon, idx] = interaction.customId.split(":");
-  return interaction.update(await buildCombosPayload(weapon, Number(idx)));
+  return interaction.update(await buildCombosMessage(weapon, Number(idx)));
 }
 
 async function handleResetSeason(interaction, ctx) {
