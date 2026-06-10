@@ -40,14 +40,19 @@ npm start              # demarre le bot
 - `/equipe [membre|pseudo]` — équipes 2v2 et coéquipiers
 - `/leaderboard [mode] [région]` — top 10 du classement
 - `/top` — classement 1v1 des membres liés du serveur
+- `/versus` — compare deux joueurs · `/progression` — courbe du rating · `/carte` — carte profil image
+- `/niveau` · `/classement-niveaux` · `/leaderboard-xp` — XP et niveaux du serveur
+- `/achievements [membre]` — succès débloqués (lié, rank, niveau, clips…)
+- `/combos [arme]` — true combos par arme · `/help` — aide · `/ping` — état de l'API + fiabilité
 
 **Staff / Admin**
 - `/setup` — config : salon de validation, rôle validateur, salon d'audit, salon d'annonces, seuil d'auto-validation
+- `/setup-succes [salon]` — salon où annoncer les succès (sans ping ; vide = désactiver)
 - `/whois <membre>` — compte Brawlhalla lié à un membre
 - `/forcelink <membre> <pseudo>` — lier sans validation
 - `/unlink <membre>` — supprimer la liaison d'un membre
 - `/refresh` — mettre à jour tous les membres liés
-- `/reset-saison` — retirer les rôles de rank saisonniers (tiers + Top), avec confirmation
+- `/reset-saison` — clôture la saison : attribue les **badges permanents** de saison puis retire les rôles de rank (tiers + Top), avec confirmation
 
 ## Rôles gérés automatiquement
 
@@ -66,6 +71,21 @@ Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que le
 - **Notifications** : DM au membre à la validation/refus.
 - **Annonces de montée** : si un salon d'annonces est configuré, le bot publie quand un membre monte de tier (détecté au refresh).
 - **Audit** : journalisation des liaisons/déliaisons/reset dans le salon d'audit.
+
+## Engagement, saisons & observabilité
+
+- **Succès / achievements** : 9 succès débloquables (liaison, paliers de rank, Top 100, niveaux XP, clips postés). Consultables via `/achievements`. Annoncés dans un salon dédié **sans ping** (configurable via `/setup-succes` ou le dashboard) — sinon silencieux.
+- **Récap hebdo de progression** : une fois par semaine, le bot poste dans le salon d'annonces le top des plus gros gains de rating 1v1 sur 7 jours (basé sur l'historique).
+- **Badges de saison** : `/reset-saison` attribue à chaque membre lié un rôle **permanent** `🏅 S{n} {Tier}` (selon son meilleur tier) avant de retirer les rôles de rank, puis incrémente le numéro de saison. Ces badges ne sont jamais retirés.
+- **Fiabilité API** : métriques exposées via `/ping`, l'endpoint `/api/metrics` et un onglet dédié du dashboard (taux de succès, erreurs 429/5xx/réseau, cooldown, files de récupération, fraîcheur de l'index).
+- **Anti-abus** : cooldowns par utilisateur sur les commandes coûteuses (API/canvas).
+
+## Architecture & développement
+
+- Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `tournament.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
+- Persistance SQLite (`data/bot.db`) : configs en documents JSON (table `kv`) ; données à forte écriture (XP, historique de rating, succès, compteurs) dans des **tables dédiées** avec écritures atomiques. Migration automatique depuis l'ancien format au premier démarrage.
+- Tests : `npm test` (lance `node --test` sur une base SQLite **temporaire isolée** via `scripts/run-tests.js`, donc sans toucher `data/bot.db`). Lint syntaxique : `npm run check`. CI locale : `npm run ci`.
+- Variables d'environnement utiles : `LEADERBOARD_SYNC_PAGES`, `LEADERBOARD_SYNC_SHALLOW_PAGES`, `LEADERBOARD_SYNC_DEEP_CHUNK` (sync incrémentale du leaderboard), `BOT_DB_PATH` (base alternative, surtout pour les tests).
 
 ## Limites connues
 
