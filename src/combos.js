@@ -129,6 +129,60 @@ export async function refreshCombos() {
   return { count: combos.length, byWeapon };
 }
 
+// ---------- Cache mémoire des vidéos de combos (anti re-téléchargement) ----------
+// Le viewer est ré-affiché à chaque navigation (changement d'arme / de combo). Sans
+// cache, on re-`fetch` le .mp4 et on le recharge entièrement en RAM à CHAQUE clic.
+// LRU borné : budget total + taille max par fichier + TTL. Au-delà du budget, on évince
+// les entrées les plus anciennes ; un fichier trop gros n'est jamais mis en cache.
+const VIDEO_TTL_MS = 60 * 60 * 1000; // 1 h
+const VIDEO_MAX_BYTES = 80 * 1024 * 1024; // budget total ~80 Mo
+const VIDEO_MAX_FILE = 12 * 1024 * 1024; // ne cache pas un fichier > 12 Mo
+const videoCache = new Map(); // key -> { buf, size, ts }
+let videoCacheBytes = 0;
+
+function videoCacheGet(key) {
+  const e = videoCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > VIDEO_TTL_MS) {
+    videoCache.delete(key);
+    videoCacheBytes -= e.size;
+    return null;
+  }
+  // Rafraîchit la récence (LRU : Map conserve l'ordre d'insertion).
+  videoCache.delete(key);
+  videoCache.set(key, e);
+  return e.buf;
+}
+
+function videoCacheSet(key, buf) {
+  const size = buf.length;
+  if (size > VIDEO_MAX_FILE) return; // trop gros : on sert sans cacher
+  while (videoCacheBytes + size > VIDEO_MAX_BYTES && videoCache.size) {
+    const oldest = videoCache.keys().next().value;
+    const old = videoCache.get(oldest);
+    videoCache.delete(oldest);
+    videoCacheBytes -= old.size;
+  }
+  videoCache.set(key, { buf, size, ts: Date.now() });
+  videoCacheBytes += size;
+}
+
+// Renvoie le buffer vidéo d'un combo (cache-first), ou null si indisponible.
+async function getComboVideo(weapon, c) {
+  const key = `${weapon}-${c.id}`;
+  const hit = videoCacheGet(key);
+  if (hit) return hit;
+  try {
+    const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    videoCacheSet(key, buf);
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- Payloads Discord ----------
 
 // Panneau PUBLIC persistant : juste un menu d'armes. Chaque clic ouvre un
@@ -200,13 +254,9 @@ export async function buildComboViewer(weapon, id) {
 
   let files = [];
   let content = "";
-  try {
-    const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
-    if (r.ok) files = [{ attachment: Buffer.from(await r.arrayBuffer()), name: `${weapon}-${c.id}.mp4` }];
-    else content = c.video;
-  } catch {
-    content = c.video;
-  }
+  const buf = await getComboVideo(weapon, c);
+  if (buf) files = [{ attachment: buf, name: `${weapon}-${c.id}.mp4` }];
+  else content = c.video; // repli : lien brut si le téléchargement échoue
 
   return {
     content,

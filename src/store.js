@@ -5,36 +5,49 @@ const KEY = "links";
 /**
  * Structure : { [discordUserId]: { brawlhallaId, name, tiers, rating1v1, updatedAt } }
  * Persisté dans SQLite (clé "links") via db.js.
+ *
+ * Le document est gardé en cache mémoire (source de vérité unique : aucun autre module
+ * n'écrit la clé "links") et les écritures passent par une chaîne sérialisée. Ça évite le
+ * read-modify-write concurrent : deux liaisons/déliaisons simultanées ne s'écrasent plus
+ * mutuellement, et chaque écriture est O(1) côté logique (plus de re-parse du blob).
  */
-async function readAll() {
-  return loadDoc(KEY, {});
+
+let cache = null;
+let writeChain = Promise.resolve();
+
+function load() {
+  if (!cache) cache = loadDoc(KEY, {});
+  return cache;
 }
 
-async function writeAll(data) {
-  saveDoc(KEY, data);
+// Chaîne d'écritures : deux sauvegardes ne se chevauchent jamais.
+function enqueueWrite() {
+  const doWrite = () => saveDoc(KEY, cache);
+  writeChain = writeChain.then(doWrite, doWrite);
+  return writeChain;
 }
 
 export async function setLink(discordUserId, brawlhallaId, name, extra = {}) {
-  const data = await readAll();
+  const data = load();
   data[discordUserId] = {
     brawlhallaId,
     name,
     ...extra,
     updatedAt: new Date().toISOString(),
   };
-  await writeAll(data);
+  await enqueueWrite();
 }
 
 export async function removeLink(discordUserId) {
-  const data = await readAll();
+  const data = load();
   const existed = Boolean(data[discordUserId]);
   delete data[discordUserId];
-  await writeAll(data);
+  await enqueueWrite();
   return existed;
 }
 
 export async function getLink(discordUserId) {
-  const data = await readAll();
+  const data = load();
   return data[discordUserId] ?? null;
 }
 
@@ -43,7 +56,7 @@ export async function getLink(discordUserId) {
  * Sert au controle d'unicite (un compte Brawlhalla = un seul membre).
  */
 export async function findUserByBrawlhallaId(brawlhallaId) {
-  const data = await readAll();
+  const data = load();
   const id = Number(brawlhallaId);
   for (const [discordUserId, link] of Object.entries(data)) {
     if (Number(link.brawlhallaId) === id) return discordUserId;
@@ -52,5 +65,7 @@ export async function findUserByBrawlhallaId(brawlhallaId) {
 }
 
 export async function getAllLinks() {
-  return readAll();
+  // Copie défensive : les appelants itèrent/agrègent dessus, on protège le cache d'une
+  // mutation externe accidentelle.
+  return structuredClone(load());
 }

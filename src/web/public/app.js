@@ -20,6 +20,7 @@ const errorMessages = {
   token: "Échec de l'authentification Discord.",
   oauth: "Erreur OAuth. Réessaie.",
   nocode: "Connexion annulée.",
+  state: "Session de connexion expirée ou invalide. Relance la connexion.",
 };
 
 // ----- Helpers DOM -----

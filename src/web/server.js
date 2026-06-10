@@ -1,6 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PermissionFlagsBits, ChannelType } from "discord.js";
@@ -41,6 +42,7 @@ import { setupRankVoiceChannels } from "../rankvoice.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "public");
 const COOKIE = "bh_session";
+const STATE_COOKIE = "bh_oauth_state";
 const DISCORD_API = "https://discord.com/api";
 
 // Sections de config exposees a l'API (lecture/ecriture).
@@ -152,6 +154,20 @@ export function startWebServer(client) {
     }
   }
 
+  // Re-vérification des droits admin à chaque requête, mais mise en cache courte (60 s)
+  // pour ne pas marteler l'API Discord. Un admin déchu perd l'accès en <= 60 s, sans
+  // attendre l'expiration (1 j) du JWT figé au login.
+  const adminCache = new Map(); // userId -> { admin, exp }
+  const ADMIN_TTL_MS = 60_000;
+  async function verifyAdmin(userId) {
+    const now = Date.now();
+    const cached = adminCache.get(userId);
+    if (cached && cached.exp > now) return cached.admin;
+    const admin = await isGuildAdmin(userId);
+    adminCache.set(userId, { admin, exp: now + ADMIN_TTL_MS });
+    return admin;
+  }
+
   function signSession(payload) {
     return jwt.sign(payload, webConfig.sessionSecret, { expiresIn: "1d" });
   }
@@ -166,24 +182,49 @@ export function startWebServer(client) {
     const s = readSession(req);
     if (!s || !s.isAdmin) return res.status(401).json({ error: "non authentifié" });
     req.session = s;
-    next();
+    // Revérification live (cache 60 s) : invalide la session si les droits ont été retirés.
+    verifyAdmin(s.id)
+      .then((ok) => {
+        if (!ok) return res.status(403).json({ error: "accès révoqué" });
+        next();
+      })
+      .catch(() => res.status(403).json({ error: "accès révoqué" }));
   }
 
   // ---- OAuth ----
   app.get("/login", (req, res) => {
+    // Paramètre `state` anti-CSRF : valeur aléatoire posée en cookie httpOnly et renvoyée
+    // par Discord ; on la revérifie au callback (lie la requête de login à son callback).
+    const state = randomBytes(16).toString("hex");
+    res.cookie(STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 5 * 60 * 1000,
+      secure: wantHttps,
+      path: "/",
+    });
     const params = new URLSearchParams({
       client_id: config.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: "identify",
       prompt: "consent",
+      state,
     });
     res.redirect(`${DISCORD_API}/oauth2/authorize?${params}`);
   });
 
   app.get("/callback", async (req, res) => {
     const code = req.query.code;
+    const state = req.query.state;
+    const expectedState = req.cookies[STATE_COOKIE];
+    // Le cookie de state est à usage unique : on le supprime quoi qu'il arrive.
+    res.clearCookie(STATE_COOKIE, { httpOnly: true, sameSite: "lax", secure: wantHttps, path: "/" });
     if (!code) return res.redirect("/?error=nocode");
+    // Rejette tout callback dont le state ne correspond pas (login CSRF / lien forgé).
+    if (!state || !expectedState || String(state) !== String(expectedState)) {
+      return res.redirect("/?error=state");
+    }
     try {
       const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
         method: "POST",
@@ -288,7 +329,15 @@ export function startWebServer(client) {
     const s = sections[req.params.section];
     if (!s) return res.status(404).json({ error: "section inconnue" });
     try {
-      const updated = await s.set(req.body || {});
+      // Anti mass-assignment : on ne garde que les clés déjà présentes dans le schéma
+      // de config courant de la section (empêche d'injecter des champs arbitraires dans
+      // les docs via Object.assign côté setters).
+      const current = await s.get();
+      const allowed = new Set(Object.keys(current || {}));
+      const body = req.body || {};
+      const filtered = {};
+      for (const k of Object.keys(body)) if (allowed.has(k)) filtered[k] = body[k];
+      const updated = await s.set(filtered);
       res.json(updated);
     } catch (err) {
       res.status(500).json({ error: err.message });

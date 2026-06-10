@@ -85,7 +85,7 @@ import {
 } from "./commands/tournament.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { loadCombos, weaponsWithCombos, buildComboViewer } from "./combos.js";
-import { EPHEMERAL, logAudit, dmUser, doSync } from "./commands/shared.js";
+import { EPHEMERAL, logAudit, dmUser, doSync, requirePermission } from "./commands/shared.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
 import { awardSeasonRewards } from "./season.js";
 import { ACHIEVEMENTS, listUnlocked } from "./achievements.js";
@@ -105,7 +105,25 @@ import {
 // Re-export ici pour compatibilite (deploy-commands.js importe { commandsData } depuis ce fichier).
 export { commandsData } from "./commands/definitions.js";
 
+// Défense en profondeur : commandes exigeant une permission, revérifiée à l'exécution
+// (en plus de setDefaultMemberPermissions qui ne filtre que côté client Discord).
+// `bracket` est volontairement absent (commande publique d'affichage).
+export const MANAGE_GUILD_COMMANDS = new Set([
+  "whois", "forcelink", "unlink", "refresh", "reset-saison", "setup", "setup-succes",
+  "niveaux-config", "niveaux-recompense", "niveaux-set", "niveaux-reset", "niveaux-resync",
+  "setup-levels", "setup-tiktok", "setup-clips", "setup-tempvoice", "setup-vocaux-rank",
+  "setup-guessrank", "tournoi-panneau", "caster",
+]);
+export const MANAGE_MESSAGES_COMMANDS = new Set(["clear"]);
+
 export async function handleChatInput(interaction, ctx) {
+  // Garde de permission centralisée (défense en profondeur) avant tout dispatch.
+  if (MANAGE_GUILD_COMMANDS.has(interaction.commandName)) {
+    if (!(await requirePermission(interaction, PermissionFlagsBits.ManageGuild))) return;
+  } else if (MANAGE_MESSAGES_COMMANDS.has(interaction.commandName)) {
+    if (!(await requirePermission(interaction, PermissionFlagsBits.ManageMessages, "⛔ Permission « Gérer les messages » requise."))) return;
+  }
+
   switch (interaction.commandName) {
     case "lier": return handleLier(interaction, ctx);
     case "delier": return handleDelier(interaction, ctx);

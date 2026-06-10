@@ -13,13 +13,16 @@ import { fileURLToPath } from "node:url";
  *
  * API volontairement simple et SYNCHRONE (better-sqlite3 est synchrone) :
  *   loadDoc(key, fallback) / saveDoc(key, value)
- * Les caches reconstruisibles (profils, recherches, leaderboard) restent en JSON.
+ * Les caches reconstruisibles (profils, recherches, leaderboard) ont aussi migré en SQLite,
+ * dans des tables dédiées (écritures atomiques par ligne, plus de gros blob JSON réécrit).
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = resolve(__dirname, "../data");
 // Base par defaut data/bot.db, surchargeable via BOT_DB_PATH (tests isoles).
-const DB_PATH = process.env.BOT_DB_PATH ? resolve(process.env.BOT_DB_PATH) : resolve(DATA_DIR, "bot.db");
+const DB_PATH = process.env.BOT_DB_PATH ? resolve(process.env.BOT_DB_PATH) : resolve(__dirname, "../data/bot.db");
+// Le dossier de données suit TOUJOURS l'emplacement de la base : en test (BOT_DB_PATH ->
+// dossier temporaire) aucun JSON réel n'est lu/renommé, donc zéro pollution des data/ réelles.
+const DATA_DIR = dirname(DB_PATH);
 
 // Clé logique -> ancien fichier JSON (pour la migration unique).
 const JSON_MIGRATION = {
@@ -84,6 +87,36 @@ db.exec(`
     val      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (guild_id, user_id, key)
   );
+
+  -- Cache des profils joueurs (anciennement data/profiles.json). 'data' = JSON du profil.
+  CREATE TABLE IF NOT EXISTS profiles (
+    brawlhalla_id TEXT PRIMARY KEY,
+    ts            INTEGER NOT NULL,
+    last_access   INTEGER NOT NULL,
+    data          TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_profiles_access ON profiles(last_access);
+
+  -- Cache des recherches par pseudo (anciennement data/searches.json). 'results' = JSON.
+  CREATE TABLE IF NOT EXISTS searches (
+    query   TEXT PRIMARY KEY,
+    ts      INTEGER NOT NULL,
+    results TEXT NOT NULL
+  );
+
+  -- Index local des joueurs classes (anciennement data/leaderboard.json). 'norm' = pseudo
+  -- normalise (minuscules/sans accents) pour la recherche; index sur norm et rating.
+  CREATE TABLE IF NOT EXISTS leaderboard (
+    brawlhalla_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL DEFAULT '?',
+    norm     TEXT NOT NULL DEFAULT '',
+    tier     TEXT,
+    rating   INTEGER NOT NULL DEFAULT 0,
+    region   TEXT,
+    ts       INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_leaderboard_norm ON leaderboard(norm);
+  CREATE INDEX IF NOT EXISTS idx_leaderboard_rating ON leaderboard(rating DESC);
 `);
 
 const getStmt = db.prepare("SELECT value FROM kv WHERE key = ?");
@@ -138,6 +171,26 @@ export function saveDoc(key, value) {
 
 /** Handle SQLite brut (better-sqlite3), pour les modules qui gèrent leurs tables dédiées. */
 export { db };
+
+/** Dossier des données (= dossier de la base). Sert aux migrations de fichiers JSON hérités. */
+export { DATA_DIR };
+
+/**
+ * Ferme proprement la base : checkpoint du WAL (pour ne rien laisser dans le -wal) puis close.
+ * À appeler lors d'un arrêt maîtrisé (SIGINT/SIGTERM). Idempotent / best-effort.
+ */
+export function closeDb() {
+  try {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+  } catch {
+    /* best-effort */
+  }
+  try {
+    db.close();
+  } catch {
+    /* best-effort */
+  }
+}
 
 /**
  * Garde de migration unique : renvoie true la PREMIÈRE fois qu'on appelle ce nom,

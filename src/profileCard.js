@@ -117,7 +117,9 @@ export async function renderProfileCard(profile, opts = {}) {
   if (opts.mainLegend) {
     ctx.fillStyle = hex(accent);
     ctx.font = `bold 22px ${FONT_BOLD}`;
-    ctx.fillText(`🗡 Main : ${opts.mainLegend}`, textX, 150);
+    // Pas d'emoji ici : les polices chargées (Arial/DejaVu/Liberation) ne rendent pas les
+    // emojis couleur et afficheraient un carré "tofu". On garde un libellé texte propre.
+    ctx.fillText(`Main : ${opts.mainLegend}`, textX, 150);
   }
 
   // Blocs de stats.

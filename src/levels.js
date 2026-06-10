@@ -239,6 +239,12 @@ function applyDailyCap(cfg, user, gain) {
   return granted;
 }
 
+// Jour de la semaine en fuseau Europe/Paris ("Sat"/"Sun"...), pour que le bonus week-end
+// colle au samedi/dimanche LOCAL des membres (et non au week-end UTC, décalé).
+function parisWeekday() {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Paris", weekday: "short" }).format(new Date());
+}
+
 /**
  * Calcule le multiplicateur d'XP à appliquer pour un gain, selon la config.
  * @param ctx { channelId?, roleIds?: string[] }
@@ -250,8 +256,8 @@ export async function computeXpMultiplier(guildId, { channelId = "", roleIds = [
   if (channelId && Array.isArray(cfg.noXpChannels) && cfg.noXpChannels.includes(channelId)) return 0;
 
   let mult = 1;
-  const day = new Date().getUTCDay(); // 0 = dimanche, 6 = samedi
-  if ((day === 0 || day === 6) && cfg.weekendBonus > 1) mult *= cfg.weekendBonus;
+  const wd = parisWeekday(); // week-end en heure locale FR
+  if ((wd === "Sat" || wd === "Sun") && cfg.weekendBonus > 1) mult *= cfg.weekendBonus;
   if (cfg.boosterRoleId && roleIds.includes(cfg.boosterRoleId) && cfg.boosterMultiplier > 1) {
     mult *= cfg.boosterMultiplier;
   }

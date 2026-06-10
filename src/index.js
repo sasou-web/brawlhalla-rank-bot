@@ -17,6 +17,7 @@ import { ensureRoles, ensureValidatorRole, ensureServerLevelRoles, updateTopServ
 import { handleChatInput, handleButton, handleSelect, handleModal } from "./commands.js";
 import { syncMember } from "./sync.js";
 import { getAllLinks } from "./store.js";
+import { closeDb } from "./db.js";
 import { setSetting } from "./settings.js";
 import { warmProfiles, syncLeaderboard, getIndexStats, retryPending } from "./brawlhalla.js";
 import { addMessageXp, addVoiceXp, getLevelConfig, setLevelConfig, setReward, rewardRolePlan, buildLevelUpAnnounce, getUserStats, computeXpMultiplier } from "./levels.js";
@@ -27,26 +28,8 @@ import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
 import { runWeeklyRecap } from "./progression.js";
 import { grantAndAnnounce } from "./achievements.js";
-import {
-  getTournament,
-  matchesNeedingChannels,
-  setMatchChannel,
-  setMatchMessage,
-  liveMatchesWithChannel,
-  doneMatchesWithChannel,
-  clearMatchChannel,
-  markAlerted,
-  resolveMatch,
-} from "./tournament.js";
-import { buildMatchPayload, buildModAlert, tournamentAnnounce } from "./tournamentUI.js";
-import {
-  getTempConfig,
-  getHub,
-  addTempChannel,
-  removeTempChannel,
-  isTempChannel,
-  getTempChannelIds,
-} from "./tempvoice.js";
+import { tournamentTick } from "./tournamentAutomation.js";
+import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
 
 const client = new Client({
   intents: [
@@ -62,31 +45,52 @@ const client = new Client({
 // Etat partage : map nom_de_role -> Role, rafraichie au demarrage.
 const ctx = { rolesByName: new Map() };
 
+// Suivi des boucles périodiques pour pouvoir les arrêter proprement à l'extinction.
+const intervals = [];
+function every(fn, ms) {
+  const h = setInterval(fn, ms);
+  intervals.push(h);
+  return h;
+}
+
+// Garde anti-chevauchement : un refresh est séquentiel (await par membre) et peut, sur
+// beaucoup de liaisons, dépasser l'intervalle. On évite qu'un second cycle se superpose.
+let refreshing = false;
+
 async function refreshAllMembers(guild) {
-  const links = await getAllLinks();
-  const entries = Object.entries(links);
-  if (entries.length === 0) return;
-
-  console.log(`Refresh auto : ${entries.length} membre(s) lie(s)...`);
-  let ok = 0;
-  for (const [discordId, { brawlhallaId }] of entries) {
-    try {
-      const member = await guild.members.fetch(discordId).catch(() => null);
-      if (!member) continue;
-      await syncMember(member, brawlhallaId, ctx.rolesByName);
-      ok++;
-    } catch (err) {
-      console.warn(`  refresh echoue pour ${discordId} : ${err.message}`);
-    }
+  if (refreshing) {
+    console.log("Refresh auto ignoré : un cycle est déjà en cours.");
+    return;
   }
-  console.log(`Refresh auto termine : ${ok}/${entries.length} mis a jour.`);
-
-  // Met a jour le role "n°1 du serveur" (plus haut rating 1v1 parmi les membres lies).
+  refreshing = true;
   try {
-    const top = await updateTopServerRole(guild);
-    if (top) console.log(`Role n°1 du serveur : <@${top.topId}> (${top.rating}).`);
-  } catch (err) {
-    console.warn("Maj role n°1 du serveur echouee :", err.message);
+    const links = await getAllLinks();
+    const entries = Object.entries(links);
+    if (entries.length === 0) return;
+
+    console.log(`Refresh auto : ${entries.length} membre(s) lie(s)...`);
+    let ok = 0;
+    for (const [discordId, { brawlhallaId }] of entries) {
+      try {
+        const member = await guild.members.fetch(discordId).catch(() => null);
+        if (!member) continue;
+        await syncMember(member, brawlhallaId, ctx.rolesByName);
+        ok++;
+      } catch (err) {
+        console.warn(`  refresh echoue pour ${discordId} : ${err.message}`);
+      }
+    }
+    console.log(`Refresh auto termine : ${ok}/${entries.length} mis a jour.`);
+
+    // Met a jour le role "n°1 du serveur" (plus haut rating 1v1 parmi les membres lies).
+    try {
+      const top = await updateTopServerRole(guild);
+      if (top) console.log(`Role n°1 du serveur : <@${top.topId}> (${top.rating}).`);
+    } catch (err) {
+      console.warn("Maj role n°1 du serveur echouee :", err.message);
+    }
+  } finally {
+    refreshing = false;
   }
 }
 
@@ -128,14 +132,14 @@ client.once(Events.ClientReady, async (c) => {
   // Premier refresh, puis a intervalle regulier.
   await refreshAllMembers(guild);
   const intervalMs = Math.max(5, config.refreshIntervalMinutes) * 60 * 1000;
-  setInterval(() => refreshAllMembers(guild).catch(console.error), intervalMs);
+  every(() => refreshAllMembers(guild).catch(console.error), intervalMs);
 
   // Rechauffe les profils en cache (pour /stats, /rank...) toutes les 15 min, en tache de fond.
   const warm = () =>
     warmProfiles()
       .then((r) => r.total && console.log(`Warm profils : ${r.ok}/${r.total} rafraichis.`))
       .catch(() => {});
-  setInterval(warm, 15 * 60 * 1000);
+  every(warm, 15 * 60 * 1000);
   warm();
 
   // Synchro de l'index local du leaderboard (recherche /lier /stats instantanee, sans API live).
@@ -147,14 +151,14 @@ client.once(Events.ClientReady, async (c) => {
       })
       .catch((e) => console.warn("Sync leaderboard echouee :", e.message));
   const syncIntervalMs = Math.max(15, config.leaderboardSyncIntervalMinutes) * 60 * 1000;
-  setInterval(syncLb, syncIntervalMs);
+  every(syncLb, syncIntervalMs);
   syncLb();
 
   // Recuperation en arriere-plan des profils/recherches qui ont echoue (API capricieuse) :
   // reessaie regulierement jusqu'a reussir, pour que la commande relancee marche a coup sur.
   // Garde anti-chevauchement : un cycle peut durer jusqu'a ~25 s (budget de retry).
   let retrying = false;
-  setInterval(async () => {
+  every(async () => {
     if (retrying) return;
     retrying = true;
     try {
@@ -168,20 +172,20 @@ client.once(Events.ClientReady, async (c) => {
   }, 30 * 1000);
 
   // XP vocal : balaye les salons vocaux chaque minute.
-  setInterval(() => tickVoiceXp(guild).catch(() => {}), VOICE_TICK_MS);
+  every(() => tickVoiceXp(guild).catch(() => {}), VOICE_TICK_MS);
 
   // Nettoie les salons vocaux temporaires laisses vides apres un redemarrage.
   await cleanupTempChannels(guild);
 
   // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
-  setInterval(() => tournamentTick(guild).catch(() => {}), 60 * 1000);
+  every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
 
   // Récap hebdo de progression : vérifié toutes les heures, posté une fois par semaine.
   const recapTick = () =>
     runWeeklyRecap(client, guild.id)
       .then((r) => r.posted && console.log(`Récap hebdo posté (${r.count} progression(s)).`))
       .catch(() => {});
-  setInterval(recapTick, 60 * 60 * 1000);
+  every(recapTick, 60 * 60 * 1000);
   recapTick();
 
   // Démarre le dashboard web (si configuré).
@@ -204,7 +208,7 @@ client.once(Events.ClientReady, async (c) => {
   };
   // Tick toutes les minutes, mais ne sonde reellement qu'a l'intervalle configure.
   let tiktokTick = 0;
-  setInterval(async () => {
+  every(async () => {
     const cfg = await getTikTokConfig(guild.id).catch(() => null);
     if (!cfg?.enabled) return;
     tiktokTick++;
@@ -356,127 +360,12 @@ async function tickVoiceXp(guild) {
 
 // ---------- Salons vocaux temporaires ("rejoindre pour creer") ----------
 
-// Panneau de controle poste dans le chat du salon vocal (composants en JSON brut).
-function voiceControlPanel(ownerId) {
-  const embed = {
-    title: "🎛️ Panneau de contrôle du salon",
-    description:
-      `Salon de <@${ownerId}>. Le créateur peut :\n` +
-      "🔒 **Verrouiller** (personne ne rejoint) · 🔓 **Ouvrir**\n" +
-      "👥 **Limite** de membres · ✏️ **Renommer**\n" +
-      "⛔ **Bloquer** un membre · ✅ **Autoriser** un membre\n" +
-      "👑 **Réclamer** le salon (si le créateur est parti)",
-    color: 0x1abc9c,
-  };
-  const row1 = {
-    type: 1,
-    components: [
-      { type: 2, style: 2, emoji: { name: "🔒" }, label: "Verrouiller", custom_id: "vc_lock" },
-      { type: 2, style: 2, emoji: { name: "🔓" }, label: "Ouvrir", custom_id: "vc_unlock" },
-      { type: 2, style: 2, emoji: { name: "👥" }, label: "Limite", custom_id: "vc_limit" },
-      { type: 2, style: 2, emoji: { name: "✏️" }, label: "Renommer", custom_id: "vc_rename" },
-    ],
-  };
-  const row2 = {
-    type: 1,
-    components: [
-      { type: 2, style: 4, emoji: { name: "⛔" }, label: "Bloquer", custom_id: "vc_block" },
-      { type: 2, style: 3, emoji: { name: "✅" }, label: "Autoriser", custom_id: "vc_permit" },
-      { type: 2, style: 1, emoji: { name: "👑" }, label: "Réclamer", custom_id: "vc_claim" },
-    ],
-  };
-  return {
-    content: `<@${ownerId}> personnalise ta room 🎛️`,
-    embeds: [embed],
-    components: [row1, row2],
-    allowedMentions: { users: [ownerId] },
-  };
-}
-
-async function createTempChannel(member, cfg, hubChannel, hub) {
-  const guild = member.guild;
-  const template = hub?.nameTemplate || "🎮 {user}";
-  const name = template.replace(/\{user\}/gi, member.displayName).slice(0, 100);
-  const parent = cfg.categoryId || hubChannel.parentId || null;
-  try {
-    // Creation simple (ne demande que "Gerer les salons"). Pas d'overwrite ici :
-    // Discord refuse qu'un bot accorde une permission qu'il n'a pas -> echec total sinon.
-    const channel = await guild.channels.create({
-      name,
-      type: ChannelType.GuildVoice,
-      parent,
-      userLimit: Math.min(99, Math.max(0, hub?.userLimit || 0)),
-      reason: "Salon vocal temporaire",
-    });
-    await addTempChannel(guild.id, channel.id, member.id);
-    await member.voice.setChannel(channel).catch(() => {});
-
-    // Donne au createur le controle de son salon (best-effort : n'echoue pas la creation).
-    channel.permissionOverwrites
-      .edit(member.id, {
-        ManageChannels: true,
-        MoveMembers: true,
-        MuteMembers: true,
-      })
-      .catch(() => {});
-
-    // Poste le panneau de controle dans le chat integre du salon vocal (best-effort).
-    channel.send(voiceControlPanel(member.id)).catch(() => {});
-    return channel;
-  } catch (err) {
-    console.warn("Creation salon temporaire echouee :", err.message);
-    return null;
-  }
-}
-
-async function handleTempVoice(oldState, newState) {
-  const guild = newState.guild || oldState.guild;
-  if (!guild) return;
-
-  // Un membre rejoint un hub -> on lui cree un salon selon le modele de CE hub.
-  const cfg = await getTempConfig(guild.id);
-  if (cfg.enabled && newState.channelId && newState.member) {
-    const hub = await getHub(guild.id, newState.channelId);
-    if (hub) {
-      const hubChannel =
-        guild.channels.cache.get(newState.channelId) ||
-        (await guild.channels.fetch(newState.channelId).catch(() => null));
-      if (hubChannel) await createTempChannel(newState.member, cfg, hubChannel, hub);
-    }
-  }
-
-  // Un membre quitte un salon temporaire -> on le supprime s'il est vide.
-  const left = oldState.channelId;
-  if (left && left !== newState.channelId && (await isTempChannel(guild.id, left))) {
-    const ch = guild.channels.cache.get(left) || (await guild.channels.fetch(left).catch(() => null));
-    if (!ch) {
-      await removeTempChannel(guild.id, left);
-    } else if (ch.members.size === 0) {
-      await ch.delete("Salon vocal temporaire vide").catch(() => {});
-      await removeTempChannel(guild.id, left);
-    }
-  }
-}
+// ---------- Salons vocaux temporaires ("rejoindre pour creer") ----------
+// Logique extraite dans ./voiceManager.js (handleTempVoice, cleanupTempChannels).
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   handleTempVoice(oldState, newState).catch((e) => console.warn("Erreur tempvoice :", e.message));
 });
-
-// Nettoyage au demarrage : supprime les salons temporaires vides/orphelins.
-async function cleanupTempChannels(guild) {
-  try {
-    const ids = await getTempChannelIds(guild.id);
-    for (const id of ids) {
-      const ch = guild.channels.cache.get(id) || (await guild.channels.fetch(id).catch(() => null));
-      if (!ch || ch.members?.size === 0) {
-        if (ch) await ch.delete("Nettoyage salon temporaire").catch(() => {});
-        await removeTempChannel(guild.id, id);
-      }
-    }
-  } catch {
-    /* best-effort */
-  }
-}
 
 // ---------- Bienvenue / Au revoir / Auto-role ----------
 
@@ -554,116 +443,32 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 });
 
 // ---------- Automatisation des matchs de tournoi ----------
-
-function slug(s) {
-  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 20) || "x";
-}
-function entrantNameById(t, id) {
-  return t.participants.find((p) => p.id === id)?.name || "?";
-}
-
-async function sendModAlert(guild, t, matchId, reason) {
-  if (!t.modAlertChannelId) return;
-  const ch = await guild.channels.fetch(t.modAlertChannelId).catch(() => null);
-  if (ch?.isTextBased?.()) await ch.send(buildModAlert(t, matchId, reason)).catch(() => {});
-}
-
-async function ensureMatchChannels(guild) {
-  const t = await getTournament(guild.id);
-  if (!t || t.status !== "running") return;
-  for (const m of matchesNeedingChannels(t)) {
-    const A = t.participants.find((p) => p.id === m.aId);
-    const B = t.participants.find((p) => p.id === m.bId);
-    if (!A || !B) continue;
-    const players = [...A.members, ...B.members];
-    const ow = [
-      { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
-    ];
-    for (const uid of players) ow.push({ id: uid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-    if (t.modRoleId) ow.push({ id: t.modRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-
-    let channel;
-    try {
-      channel = await guild.channels.create({
-        name: `match-${m.id}-${slug(A.name)}-vs-${slug(B.name)}`.slice(0, 95),
-        type: ChannelType.GuildText,
-        parent: t.matchCategoryId || null,
-        permissionOverwrites: ow,
-        reason: "Salon de match (tournoi)",
-      });
-    } catch (e) {
-      console.warn("Salon de match échoué :", e.message);
-      continue;
-    }
-    let voiceId = "";
-    if (t.createVoice) {
-      try {
-        const vow = ow.map((o) => (o.deny ? o : { ...o, allow: [...o.allow, PermissionFlagsBits.Connect] }));
-        const vc = await guild.channels.create({
-          name: `🔊 ${slug(A.name)} vs ${slug(B.name)}`.slice(0, 95),
-          type: ChannelType.GuildVoice,
-          parent: t.matchCategoryId || null,
-          userLimit: t.format === "2v2" ? 4 : 2,
-          permissionOverwrites: vow,
-          reason: "Vocal de match (tournoi)",
-        });
-        voiceId = vc.id;
-      } catch {
-        /* vocal optionnel */
-      }
-    }
-    await setMatchChannel(guild.id, m.id, channel.id, voiceId);
-    const fresh = await getTournament(guild.id);
-    const sent = await channel.send(buildMatchPayload(fresh, m.id)).catch(() => null);
-    if (sent) await setMatchMessage(guild.id, m.id, sent.id);
-  }
-}
-
-async function tickMatchTimers(guild) {
-  const t = await getTournament(guild.id);
-  if (!t || t.status !== "running") return;
-  const now = Date.now();
-  for (const m of liveMatchesWithChannel(t)) {
-    const elapsed = (now - (m.startedAt || now)) / 60000;
-    const gamesPlayed = (m.scoreA || 0) + (m.scoreB || 0);
-
-    if (m.status === "dispute") {
-      if (!m.alerted) {
-        await sendModAlert(guild, t, m.id, "Litige en cours");
-        await markAlerted(guild.id, m.id);
-      }
-      continue;
-    }
-    // Aucune manche jouée après le délai → joueurs probablement inactifs : alerte staff.
-    if (gamesPlayed === 0 && elapsed >= t.alertMinutes && !m.alerted) {
-      await sendModAlert(guild, t, m.id, `Aucune manche jouée après ${Math.round(elapsed)} min — joueurs peut-être inactifs`);
-      await markAlerted(guild.id, m.id);
-    }
-  }
-}
-
-async function cleanupMatchChannels(guild) {
-  const t = await getTournament(guild.id);
-  if (!t) return;
-  for (const m of doneMatchesWithChannel(t)) {
-    for (const id of [m.channelId, m.voiceChannelId]) {
-      if (!id) continue;
-      const ch = await guild.channels.fetch(id).catch(() => null);
-      if (ch) await ch.delete("Match terminé").catch(() => {});
-    }
-    await clearMatchChannel(guild.id, m.id);
-  }
-}
-
-async function tournamentTick(guild) {
-  try {
-    await ensureMatchChannels(guild);
-    await tickMatchTimers(guild);
-    await cleanupMatchChannels(guild);
-  } catch (err) {
-    console.warn("Tournoi tick :", err.message);
-  }
-}
+// Extraite dans ./tournamentAutomation.js (tournamentTick).
 
 client.login(config.token);
+
+// ---------- Arrêt propre (SIGINT/SIGTERM, ex. `pm2 restart`) ----------
+// Stoppe les boucles périodiques, déconnecte le client Discord, puis ferme la base
+// (checkpoint WAL). Évite qu'un tick écrive dans une base fermée et limite les fuites.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Arrêt en cours (${signal})...`);
+
+  // Filet de sécurité : si la fermeture traîne, on quitte quand même.
+  const force = setTimeout(() => process.exit(0), 5000);
+  force.unref();
+
+  for (const h of intervals) clearInterval(h);
+  try {
+    await client.destroy(); // yield aussi aux écritures en attente (chaînes de saveDoc)
+  } catch {
+    /* best-effort */
+  }
+  closeDb();
+  console.log("Arrêt propre terminé.");
+  process.exit(0);
+}
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

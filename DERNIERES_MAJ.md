@@ -1,5 +1,95 @@
 # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Découpe des monolithes, permissions & tests handlers (Priorité 5)
+
+### 🧱 Découpe d'`index.js`
+- **`src/tournamentAutomation.js`** : extraction de toute l'automatisation des matchs de tournoi
+  (création des salons texte/vocal, timers litige/inactivité, nettoyage). Point d'entrée
+  `tournamentTick(client, guild)`.
+- **`src/voiceManager.js`** : extraction des salons vocaux temporaires « rejoindre pour créer »
+  (`handleTempVoice`, `cleanupTempChannels`, panneau de contrôle).
+- `index.js` allégé d'environ **230 lignes** ; suppression de code mort (`resolveMatch`,
+  `tournamentAnnounce`, `entrantNameById` non utilisés).
+
+### 🛡️ Défense en profondeur sur les permissions
+- Helper centralisé `requirePermission` / `requireManageGuild` (`commands/shared.js`).
+- **Gate de permission au niveau du dispatcher** (`handleChatInput`) : les commandes admin
+  (`ManageGuild`) et staff (`ManageMessages`) sont revérifiées **à l'exécution**, plus seulement
+  via `setDefaultMemberPermissions` (gate client Discord, contournable). `bracket` reste publique.
+
+### ✅ Tests handlers (nouveaux)
+- `test/permissions.test.js` (6 tests) : `requirePermission`/`requireManageGuild`, contenu des
+  ensembles de commandes gatées (et exclusion des commandes publiques), et **blocage effectif**
+  d'une commande admin/staff pour un non-autorisé via `handleChatInput` (handler jamais atteint).
+- Total : **82 → 88 tests**, tous au vert. `npm run check` : 49 fichiers OK.
+
+### 🗺️ Mono-serveur
+- Choix assumé pour l'instant : le runtime reste mono-serveur (`config.guildId`). Le passage
+  multi-serveur est reporté.
+
+---
+
+## Session — Durcissement : intégrité, arrêt propre, sécu dashboard & UX
+
+Session de durcissement : élimination de risques réels de perte de données, arrêt propre,
+3 correctifs de sécurité du dashboard, et 3 améliorations UX.
+
+### 🗄️ Intégrité des données
+- **`store.js` (liaisons) en cache + chaîne d'écriture sérialisée** : fin du *read-modify-write*
+  concurrent. Avant, deux liaisons/déliaisons simultanées travaillaient sur des copies
+  indépendantes du blob et pouvaient s'écraser (clobber). Désormais source de vérité unique
+  en mémoire + écritures non chevauchantes. `getAllLinks` renvoie une copie défensive.
+- *Note* : l'XP (`addMessageXp`/`addVoiceXp`) est en réalité déjà atomique par appel (aucun
+  `await` entre lecture et écriture sous better-sqlite3 synchrone) — pas de correctif requis.
+
+### 🔌 Cycle de vie
+- **Arrêt propre `SIGINT`/`SIGTERM`** (`index.js`) : stoppe les 8 boucles `setInterval`
+  (suivi via `every()`), déconnecte le client Discord, puis ferme SQLite (`closeDb` +
+  `wal_checkpoint(TRUNCATE)`). Filet de sécurité : sortie forcée après 5 s.
+- **Garde anti-chevauchement sur `refreshAllMembers`** : un cycle ne peut plus se superposer
+  au précédent s'il dépasse l'intervalle.
+
+### 🛡️ Sécurité du dashboard (`web/server.js`)
+- **`state` OAuth anti login-CSRF** : nonce aléatoire posé en cookie httpOnly (5 min) et
+  revérifié au `/callback` (rejet → `?error=state`), à usage unique.
+- **Re-vérification admin par requête** (cache 60 s) : on ne se fie plus au flag `isAdmin`
+  figé 1 j dans le JWT. Un admin déchu perd l'accès en ≤ 60 s (`403 accès révoqué`).
+- **Anti mass-assignment** sur `PUT /api/config/:section` : le body est filtré sur les clés
+  déjà présentes dans le schéma de config courant (plus d'injection de champs arbitraires).
+
+### ✨ UX
+- **Cache LRU des vidéos de combos** (`combos.js`) : plus de re-téléchargement en RAM à chaque
+  navigation. TTL 1 h, budget total ~80 Mo, plafond 12 Mo/fichier, éviction des plus anciennes.
+- **Bonus XP week-end en heure FR** (`levels.js`) : `Europe/Paris` au lieu d'UTC → le double-XP
+  couvre exactement samedi/dimanche locaux.
+- **Carte profil** (`profileCard.js`) : suppression de l'emoji `🗡` (rendu en carré "tofu" avec
+  les polices Arial/DejaVu/Liberation) → libellé texte propre `Main : …`.
+
+### ✅ Vérifications
+- `npm run check` : 47 fichiers OK. `npm test` : **82/82**.
+
+---
+
+## Session — Migration des derniers caches JSON vers SQLite
+
+Fin de la Priorité 1 (intégrité des données) : les trois derniers caches encore en gros JSON
+réécrits avec debounce (2 s) passent en tables SQLite dédiées. Plus aucun blob réécrit en
+entier → écritures atomiques par ligne, zéro corruption possible, un seul fichier à sauvegarder.
+
+### 🗄️ Caches migrés (profils / recherches / index leaderboard)
+- **`profiles.json` → table `profiles`** (`brawlhalla_id`, `ts`, `last_access`, `data` JSON) :
+  cache profils joueurs. UPSERT atomique par accès au lieu de réécrire tout le fichier.
+- **`searches.json` → table `searches`** (`query`, `ts`, `results` JSON) : cache des recherches
+  par pseudo.
+- **`leaderboard.json` → table `leaderboard`** (~25k joueurs classés) : `norm` (pseudo
+  normalisé indexé) permet la **recherche en SQL** (exact > commence par > contient, trié par
+  rating) au lieu de scanner 25k entrées en mémoire. `syncedAt` conservé en `kv`.
+- **Migration automatique unique** par cache (garde `runOnce`), fichiers d'origine renommés
+  `.migrated` comme filet de sécurité. Le dossier de données suit désormais l'emplacement de la
+  base → **tests totalement isolés** (aucun JSON réel lu/renommé pendant `npm test`).
+- **11 nouveaux tests** (`test/stores.migration.test.js`) : set/get, profils chauds, tri de
+  recherche, insensibilité accents/casse, échappement des jokers LIKE. Suite : **71 → 82 tests**.
+
 ## Session du 10 juin 2026 — Refactorisation, robustesse, observabilité & nouvelles features
 
 Grosse session de fond : modularisation du code, fiabilisation des données, observabilité de

@@ -1,4 +1,4 @@
-import { MessageFlags } from "discord.js";
+import { MessageFlags, PermissionFlagsBits } from "discord.js";
 import { getSettings } from "../settings.js";
 import { tierEmojiText } from "../config.js";
 import { syncMember } from "../sync.js";
@@ -7,6 +7,29 @@ import { syncMember } from "../sync.js";
 
 // Flag "reponse ephemere" (visible uniquement par l'auteur de l'interaction).
 export const EPHEMERAL = MessageFlags.Ephemeral;
+
+/**
+ * Défense en profondeur : vérifie que l'auteur de l'interaction possède la permission
+ * requise côté serveur, sans se reposer uniquement sur `setDefaultMemberPermissions`
+ * (gate Discord, contournable si la permission par défaut est modifiée côté serveur).
+ * Répond (éphémère) et renvoie false si refusé ; renvoie true si autorisé.
+ */
+export async function requirePermission(interaction, flag, label = "⛔ Réservé aux administrateurs.") {
+  if (interaction.memberPermissions?.has(flag)) return true;
+  const payload = { content: label, flags: EPHEMERAL };
+  try {
+    if (interaction.deferred || interaction.replied) await interaction.editReply(payload);
+    else await interaction.reply(payload);
+  } catch {
+    /* l'interaction a pu expirer : on ne bloque pas */
+  }
+  return false;
+}
+
+// Raccourci pour la permission « Gérer le serveur » (admins du bot).
+export function requireManageGuild(interaction) {
+  return requirePermission(interaction, PermissionFlagsBits.ManageGuild);
+}
 
 // Synchronise les roles de rank d'un membre (wrapper autour de syncMember).
 export async function doSync(member, brawlhallaId, ctx, profile) {
