@@ -1,29 +1,10 @@
-import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import { createCanvas } from "@napi-rs/canvas";
+import { FONT, FONT_BOLD } from "./cardFont.js";
 
 /**
  * Rendu visuel d'un bracket d'elimination simple en image PNG (Buffer).
  * Colonnes = rounds, de gauche (round 0) a droite (finale).
  */
-
-let FONT = "sans-serif";
-let FONT_BOLD = "sans-serif";
-for (const [path, name, bold] of [
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "BrkBold", true],
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "Brk", false],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", "BrkBold", true],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "Brk", false],
-  ["C:\\Windows\\Fonts\\arialbd.ttf", "BrkBold", true],
-  ["C:\\Windows\\Fonts\\arial.ttf", "Brk", false],
-]) {
-  try {
-    if (GlobalFonts.registerFromPath(path, name)) {
-      if (bold) FONT_BOLD = name;
-      else FONT = name;
-    }
-  } catch {
-    /* police absente */
-  }
-}
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();

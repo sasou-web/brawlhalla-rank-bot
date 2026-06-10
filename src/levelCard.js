@@ -1,30 +1,10 @@
-import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { SERVER_LEVEL_TIERS } from "./config.js";
+import { FONT, FONT_BOLD } from "./cardFont.js";
 
 /**
  * Carte de niveau (XP) facon MEE6/Arcane, en image PNG (Buffer).
  */
-
-let FONT = "sans-serif";
-let FONT_BOLD = "sans-serif";
-const FONT_TRIES = [
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "LvlBold", true],
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "Lvl", false],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", "LvlBold", true],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "Lvl", false],
-  ["C:\\Windows\\Fonts\\arialbd.ttf", "LvlBold", true],
-  ["C:\\Windows\\Fonts\\arial.ttf", "Lvl", false],
-];
-for (const [path, name, bold] of FONT_TRIES) {
-  try {
-    if (GlobalFonts.registerFromPath(path, name)) {
-      if (bold) FONT_BOLD = name;
-      else FONT = name;
-    }
-  } catch {
-    /* police absente */
-  }
-}
 
 const hex = (n) => "#" + (n ?? 0x5865f2).toString(16).padStart(6, "0");
 const NF = new Intl.NumberFormat("fr-FR");

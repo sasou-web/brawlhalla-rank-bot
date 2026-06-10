@@ -1,33 +1,12 @@
-import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { TIER_COLORS } from "./config.js";
+import { FONT, FONT_BOLD } from "./cardFont.js";
 
 /**
  * Rendu d'une "carte profil" Brawlhalla en image PNG (Buffer), facon carte de rank.
- * Aucune dependance systeme : @napi-rs/canvas embarque skia. On tente toutefois de
- * charger une police systeme courante (Linux) pour un rendu net ; sinon repli generique.
+ * Aucune dependance systeme : @napi-rs/canvas embarque skia. La police est chargee de
+ * facon partagee via cardFont.js (repli generique si aucune police systeme trouvee).
  */
-
-// Enregistre une police systeme si disponible (sinon skia utilise un repli).
-let FONT = "sans-serif";
-let FONT_BOLD = "sans-serif";
-const FONT_TRIES = [
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "CardBold", true],
-  ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "Card", false],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", "CardBold", true],
-  ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "Card", false],
-  ["C:\\Windows\\Fonts\\arialbd.ttf", "CardBold", true],
-  ["C:\\Windows\\Fonts\\arial.ttf", "Card", false],
-];
-for (const [path, name, bold] of FONT_TRIES) {
-  try {
-    if (GlobalFonts.registerFromPath(path, name)) {
-      if (bold) FONT_BOLD = name;
-      else FONT = name;
-    }
-  } catch {
-    /* police absente : on continue */
-  }
-}
 
 const hex = (n) => "#" + (n ?? 0x99aab5).toString(16).padStart(6, "0");
 

@@ -1,5 +1,24 @@
 # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Découpe XP & factorisation police (dette technique)
+
+### 🧱 Découpe d'`index.js` (suite)
+- **`src/xpEvents.js`** : extraction de toute la logique XP (`handleMessageXp`, `tickVoiceXp`,
+  `handleLevelUp` + rôles de récompense). `index.js` ne fait plus que brancher les évènements.
+- Imports d'`index.js` nettoyés (plus de `ChannelType`/`PermissionFlagsBits`/imports XP
+  inutiles) ; doublon de commentaire supprimé.
+
+### 🎨 Factorisation du chargement de police
+- **`src/cardFont.js`** : logique de chargement de police (DejaVu/Liberation/Arial → repli
+  `sans-serif`) mutualisée. `profileCard.js`, `levelCard.js` et `bracketImage.js` l'importent
+  au lieu de dupliquer le bloc 3 fois.
+
+### ✅ Vérifications
+- `npm run check` : 52 fichiers OK. `npm test` : **93/93**.
+- Smoke-test de rendu des 3 cartes (profil/niveau/bracket) : PNG générés correctement.
+
+---
+
 ## Session — Files de récupération API persistées (robustesse)
 
 ### 📡 Files de récupération persistées en SQLite
