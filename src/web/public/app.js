@@ -195,7 +195,7 @@ const NAV = [
   { id: "stats", label: "Statistiques", ico: "📈" },
   { id: "logs", label: "Logs en direct", ico: "📜" },
   { id: "welcome", label: "Bienvenue", ico: "👋" },
-  { id: "settings", label: "Validation rank", ico: "✅" },
+  { id: "settings", label: "Validation des rangs", ico: "✅" },
   { id: "levels", label: "Niveaux", ico: "⭐" },
   { id: "tiktok", label: "TikTok", ico: "📱" },
   { id: "clips", label: "Clips", ico: "🎬" },
