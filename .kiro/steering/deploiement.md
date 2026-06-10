@@ -1,64 +1,81 @@
 # Déploiement & mise à jour du bot (procédure de Kaya)
 
-> ⚠️ IMPORTANT pour l'assistant : c'est LA méthode officielle pour pousser les mises à jour.
-> Toujours donner ces commandes-là, sans inventer d'autres chemins.
+> ⚠️ ASSISTANT : quand Kaya demande « pousser sur le serv », « déployer », « les commandes
+> pour mon serveur », etc. → donner EXACTEMENT les commandes ci-dessous. Ne JAMAIS inventer
+> d'autre chemin. Le dossier de prod est **`/root/brawlhalla-rank-bot`** (PAS `/home/kaya/...`).
 
-> 🟢 MÉTHODE PRÉFÉRÉE si le dépôt git est configuré : voir « Déploiement par git » plus bas.
-> Sinon, méthode scp ci-dessous.
+## TL;DR — la seule séquence à donner
 
-## CI (avant de déployer)
+Le cycle normal : modifier en local → commit + push GitHub → déployer sur le serveur.
 
-- Lint + tests en local : `npm run ci` (= `npm run check` + `npm test`).
-- GitHub Actions (`.github/workflows/ci.yml`) relance ça à chaque push/PR.
+### 1. Côté PC (local) — commit + push
 
-## Déploiement par git (préféré, une fois le dépôt configuré)
-
-Sur le serveur, une seule commande :
 ```bash
-cd /root/brawlhalla-rank-bot && sudo bash update.sh
-```
-(`update.sh` : git pull → npm install → lint+tests → npm run deploy → pm2 restart)
-Les données (`data/`, `.env`, `backup.env`, `bot.db`) sont gitignorées : jamais écrasées.
-
-## Faits sur le serveur
-
-- Connexion SSH : `ssh kaya@91.98.17.48` (utilisateur **kaya**, JAMAIS root en direct)
-- Le bot tourne en réalité dans **`/root/brawlhalla-rank-bot/`** (sous pm2, lancé via `sudo`)
-- Nom du process pm2 : **`brawl-bot`**
-- Kaya n'a pas accès en écriture direct à `/root/...` → il passe par son home `/home/kaya/src/` puis copie avec `sudo`
-- Le dossier tampon sur le serveur est **`/home/kaya/src/`**
-
-## Procédure complète de mise à jour
-
-### 1. Depuis le PC Windows (PowerShell) — envoyer le dossier `src` complet
-
-⚠️ Méthode FIABLE : envoyer tout le dossier `src` (et pas des fichiers un par un, car
-`/home/kaya/src/` peut ne pas exister et `scp` ne crée pas les chemins imbriqués).
-`scp -r ...\src` vers `/home/kaya/` recrée `/home/kaya/src/` automatiquement.
-
-```powershell
-scp -r "c:\Users\ogsas\Downloads\a\brawlhalla-rank-bot\src" kaya@91.98.17.48:/home/kaya/
+git add -A
+git commit -m "message clair"
+git push origin main
 ```
 
-### 2. Se connecter au serveur
+### 2. Côté serveur — déployer
 
-```powershell
+Se connecter puis lancer `update.sh` (git pull → npm install → lint+tests → npm run deploy → pm2 restart) :
+
+```bash
 ssh kaya@91.98.17.48
 ```
 
-### 3. Sur le serveur — copier dans le vrai dossier, redéployer, redémarrer
+```bash
+sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
+```
 
-Ce sont les 3 commandes que Kaya lance à chaque fois :
+> C'est LA commande de déploiement (Kaya n'a pas l'écriture directe sur `/root`, d'où le `sudo bash -c`).
+> Elle s'occupe de tout. Ne pas proposer scp/cp manuels par défaut.
 
+### 3. Vérifier
+
+```bash
+sudo pm2 list
+sudo pm2 logs brawl-bot --lines 30
+```
+
+Doit afficher « Connecte en tant que ... » et un statut `online`.
+Pour le dashboard web : recharger le navigateur en **Ctrl+F5** (nouveau `app.js`).
+
+## Faits serveur (à ne pas oublier)
+
+- SSH : `ssh kaya@91.98.17.48` — utilisateur **kaya**, jamais root en direct.
+- Dossier de prod (clone git) : **`/root/brawlhalla-rank-bot`**.
+- Process pm2 : **`brawl-bot`** (lancé via `sudo`, donc utiliser `sudo pm2 ...`).
+- `update.sh` stoppe si lint/tests échouent (filet de sécurité), donc pas de restart sur du code cassé.
+- Données gitignorées (`data/`, `bot.db`, `.env`, `backup.env`) : **jamais touchées** par le pull.
+
+## CI (avant de pousser)
+
+- En local : `npm run ci` (= `npm run check` + `npm test`).
+- GitHub Actions (`.github/workflows/ci.yml`) relance ça à chaque push/PR (coche verte avant de déployer).
+
+## Si le chemin de prod semble introuvable
+
+Le retrouver sans deviner :
+```bash
+sudo pm2 info brawl-bot | grep -i "cwd\|script path"
+# ou
+find / -type d -name "brawlhalla-rank-bot" 2>/dev/null
+```
+
+## Méthode scp (LEGACY — uniquement si le clone git est cassé/absent)
+
+Ne donner que si le git ne marche plus. Tampon : `/home/kaya/src/`.
+```powershell
+scp -r "c:\Users\ogsas\Downloads\a\brawlhalla-rank-bot\src" kaya@91.98.17.48:/home/kaya/
+```
 ```bash
 sudo cp -r /home/kaya/src/* /root/brawlhalla-rank-bot/src/
 sudo bash -c "cd /root/brawlhalla-rank-bot && npm run deploy"
 sudo pm2 restart brawl-bot
 ```
 
-- `npm run deploy` n'est nécessaire que si des **commandes slash** ont changé, mais Kaya le lance systématiquement (sans danger).
-- Vérifier ensuite : `sudo pm2 logs brawl-bot` (doit afficher « Connecte en tant que ... »).
+## Ne JAMAIS faire
 
-## Ne JAMAIS écraser en prod
-
-- Ne pas envoyer/copier `data/` (XP, liaisons, paramètres) ni `.env` : ça détruirait les données et la config de production.
+- Ne pas écraser/copier `data/` ni `.env` en prod (détruit XP, liaisons, config).
+- Ne pas donner `/home/kaya/brawlhalla-rank-bot` comme dossier de prod (n'existe pas).

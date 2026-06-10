@@ -45,14 +45,13 @@ pm2 logs brawl-bot      # tu dois voir "Connecte en tant que ..."
 
 ## Mettre à jour le bot plus tard
 
-Renvoie les fichiers modifiés (scp ou `git pull`), puis :
+Le dossier de prod est un clone git sous `/root/brawlhalla-rank-bot`. Pour déployer une mise à jour, pousse ton code sur GitHub puis, sur le serveur :
 
 ```bash
-cd /home/kaya/brawlhalla-rank-bot
-npm install --omit=dev      # si dépendances changées
-npm run deploy              # si commandes changées
-pm2 restart brawl-bot
+sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
 ```
+
+`update.sh` enchaîne : `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart brawl-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
 
 ## Sauvegardes automatiques des données (XP, liaisons)
 
