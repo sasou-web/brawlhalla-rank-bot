@@ -32,7 +32,7 @@ import {
 import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
-import { combosInfo, refreshCombos, buildCombosMessage, weaponsWithCombos } from "../combos.js";
+import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos } from "../combos.js";
 import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
 import { getPlayerProfile } from "../brawlhalla.js";
@@ -608,7 +608,7 @@ export function startWebServer(client) {
       if (!weapons.length) return res.status(400).json({ error: "Base de combos vide — mets-la à jour d'abord." });
       const ch = await client.channels.fetch(channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
-      await ch.send(await buildCombosMessage(weapons[0], 0));
+      await ch.send(await buildPanelMessage());
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -73,7 +73,7 @@ import {
 import { buildSignupPayload, refreshSignupPanel, buildModAlert, buildMatchPayload, refreshMatchMessage, tournamentAnnounce, buildMatchResultEmbed } from "./tournamentUI.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { renderBracketImage } from "./bracketImage.js";
-import { loadCombos, weaponsWithCombos, WEAPON_META, buildCombosMessage } from "./combos.js";
+import { loadCombos, weaponsWithCombos, WEAPON_META, buildPanelMessage, buildComboViewer } from "./combos.js";
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const LIER_COOLDOWN_MS = 30_000;
@@ -1559,20 +1559,25 @@ async function handleCombos(interaction) {
   const opt = interaction.options.getString("arme");
   const weapons = await weaponsWithCombos();
   const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
-  await interaction.deferReply(); // le téléchargement de la vidéo peut dépasser 3s
-  return interaction.editReply(await buildCombosMessage(weapon, 0));
+  await interaction.deferReply({ flags: EPHEMERAL }); // affichage privé + le téléchargement vidéo peut dépasser 3s
+  return interaction.editReply(await buildComboViewer(weapon));
 }
 
-// Composants du panneau combos : changement d'arme + navigation.
-// attachments:[] sur l'édition pour retirer l'ancienne vidéo avant d'ajouter la nouvelle.
-async function handleCombosSelect(interaction) {
-  await interaction.deferUpdate();
-  return interaction.editReply({ ...(await buildCombosMessage(interaction.values[0], 0)), attachments: [] });
+// Panneau public : ouvre un affichage PRIVÉ par utilisateur (usage simultané sans conflit).
+async function handleCombosOpen(interaction) {
+  await interaction.deferReply({ flags: EPHEMERAL });
+  return interaction.editReply(await buildComboViewer(interaction.values[0]));
 }
-async function handleCombosNav(interaction) {
-  const [, weapon, idx] = interaction.customId.split(":");
+// Dans l'affichage privé : changer d'arme.
+async function handleCombosWeapon(interaction) {
   await interaction.deferUpdate();
-  return interaction.editReply({ ...(await buildCombosMessage(weapon, Number(idx))), attachments: [] });
+  return interaction.editReply({ ...(await buildComboViewer(interaction.values[0])), attachments: [] });
+}
+// Dans l'affichage privé : choisir un combo par son nom.
+async function handleCombosPick(interaction) {
+  const weapon = interaction.customId.split(":")[1];
+  await interaction.deferUpdate();
+  return interaction.editReply({ ...(await buildComboViewer(weapon, interaction.values[0])), attachments: [] });
 }
 
 async function handleResetSeason(interaction, ctx) {
@@ -1698,7 +1703,9 @@ async function handleSetup(interaction, ctx) {
 }
 
 export async function handleSelect(interaction, ctx) {
-  if (interaction.customId === "cb_weapon") return handleCombosSelect(interaction);
+  if (interaction.customId === "cbp_open") return handleCombosOpen(interaction);
+  if (interaction.customId === "cbp_weapon") return handleCombosWeapon(interaction);
+  if (interaction.customId.startsWith("cbp_pick:")) return handleCombosPick(interaction);
   if (interaction.customId.startsWith("lvl_")) return handleLevelsPanelSelect(interaction, ctx);
   if (interaction.customId.startsWith("tt_")) return handleTikTokPanelSelect(interaction, ctx);
   if (interaction.customId.startsWith("clp_")) return handleClipsPanelSelect(interaction, ctx);
@@ -1729,8 +1736,6 @@ export async function handleSelect(interaction, ctx) {
 
 export async function handleButton(interaction, ctx) {
   const id = interaction.customId;
-  if (id === "cb_count") return interaction.deferUpdate();
-  if (id.startsWith("cb_nav:")) return handleCombosNav(interaction);
   if (id.startsWith("lvl_")) return handleLevelsPanelButton(interaction, ctx);
   if (id.startsWith("tt_")) return handleTikTokPanelButton(interaction, ctx);
   if (id.startsWith("clp_")) return handleClipsPanelButton(interaction, ctx);

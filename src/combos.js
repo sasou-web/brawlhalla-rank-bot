@@ -129,12 +129,36 @@ export async function refreshCombos() {
   return { count: combos.length, byWeapon };
 }
 
-// ---------- Payload Discord (partagé commande + dashboard) ----------
-export async function buildCombosMessage(weapon, index) {
+// ---------- Payloads Discord ----------
+
+// Panneau PUBLIC persistant : juste un menu d'armes. Chaque clic ouvre un
+// affichage privé (ephemeral) propre à l'utilisateur -> usage simultané sans conflit.
+export async function buildPanelMessage() {
+  const weapons = await weaponsWithCombos();
+  const embed = {
+    color: 0xf1c40f,
+    title: "🥊 Combos Brawlhalla",
+    description:
+      "Choisis ton **arme** ci-dessous pour parcourir ses **true combos** (vidéo + stats).\n" +
+      "🔒 L'affichage est **privé** : chacun explore de son côté, sans déranger les autres.",
+    footer: { text: "Source : BrawlDatabase.com" },
+  };
+  const menu = {
+    type: 3,
+    custom_id: "cbp_open",
+    placeholder: "Choisis une arme…",
+    options: weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) } })),
+  };
+  return { embeds: [embed], components: [{ type: 1, components: [menu] }] };
+}
+
+// Affichage privé d'un combo : vidéo jointe + stats + menu arme + menu noms de combos.
+export async function buildComboViewer(weapon, id) {
   const list = await combosFor(weapon);
-  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [], files: [], attachments: [] };
-  const i = Math.max(0, Math.min(Number(index) || 0, list.length - 1));
-  const c = list[i];
+  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [], files: [] };
+  let c = id != null ? list.find((x) => String(x.id) === String(id)) : null;
+  if (!c) c = list[0];
+  const pos = list.indexOf(c);
   const weapons = await weaponsWithCombos();
 
   const embed = {
@@ -147,45 +171,50 @@ export async function buildCombosMessage(weapon, index) {
       { name: "✋ Dextérité", value: String(c.dexterity), inline: true },
       { name: "📊 Dégâts moyens", value: String(c.avgDamage), inline: true },
     ],
-    footer: { text: `Combo ${i + 1}/${list.length} · trié par facilité · source BrawlDatabase.com` },
-  };
-  const menu = {
-    type: 3,
-    custom_id: "cb_weapon",
-    placeholder: `${weaponLabel(weapon)} — choisir une arme`,
-    options: weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) }, default: w === weapon })),
-  };
-  const nav = {
-    type: 1,
-    components: [
-      { type: 2, style: 2, custom_id: `cb_nav:${weapon}:${i - 1}`, label: "◀", disabled: i === 0 },
-      { type: 2, style: 2, custom_id: "cb_count", label: `${i + 1}/${list.length}`, disabled: true },
-      { type: 2, style: 2, custom_id: `cb_nav:${weapon}:${i + 1}`, label: "▶", disabled: i >= list.length - 1 },
-      { type: 2, style: 5, label: "BrawlDB", url: c.url },
-    ],
+    footer: { text: `Combo ${pos + 1}/${list.length} · source BrawlDatabase.com` },
   };
 
-  // On télécharge la vidéo et on la JOINT au message : Discord la lit inline,
-  // contrairement à un simple lien (qui n'est pas déroulé quand un embed est présent).
+  const weaponMenu = {
+    type: 3,
+    custom_id: "cbp_weapon",
+    placeholder: `${weaponLabel(weapon)} — changer d'arme`,
+    options: weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) }, default: w === weapon })),
+  };
+  // Discord limite un menu à 25 options : on liste les 25 meilleurs combos (par facilité).
+  const shown = list.slice(0, 25);
+  const comboMenu = {
+    type: 3,
+    custom_id: `cbp_pick:${weapon}`,
+    placeholder: "Choisis un combo…",
+    options: shown.map((x) => ({
+      label: x.notation.slice(0, 100),
+      description: `Facilité ${x.usability}/10 · ${x.avgDamage} dmg moy.`.slice(0, 100),
+      value: String(x.id),
+      default: x.id === c.id,
+    })),
+  };
+  const linkRow = {
+    type: 1,
+    components: [{ type: 2, style: 5, label: "Voir sur BrawlDB", url: c.url }],
+  };
+
   let files = [];
   let content = "";
   try {
     const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
-    if (r.ok) {
-      files = [{ attachment: Buffer.from(await r.arrayBuffer()), name: `${weapon}-${c.id}.mp4` }];
-    } else {
-      content = c.video;
-    }
+    if (r.ok) files = [{ attachment: Buffer.from(await r.arrayBuffer()), name: `${weapon}-${c.id}.mp4` }];
+    else content = c.video;
   } catch {
-    content = c.video; // fallback : au moins le lien
+    content = c.video;
   }
 
   return {
     content,
     embeds: [embed],
-    components: [{ type: 1, components: [menu] }, nav],
+    components: [{ type: 1, components: [weaponMenu] }, { type: 1, components: [comboMenu] }, linkRow],
     files,
     allowedMentions: { parse: [] },
   };
 }
+
 
