@@ -176,6 +176,31 @@ export function buildCheckinAnnounce(t) {
   return { content: ping || undefined, embeds: [embed], components, allowedMentions: { roles: pingId ? [pingId] : [] } };
 }
 
+// Annonce de lancement du bracket (embed + bouton + ping des inscrits).
+export function buildBracketAnnounce(t) {
+  const pingId = t.participantRoleId || t.pingRoleId || null;
+  const ping = pingId ? `<@&${pingId}>` : "";
+  const embed = {
+    title: `⚔️ ${t.name} — Le bracket est lancé !`,
+    description: "Les matchs sont prêts. Retrouve ton adversaire et joue ta place !\n\n" + bracketSummary(t),
+    color: 0x7c5cff,
+    fields: [
+      { name: "🎮 Format", value: `${t.format} · BO${t.bestOf}`, inline: true },
+      { name: "👥 Joueurs", value: `${t.participants.length}`, inline: true },
+    ],
+    footer: { text: "Brawlhalla · que le meilleur gagne ⚔️" },
+    timestamp: new Date().toISOString(),
+  };
+  const components = [];
+  if (t.signupChannelId) {
+    components.push({
+      type: 1,
+      components: [{ type: 2, style: 5, label: "Voir le tournoi", emoji: { name: "🗺️" }, url: `https://discord.com/channels/${config.guildId}/${t.signupChannelId}` }],
+    });
+  }
+  return { content: ping || undefined, embeds: [embed], components, allowedMentions: { roles: pingId ? [pingId] : [] } };
+}
+
 // Résumé du bracket pour annonce (texte par round).
 export function bracketSummary(t) {  if (!t.rounds) return "Bracket non généré.";
   const nameOf = (id) => (id ? t.participants.find((p) => p.id === id)?.name || "?" : "—");

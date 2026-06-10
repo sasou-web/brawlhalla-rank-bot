@@ -29,7 +29,7 @@ import {
   getHistoryEntry,
   deleteHistoryEntry,
 } from "../tournament.js";
-import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, bracketSummary, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
+import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
 import { getLeaderboard } from "../levels.js";
@@ -469,7 +469,7 @@ export function startWebServer(client) {
     try {
       const t = await generateBracket(G);
       await refreshSignupPanel(client, G);
-      await tournamentAnnounce(client, G, `⚔️ **${t.name}** — le bracket est lancé !`, [{ title: "Bracket", description: bracketSummary(t), color: 0xf1c40f }]);
+      await tournamentAnnouncePayload(client, G, buildBracketAnnounce(t));
       res.json(t);
     } catch (err) {
       res.status(400).json({ error: err.message });
