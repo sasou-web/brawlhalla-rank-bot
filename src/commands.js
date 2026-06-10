@@ -66,6 +66,12 @@ import {
   handleGuessRankPanelModal,
 } from "./commands/panels/guessrank.js";
 import {
+  handleSetupTickets,
+  handleTicketsButton,
+  handleTicketsSelect,
+  handleTicketsModal,
+} from "./commands/panels/tickets.js";
+import {
   handleSetupTempVoice,
   handleTempVoicePanelButton,
   handleTempVoicePanelSelect,
@@ -112,7 +118,7 @@ export const MANAGE_GUILD_COMMANDS = new Set([
   "whois", "forcelink", "unlink", "refresh", "reset-saison", "setup", "setup-succes",
   "niveaux-config", "niveaux-recompense", "niveaux-set", "niveaux-reset", "niveaux-resync",
   "setup-levels", "setup-tiktok", "setup-clips", "setup-tempvoice", "setup-vocaux-rank",
-  "setup-guessrank", "tournoi-panneau", "caster",
+  "setup-guessrank", "setup-tickets", "tournoi-panneau", "caster",
 ]);
 export const MANAGE_MESSAGES_COMMANDS = new Set(["clear"]);
 
@@ -162,6 +168,7 @@ export async function handleChatInput(interaction, ctx) {
     case "setup-tempvoice": return handleSetupTempVoice(interaction, ctx);
     case "setup-vocaux-rank": return handleSetupVocauxRank(interaction, ctx);
     case "setup-guessrank": return handleSetupGuessRank(interaction, ctx);
+    case "setup-tickets": return handleSetupTickets(interaction, ctx);
     case "tournoi-panneau": return handleTournoiPanneau(interaction, ctx);
     case "bracket": return handleBracket(interaction, ctx);
     case "caster": return handleCaster(interaction, ctx);
@@ -175,6 +182,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("tv_")) return handleTempVoicePanelModal(interaction, ctx);
   if (interaction.customId.startsWith("vc_")) return handleVoiceControlModal(interaction, ctx);
   if (interaction.customId.startsWith("gr_")) return handleGuessRankPanelModal(interaction, ctx);
+  if (interaction.customId.startsWith("tck")) return handleTicketsModal(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
   if (!interaction.customId.startsWith("rm:")) return;
   const [, requesterId, , channelId, messageId] = interaction.customId.split(":");
@@ -494,6 +502,7 @@ export async function handleSelect(interaction, ctx) {
   if (interaction.customId.startsWith("tv_")) return handleTempVoicePanelSelect(interaction, ctx);
   if (interaction.customId.startsWith("vc_")) return handleVoiceControlSelect(interaction, ctx);
   if (interaction.customId.startsWith("gr_")) return handleGuessRankPanelSelect(interaction, ctx);
+  if (interaction.customId.startsWith("tck")) return handleTicketsSelect(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentSelect(interaction, ctx);
   switch (interaction.customId) {
     case "setup_channel":
@@ -524,6 +533,7 @@ export async function handleButton(interaction, ctx) {
   if (id.startsWith("tv_")) return handleTempVoicePanelButton(interaction, ctx);
   if (id.startsWith("vc_")) return handleVoiceControlButton(interaction, ctx);
   if (id.startsWith("gr_")) return handleGuessRankPanelButton(interaction, ctx);
+  if (id.startsWith("tck")) return handleTicketsButton(interaction, ctx);
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);

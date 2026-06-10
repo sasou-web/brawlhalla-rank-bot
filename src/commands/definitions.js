@@ -302,6 +302,11 @@ export const commandsData = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("setup-tickets")
+    .setDescription("(Admin) Panneau du système de tickets de support.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("tournoi-panneau")
     .setDescription("(Admin) Publie le panneau d'inscription du tournoi dans ce salon.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
