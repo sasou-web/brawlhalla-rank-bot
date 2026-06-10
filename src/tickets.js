@@ -279,10 +279,10 @@ export function buildTicketPanelPayload(cfg) {
     );
   }
 
-  // Pied : invitation + lien Terms of Service.
+  // Pied : invitation + lien Terms of Service (en sous-texte discret).
   container.addSeparatorComponents(divider());
   let footer = cfg.footerText || "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.";
-  if (cfg.tosUrl) footer += `\n📜 [Terms of Service](${cfg.tosUrl})`;
+  if (cfg.tosUrl) footer += `\n-# 📜 [Terms of Service](${cfg.tosUrl})`;
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer.slice(0, 4000)));
 
   // Menu déroulant (ou bouton unique) intégré DANS le cadre, sous une ligne de séparation.
@@ -339,7 +339,7 @@ export function buildTicketContainer(cfg, { topic, subject, ownerId, number }) {
   container.addSeparatorComponents(divider());
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `🕓 Ouvert par <@${ownerId}> • <t:${Math.floor(Date.now() / 1000)}:f> • Ticket #${number}`,
+      `-# 🕓 Ouvert par <@${ownerId}> • <t:${Math.floor(Date.now() / 1000)}:f> • Ticket #${number}`,
     ),
   );
 
