@@ -1,5 +1,26 @@
 # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Points ciblés : fuite mémoire & plafond bracket
+
+### 🩹 Corrections ciblées
+- **Fuite mémoire `lierCooldowns`** (`commands/linking.js`) : la Map des cooldowns `/lier`
+  grossissait indéfiniment (une entrée par membre ayant déjà fait `/lier`). Nettoyage
+  opportuniste des entrées expirées à chaque appel → taille bornée aux cooldowns actifs.
+- **Plafond de hauteur du bracket** (`bracketImage.js`) : un tournoi 64/128 joueurs générait
+  un canvas très haut (risque mémoire). Au-delà de 32 matchs au premier round affiché, on
+  bascule automatiquement en vue « top N » (avance `fromRound`) → image bornée. Vérifié avec
+  un bracket 128 joueurs.
+
+### ✅ Vérifications
+- `npm run check` : 52 fichiers OK. `npm test` : **93/93**. Smoke-test rendu bracket 128j OK.
+
+### ⏭️ Laissés volontairement
+- `guessrank` (refetch des users sur réaction) et `tiktok.js` (parsing RSS par regex) :
+  modifications jugées trop risquées pour un gain marginal (risque de casser le single-vote /
+  ajout d'une dépendance). Statu quo assumé.
+
+---
+
 ## Session — Découpe XP & factorisation police (dette technique)
 
 ### 🧱 Découpe d'`index.js` (suite)

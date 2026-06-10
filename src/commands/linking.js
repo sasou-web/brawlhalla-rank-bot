@@ -41,6 +41,11 @@ async function isReviewer(interaction) {
 
 export async function handleLier(interaction, ctx) {
   const now = Date.now();
+  // Nettoyage opportuniste : retire les cooldowns expirés pour borner la taille de la Map
+  // (sinon elle grossit indéfiniment, un userId par personne ayant déjà fait /lier).
+  for (const [uid, ts] of lierCooldowns) {
+    if (now - ts >= LIER_COOLDOWN_MS) lierCooldowns.delete(uid);
+  }
   const last = lierCooldowns.get(interaction.user.id) ?? 0;
   if (now - last < LIER_COOLDOWN_MS) {
     const wait = Math.ceil((LIER_COOLDOWN_MS - (now - last)) / 1000);

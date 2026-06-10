@@ -32,9 +32,16 @@ export function renderBracketImage(t, opts = {}) {
   const rounds = t.rounds || 0;
   if (rounds < 1) throw new Error("Bracket non généré.");
   const size = Math.pow(2, rounds);
-  const fromRound = Math.max(0, Math.min(Math.floor(opts.fromRound || 0), rounds - 1));
+  let fromRound = Math.max(0, Math.min(Math.floor(opts.fromRound || 0), rounds - 1));
+  // Plafond de hauteur : trop de matchs au 1er round affiché = canvas géant (ex. 64/128
+  // joueurs). On avance automatiquement fromRound (vue "top N") pour borner l'image.
+  const MAX_FIRST_ROUND_MATCHES = 32;
+  let n0 = size / Math.pow(2, fromRound + 1); // matchs au premier round affiche
+  while (n0 > MAX_FIRST_ROUND_MATCHES && fromRound < rounds - 1) {
+    fromRound++;
+    n0 = size / Math.pow(2, fromRound + 1);
+  }
   const shownRounds = rounds - fromRound;
-  const n0 = size / Math.pow(2, fromRound + 1); // matchs au premier round affiche
 
   const boxW = 200;
   const boxH = 40;
