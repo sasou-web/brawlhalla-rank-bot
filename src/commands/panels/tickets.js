@@ -12,6 +12,8 @@ import {
   ChannelType,
   PermissionFlagsBits,
   AttachmentBuilder,
+  TextDisplayBuilder,
+  MessageFlags,
 } from "discord.js";
 import {
   getTicketConfig,
@@ -26,8 +28,7 @@ import {
   setTicketClaim,
   countOpenByOwner,
   buildTicketPanelPayload,
-  buildTicketBody,
-  parseColor,
+  buildTicketContainer,
 } from "../../tickets.js";
 import { EPHEMERAL, logAudit } from "../shared.js";
 
@@ -402,12 +403,7 @@ async function createTicketChannel(interaction, topicId, subject) {
     subject,
   });
 
-  const embed = new EmbedBuilder()
-    .setColor(parseColor(cfg.panelColor))
-    .setTitle((cfg.ticketTitle || "🎫 Support Ticket").slice(0, 256))
-    .setDescription(buildTicketBody(cfg, { topic, subject, ownerId: interaction.user.id }))
-    .setFooter({ text: `Ticket #${number}` });
-  if (cfg.thumbnailUrl) embed.setThumbnail(cfg.thumbnailUrl);
+  const container = buildTicketContainer(cfg, { topic, subject, ownerId: interaction.user.id, number });
 
   const controls = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("tck_claim").setLabel("Prendre en charge").setEmoji("🙋").setStyle(ButtonStyle.Secondary),
@@ -416,7 +412,15 @@ async function createTicketChannel(interaction, topicId, subject) {
   );
 
   await channel
-    .send({ content: `<@${interaction.user.id}> <@&${cfg.staffRoleId}>`, embeds: [embed], components: [controls] })
+    .send({
+      components: [
+        new TextDisplayBuilder().setContent(`<@${interaction.user.id}> <@&${cfg.staffRoleId}>`),
+        container,
+        controls,
+      ],
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { users: [interaction.user.id], roles: [cfg.staffRoleId] },
+    })
     .catch(() => {});
 
   await logAudit(guild, `🎫 <@${interaction.user.id}> a ouvert le **ticket #${number}** (${topic ? topic.label : "Général"}) → <#${channel.id}>`);

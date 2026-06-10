@@ -1,4 +1,18 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  ThumbnailBuilder,
+  MessageFlags,
+} from "discord.js";
 import { loadDoc, saveDoc } from "./db.js";
 
 const KEY = "tickets";
@@ -200,54 +214,75 @@ function resolveEmoji(e) {
   return undefined;
 }
 
-// Ligne de séparation visuelle entre sections (style "sexy" type boutique).
-const DIVIDER = "──────────────────────────────";
+// ====================================================================
+// Panneaux en Components V2 (Container, Separator, Media Gallery, Section).
+// Rend les lignes de séparation fines, la bannière intégrée et la bordure
+// de couleur continue (style "boutique"). Partagé avec le dashboard web.
+// ====================================================================
 
-function buildDescription(cfg) {
-  const parts = [];
-  parts.push(cfg.panelDescription || "Clique pour ouvrir un ticket privé avec le staff.");
+// Ligne de séparation native (composant Separator de Discord).
+function divider() {
+  return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+}
 
-  if (cfg.rulesText && cfg.rulesText.trim()) {
-    parts.push(DIVIDER);
-    parts.push(`📋 **Étapes à suivre**\n${cfg.rulesText.trim()}`);
+// Ajoute un en-tête (titre + texte) au container, avec la vignette/logo en accessoire à droite.
+function addHeader(container, headText, thumbnailUrl) {
+  if (thumbnailUrl) {
+    container.addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(headText.slice(0, 4000)))
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnailUrl)),
+    );
+  } else {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(headText.slice(0, 4000)));
+  }
+}
+
+/** Payload Discord (Components V2) du panneau public de tickets, à partir de la config. */
+export function buildTicketPanelPayload(cfg) {
+  const color = parseColor(cfg.panelColor);
+  const container = new ContainerBuilder().setAccentColor(color);
+
+  // Bannière intégrée en haut du cadre (Media Gallery).
+  if (cfg.bannerUrl) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(cfg.bannerUrl)),
+    );
   }
 
+  // Titre + description, vignette à droite.
+  const head = `## ${cfg.panelTitle || "🎫 Support & Tickets"}\n${cfg.panelDescription || "Choisis un motif ci-dessous pour ouvrir un ticket."}`;
+  addHeader(container, head, cfg.thumbnailUrl);
+
+  // Étapes à suivre.
+  if (cfg.rulesText && cfg.rulesText.trim()) {
+    container.addSeparatorComponents(divider());
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### 📋 Étapes à suivre\n${cfg.rulesText.trim()}`.slice(0, 4000)),
+    );
+  }
+
+  // Options de ticket.
   const topics = Array.isArray(cfg.topics) ? cfg.topics : [];
   const optionsText = topics
     .filter((t) => t.description)
     .map((t) => `${t.emoji || "•"} **${t.label}** → ${t.description}`)
     .join("\n");
   if (optionsText) {
-    parts.push(DIVIDER);
-    parts.push(`🎫 **Options de ticket**\n${optionsText}`);
+    container.addSeparatorComponents(divider());
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### 🎫 Options de ticket\n${optionsText}`.slice(0, 4000)),
+    );
   }
 
-  parts.push(DIVIDER);
+  // Pied : invitation + lien Terms of Service.
+  container.addSeparatorComponents(divider());
   let footer = "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.";
   if (cfg.tosUrl) footer += `\n📜 [Terms of Service](${cfg.tosUrl})`;
-  parts.push(footer);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
 
-  return parts.join("\n\n").slice(0, 4096);
-}
-
-/** Payload Discord (embeds + components) du panneau public de tickets, à partir de la config. */
-export function buildTicketPanelPayload(cfg) {
-  const color = parseColor(cfg.panelColor);
-  const embeds = [];
-
-  // Bannière dans un embed SÉPARÉ placé en premier : Discord l'affiche AU-DESSUS du contenu
-  // (un setImage classique apparaîtrait en bas). Même couleur => bordure continue "sexy".
-  if (cfg.bannerUrl) embeds.push(new EmbedBuilder().setColor(color).setImage(cfg.bannerUrl));
-
-  const main = new EmbedBuilder()
-    .setColor(color)
-    .setTitle((cfg.panelTitle || "🎫 Support & Tickets").slice(0, 256))
-    .setDescription(buildDescription(cfg));
-  if (cfg.thumbnailUrl) main.setThumbnail(cfg.thumbnailUrl);
-  embeds.push(main);
-
+  // Menu déroulant (ou bouton unique) sous le cadre.
   let row;
-  const topics = Array.isArray(cfg.topics) ? cfg.topics : [];
   if (topics.length) {
     const select = new StringSelectMenuBuilder()
       .setCustomId("tckopen_select")
@@ -268,27 +303,39 @@ export function buildTicketPanelPayload(cfg) {
     );
   }
 
-  return { embeds, components: [row] };
+  return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
 }
 
-/** Description (markdown) de l'embed posté DANS le salon de ticket : style compact + séparateurs. */
-export function buildTicketBody(cfg, { topic, subject, ownerId }) {
-  const parts = [];
-  let intro = cfg.ticketWelcome || "Merci de patienter, un membre du staff va prendre en charge ton ticket.";
-  if (cfg.tosUrl) intro += ` Merci de respecter nos [Terms of Service](${cfg.tosUrl}).`;
-  parts.push(intro);
+/** Container (Components V2) de l'embed posté DANS le salon de ticket créé. */
+export function buildTicketContainer(cfg, { topic, subject, ownerId, number }) {
+  const color = parseColor(cfg.panelColor);
+  const container = new ContainerBuilder().setAccentColor(color);
 
-  parts.push(DIVIDER);
+  let welcome = cfg.ticketWelcome || "Merci de patienter, un membre du staff va prendre en charge ton ticket.";
+  if (cfg.tosUrl) welcome += ` Merci de respecter nos [Terms of Service](${cfg.tosUrl}).`;
+  addHeader(container, `## ${cfg.ticketTitle || "🎫 Support Ticket"}\n${welcome}`, cfg.thumbnailUrl);
+
+  container.addSeparatorComponents(divider());
   const lines = [
     `📌 **Motif :** ${topic ? `${topic.emoji || ""} ${topic.label}`.trim() : "Général"}`,
     `📝 **Demande :** ${subject}`,
   ];
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join("\n").slice(0, 4000)));
+
   const info = (topic && topic.message) || cfg.ticketInfo;
-  if (info && info.trim()) lines.push(`\nℹ️ **Informations**\n${info.trim()}`);
-  parts.push(lines.join("\n"));
+  if (info && info.trim()) {
+    container.addSeparatorComponents(divider());
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### ℹ️ Informations\n${info.trim()}`.slice(0, 4000)),
+    );
+  }
 
-  parts.push(DIVIDER);
-  parts.push(`🕓 Ouvert par <@${ownerId}> • <t:${Math.floor(Date.now() / 1000)}:f>`);
+  container.addSeparatorComponents(divider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `🕓 Ouvert par <@${ownerId}> • <t:${Math.floor(Date.now() / 1000)}:f> • Ticket #${number}`,
+    ),
+  );
 
-  return parts.join("\n\n").slice(0, 4096);
+  return container;
 }
