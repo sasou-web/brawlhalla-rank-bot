@@ -1,5 +1,24 @@
 # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Files de récupération API persistées (robustesse)
+
+### 📡 Files de récupération persistées en SQLite
+- Nouveau module **`src/pendingStore.js`** (table `pending(kind, item, added_ts)`).
+- `brawlhalla.js` : les files `pendingProfiles` / `pendingSearches` (profils & recherches qui
+  ont échoué côté API et qu'on rejoue en arrière-plan) étaient **en mémoire** → perdues à
+  chaque redémarrage. Elles sont désormais **persistées** : hydratées au démarrage, miroir
+  mémoire+SQLite à chaque ajout/retrait. Un `/lier` qui a échoué se rejoue même après un
+  `pm2 restart`.
+- **Purge automatique** au démarrage des éléments en attente depuis > 7 jours (hygiène : on
+  ne réessaie pas indéfiniment un pseudo qui n'existe plus en ranked).
+- **5 nouveaux tests** (`test/pending.store.test.js`) : add/load par type, idempotence,
+  suppression, indépendance des types, purge par ancienneté.
+
+### ✅ Vérifications
+- `npm run check` : 50 fichiers OK. `npm test` : **93/93**.
+
+---
+
 ## Session — Découpe des monolithes, permissions & tests handlers (Priorité 5)
 
 ### 🧱 Découpe d'`index.js`

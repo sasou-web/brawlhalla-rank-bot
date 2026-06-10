@@ -3,6 +3,7 @@ import { getProfileEntry, setProfileEntry, getWarmIds } from "./profileStore.js"
 import { getSearchEntry, setSearchEntry } from "./searchStore.js";
 import { upsertPlayers, searchLocalPlayers, markSynced, getIndexStats, getLocalPlayer } from "./leaderboardStore.js";
 import { recordOutcome, recordRetry, recordCooldown, snapshot as metricsSnapshot } from "./apiMetrics.js";
+import { addPending, removePending, loadPending, prunePending } from "./pendingStore.js";
 
 /**
  * Client de l'API officielle Brawlhalla v1.
@@ -28,8 +29,34 @@ const inflight = new Map(); // brawlhallaId -> Promise (dedup des fetchs concurr
 
 // Files de recuperation en arriere-plan : ce qui a echoue a cause de l'API est reessaye
 // en boucle jusqu'a reussir, puis stocke en base. Garantit que la PROCHAINE commande marche.
-const pendingProfiles = new Set(); // brawlhallaId (string)
-const pendingSearches = new Set(); // pseudo recherche (string brut)
+// PERSISTEES en SQLite (pendingStore) : les files survivent a un redemarrage. On les
+// hydrate au demarrage et on purge ce qui traine depuis > 7 jours (hygiene).
+const PENDING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+prunePending(PENDING_MAX_AGE_MS);
+const pendingProfiles = new Set(loadPending("profile")); // brawlhallaId (string)
+const pendingSearches = new Set(loadPending("search")); // pseudo recherche (string brut)
+
+// Mutations miroir mémoire + SQLite (pour que les files survivent au restart).
+function addPendingProfile(id) {
+  const k = String(id);
+  if (!pendingProfiles.has(k)) {
+    pendingProfiles.add(k);
+    addPending("profile", k);
+  }
+}
+function delPendingProfile(id) {
+  const k = String(id);
+  if (pendingProfiles.delete(k)) removePending("profile", k);
+}
+function addPendingSearch(name) {
+  if (!pendingSearches.has(name)) {
+    pendingSearches.add(name);
+    addPending("search", name);
+  }
+}
+function delPendingSearch(name) {
+  if (pendingSearches.delete(name)) removePending("search", name);
+}
 
 function _acquireSlot() {
   if (_active < MAX_CONCURRENCY) {
@@ -291,7 +318,7 @@ export async function searchPlayers(name, limit = 5) {
     const cached = await getSearchEntry(key);
     if (cached) return cached.results.slice(0, limit);
     // 3c) Rien en base : on programme une recuperation en arriere-plan (marchera au prochain essai).
-    pendingSearches.add(name);
+    addPendingSearch(name);
     const e = new Error(
       `🔎 Je cherche **${name}**… l'API Brawlhalla fait des siennes en ce moment.\n` +
         `💡 Astuce : pour une **première** recherche fiable, utilise plutôt l'option **\`id\`** ` +
@@ -427,7 +454,7 @@ export async function getPlayerProfile(brawlhallaId, { force = false, allowStale
   // Cache-first (stale-while-revalidate) : on sert le cache tout de suite,
   // et on rafraichit en arriere-plan s'il est perime.
   if (!force && entry) {
-    if (!fresh) revalidate(brawlhallaId).catch(() => pendingProfiles.add(String(brawlhallaId)));
+    if (!fresh) revalidate(brawlhallaId).catch(() => addPendingProfile(brawlhallaId));
     return entry.data;
   }
 
@@ -436,7 +463,7 @@ export async function getPlayerProfile(brawlhallaId, { force = false, allowStale
     return await revalidate(brawlhallaId);
   } catch (err) {
     // Echec API : on programme une recuperation en arriere-plan pour que la prochaine fois marche.
-    pendingProfiles.add(String(brawlhallaId));
+    addPendingProfile(brawlhallaId);
     if (allowStale && entry) return entry.data; // repli sur donnee perimee
     // Dernier recours : profil minimal reconstruit depuis l'index local du leaderboard.
     // Permet a /lier d'attribuer au moins le role 1v1 meme quand l'API est totalement morte.
@@ -483,7 +510,7 @@ function revalidate(brawlhallaId) {
     const data = await fetchPlayerProfile(brawlhallaId);
     await setProfileEntry(brawlhallaId, data);
     // Profil incomplet (un appel secondaire a echoue) : on le re-complete en arriere-plan.
-    if (data.partial) pendingProfiles.add(String(brawlhallaId));
+    if (data.partial) addPendingProfile(brawlhallaId);
     // Enrichit l'index local nom->ID : tout joueur consulte (par ID, membre lie, warm...)
     // devient cherchable par pseudo ensuite, sans jamais retoucher l'endpoint /search casse.
     if (data.name && data.name !== "?") {
@@ -539,7 +566,7 @@ export async function retryPending() {
     try {
       const data = await revalidate(id);
       if (!data?.partial) {
-        pendingProfiles.delete(id);
+        delPendingProfile(id);
         recovered++;
       }
     } catch {
@@ -552,7 +579,7 @@ export async function retryPending() {
     try {
       const results = await searchPlayers(name);
       if (results.length) {
-        pendingSearches.delete(name);
+        delPendingSearch(name);
         // On pre-charge aussi le profil du meilleur resultat pour que /stats /rank marche direct.
         revalidate(results[0].id).catch(() => {});
         recovered++;
