@@ -1107,6 +1107,12 @@ async function renderTournament(content) {
   const STATUS_CLASS = { draft: "", registration: "ok", checkin: "info", running: "info", completed: "win" };
 
   // Hero (en-tête synthétique)
+  const refreshHero = el("button", { class: "tbtn", title: "Actualiser le tournoi" }, "🔄 Actualiser");
+  refreshHero.addEventListener("click", async () => {
+    refreshHero.disabled = true;
+    refreshHero.textContent = "⏳ …";
+    await renderTournament(content);
+  });
   content.append(el("div", { class: "trn-hero" },
     el("div", { class: "h-main" },
       el("div", { class: "h-name" }, t.name),
@@ -1115,7 +1121,8 @@ async function renderTournament(content) {
         el("span", { class: "pill" }, `👥 ${t.participants.length}/${t.maxParticipants}`),
         el("span", { class: "pill" }, `🎮 ${t.format}`),
         el("span", { class: "pill" }, `⚔️ BO${t.bestOf} · finale BO${t.finalsBestOf}`),
-        t.startTime ? el("span", { class: "pill" }, `🕒 ${t.startTime}`) : null))));
+        t.startTime ? el("span", { class: "pill" }, `🕒 ${t.startTime}`) : null)),
+    refreshHero));
 
   // Action générique (toolbar) : exécute fn puis recharge (l'onglet actif est conservé).
   const action = (label, fn, variant) => {
