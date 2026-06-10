@@ -899,6 +899,9 @@ function renderTickets(content) {
   c2.append(fieldRow("Image bannière (URL)", "Grande image affichée en bas de l'embed.", textInput(cfg, "bannerUrl", "https://…")));
   c2.append(fieldRow("Vignette / logo (URL)", "Petite image en haut à droite.", textInput(cfg, "thumbnailUrl", "https://…")));
   c2.append(fieldRow("À lire avant d'ouvrir", "Instructions affichées dans l'embed (une ligne par règle).", textareaInput(cfg, "rulesText", "• Explique ton problème directement\n• Reste respectueux et patient\n• Pas de ticket pour rien")));
+  c2.append(fieldRow("Titre section « Étapes »", "Titre du bloc des instructions (mets l'emoji que tu veux).", textInput(cfg, "rulesTitle", "📋 Étapes à suivre")));
+  c2.append(fieldRow("Titre section « Options »", "Titre du bloc listant les motifs.", textInput(cfg, "optionsTitle", "🎫 Options de ticket")));
+  c2.append(fieldRow("Texte de bas de panneau", "Phrase juste au-dessus du menu déroulant.", textInput(cfg, "footerText", "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.")));
   c2.append(fieldRow("Lien Terms of Service", "Affiché comme lien dans la description (optionnel).", textInput(cfg, "tosUrl", "https://…")));
   c2.append(fieldRow("Texte du menu déroulant", "Placeholder affiché sur le menu de motifs.", textInput(cfg, "selectPlaceholder", "Choisis un motif")));
   content.append(c2);

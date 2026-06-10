@@ -51,6 +51,10 @@ const DEFAULT_CONFIG = {
   rulesText: "",
   tosUrl: "",
   selectPlaceholder: "Choisis un motif pour ouvrir un ticket",
+  // Titres de section du panneau public (personnalisables avec tes emojis).
+  rulesTitle: "📋 Étapes à suivre",
+  optionsTitle: "🎫 Options de ticket",
+  footerText: "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.",
   // Embed posté DANS le salon de ticket à sa création.
   ticketTitle: "🎫 Support Ticket",
   ticketWelcome: "Merci de patienter, un membre du staff va prendre en charge ton ticket dès que possible.",
@@ -258,7 +262,7 @@ export function buildTicketPanelPayload(cfg) {
   if (cfg.rulesText && cfg.rulesText.trim()) {
     container.addSeparatorComponents(divider());
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### 📋 Étapes à suivre\n${cfg.rulesText.trim()}`.slice(0, 4000)),
+      new TextDisplayBuilder().setContent(`### ${cfg.rulesTitle || "📋 Étapes à suivre"}\n${cfg.rulesText.trim()}`.slice(0, 4000)),
     );
   }
 
@@ -271,15 +275,15 @@ export function buildTicketPanelPayload(cfg) {
   if (optionsText) {
     container.addSeparatorComponents(divider());
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### 🎫 Options de ticket\n${optionsText}`.slice(0, 4000)),
+      new TextDisplayBuilder().setContent(`### ${cfg.optionsTitle || "🎫 Options de ticket"}\n${optionsText}`.slice(0, 4000)),
     );
   }
 
   // Pied : invitation + lien Terms of Service.
   container.addSeparatorComponents(divider());
-  let footer = "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.";
+  let footer = cfg.footerText || "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.";
   if (cfg.tosUrl) footer += `\n📜 [Terms of Service](${cfg.tosUrl})`;
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer.slice(0, 4000)));
 
   // Menu déroulant (ou bouton unique) intégré DANS le cadre, sous une ligne de séparation.
   let row;
