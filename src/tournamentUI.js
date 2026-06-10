@@ -145,9 +145,39 @@ export function buildRegistrationAnnounce(t) {
   return { content: ping || undefined, embeds: [embed], components, allowedMentions: { roles: t.pingRoleId ? [t.pingRoleId] : [] } };
 }
 
+// Annonce d'ouverture du check-in (embed + bouton vers le salon d'inscription, ping des inscrits).
+export function buildCheckinAnnounce(t) {
+  const pingId = t.participantRoleId || t.pingRoleId || null;
+  const ping = pingId ? `<@&${pingId}>` : "";
+  const fields = [
+    { name: "🎮 Format", value: `${t.format} · BO${t.bestOf}`, inline: true },
+    { name: "👥 Inscrits", value: `${t.participants.length}/${t.maxParticipants}`, inline: true },
+  ];
+  if (t.startTime) fields.push({ name: "🕒 Début", value: t.startTime, inline: true });
+
+  const embed = {
+    title: `✅ ${t.name} — Check-in ouvert`,
+    description:
+      "Le tournoi commence bientôt ! **Confirme ta présence** sur le panneau d'inscription.\n" +
+      "⚠️ Sans check-in, ta place pourra être libérée.",
+    color: 0x2ecc71,
+    fields,
+    footer: { text: "Brawlhalla · clique pour faire ton check-in" },
+    timestamp: new Date().toISOString(),
+  };
+
+  const components = [];
+  if (t.signupChannelId) {
+    components.push({
+      type: 1,
+      components: [{ type: 2, style: 5, label: "Faire mon check-in", emoji: { name: "✅" }, url: `https://discord.com/channels/${config.guildId}/${t.signupChannelId}` }],
+    });
+  }
+  return { content: ping || undefined, embeds: [embed], components, allowedMentions: { roles: pingId ? [pingId] : [] } };
+}
+
 // Résumé du bracket pour annonce (texte par round).
-export function bracketSummary(t) {
-  if (!t.rounds) return "Bracket non généré.";
+export function bracketSummary(t) {  if (!t.rounds) return "Bracket non généré.";
   const nameOf = (id) => (id ? t.participants.find((p) => p.id === id)?.name || "?" : "—");
   const roundName = (r) => {
     const fromEnd = t.rounds - 1 - r;

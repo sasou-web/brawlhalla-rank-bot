@@ -29,7 +29,7 @@ import {
   getHistoryEntry,
   deleteHistoryEntry,
 } from "../tournament.js";
-import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, bracketSummary, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
+import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, bracketSummary, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
 import { getLeaderboard } from "../levels.js";
@@ -439,7 +439,7 @@ export function startWebServer(client) {
       const t = await updateTournament(G, { status: req.body.status });
       await refreshSignupPanel(client, G);
       if (req.body.status === "registration") await tournamentAnnouncePayload(client, G, buildRegistrationAnnounce(t));
-      if (req.body.status === "checkin") await tournamentAnnounce(client, G, `✅ **Check-in ouvert** pour **${t.name}** ! Confirmez votre présence sur le panneau.`);
+      if (req.body.status === "checkin") await tournamentAnnouncePayload(client, G, buildCheckinAnnounce(t));
       res.json(t);
     } catch (err) {
       res.status(400).json({ error: err.message });
