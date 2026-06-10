@@ -70,7 +70,7 @@ import {
   unlockMatch,
   setCastThreshold,
 } from "./tournament.js";
-import { buildSignupPayload, refreshSignupPanel, buildModAlert, buildMatchPayload, refreshMatchMessage, tournamentAnnounce } from "./tournamentUI.js";
+import { buildSignupPayload, refreshSignupPanel, buildModAlert, buildMatchPayload, refreshMatchMessage, tournamentAnnounce, buildMatchResultEmbed } from "./tournamentUI.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { renderBracketImage } from "./bracketImage.js";
 
@@ -3289,7 +3289,7 @@ async function handleTournamentButton(interaction, ctx) {
         await refreshSignupPanel(interaction.client, guildId);
         if (r.finished) {
           const w = r.tournament.participants.find((p) => p.id === r.match.winnerId)?.name || "?";
-          await tournamentAnnounce(interaction.client, guildId, `✅ Match terminé : **${w}** l'emporte ${r.match.scoreA}-${r.match.scoreB} !`);
+          await tournamentAnnounce(interaction.client, guildId, undefined, [buildMatchResultEmbed(r.tournament, r.match)]);
           return interaction.update({ content: `🏆 Point attribué — **${w}** remporte le match !`, components: [] });
         }
         return interaction.update({ content: `✅ Point attribué (${r.match.scoreA}-${r.match.scoreB}).`, components: [] });

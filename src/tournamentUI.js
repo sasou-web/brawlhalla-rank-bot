@@ -176,6 +176,31 @@ export function buildCheckinAnnounce(t) {
   return { content: ping || undefined, embeds: [embed], components, allowedMentions: { roles: pingId ? [pingId] : [] } };
 }
 
+// Embed de fin de match (annoncé dans le salon d'annonces du tournoi).
+export function buildMatchResultEmbed(t, m) {
+  const A = t.participants.find((p) => p.id === m.aId);
+  const B = t.participants.find((p) => p.id === m.bId);
+  const winner = m.winnerId === m.aId ? A : B;
+  const loser = m.winnerId === m.aId ? B : A;
+  const ws = Math.max(m.scoreA, m.scoreB);
+  const ls = Math.min(m.scoreA, m.scoreB);
+  const roundName = (r) => {
+    const fe = t.rounds - 1 - r;
+    if (fe === 0) return "🏆 Finale";
+    if (fe === 1) return "🥈 Demi-finale";
+    if (fe === 2) return "Quart de finale";
+    return `Round ${r + 1}`;
+  };
+  return {
+    title: "✅ Match terminé",
+    color: 0x2ecc71,
+    description: `🏆 **${winner?.name ?? "?"}** l'emporte **${ws}-${ls}** face à **${loser?.name ?? "?"}**.`,
+    fields: [{ name: "Tour", value: roundName(m.round), inline: true }],
+    footer: { text: t.name },
+    timestamp: new Date().toISOString(),
+  };
+}
+
 // Annonce de lancement du bracket (embed + bouton + ping des inscrits).
 export function buildBracketAnnounce(t) {
   const pingId = t.participantRoleId || t.pingRoleId || null;
