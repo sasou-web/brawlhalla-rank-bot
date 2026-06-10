@@ -132,7 +132,7 @@ export async function refreshCombos() {
 // ---------- Payload Discord (partagé commande + dashboard) ----------
 export async function buildCombosMessage(weapon, index) {
   const list = await combosFor(weapon);
-  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [] };
+  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [], files: [], attachments: [] };
   const i = Math.max(0, Math.min(Number(index) || 0, list.length - 1));
   const c = list[i];
   const weapons = await weaponsWithCombos();
@@ -164,5 +164,28 @@ export async function buildCombosMessage(weapon, index) {
       { type: 2, style: 5, label: "BrawlDB", url: c.url },
     ],
   };
-  return { content: c.video, embeds: [embed], components: [{ type: 1, components: [menu] }, nav], allowedMentions: { parse: [] } };
+
+  // On télécharge la vidéo et on la JOINT au message : Discord la lit inline,
+  // contrairement à un simple lien (qui n'est pas déroulé quand un embed est présent).
+  let files = [];
+  let content = "";
+  try {
+    const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
+    if (r.ok) {
+      files = [{ attachment: Buffer.from(await r.arrayBuffer()), name: `${weapon}-${c.id}.mp4` }];
+    } else {
+      content = c.video;
+    }
+  } catch {
+    content = c.video; // fallback : au moins le lien
+  }
+
+  return {
+    content,
+    embeds: [embed],
+    components: [{ type: 1, components: [menu] }, nav],
+    files,
+    allowedMentions: { parse: [] },
+  };
 }
+

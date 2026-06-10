@@ -1559,17 +1559,20 @@ async function handleCombos(interaction) {
   const opt = interaction.options.getString("arme");
   const weapons = await weaponsWithCombos();
   const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
-  return interaction.reply(await buildCombosMessage(weapon, 0));
+  await interaction.deferReply(); // le téléchargement de la vidéo peut dépasser 3s
+  return interaction.editReply(await buildCombosMessage(weapon, 0));
 }
 
 // Composants du panneau combos : changement d'arme + navigation.
+// attachments:[] sur l'édition pour retirer l'ancienne vidéo avant d'ajouter la nouvelle.
 async function handleCombosSelect(interaction) {
-  const weapon = interaction.values[0];
-  return interaction.update(await buildCombosMessage(weapon, 0));
+  await interaction.deferUpdate();
+  return interaction.editReply({ ...(await buildCombosMessage(interaction.values[0], 0)), attachments: [] });
 }
 async function handleCombosNav(interaction) {
   const [, weapon, idx] = interaction.customId.split(":");
-  return interaction.update(await buildCombosMessage(weapon, Number(idx)));
+  await interaction.deferUpdate();
+  return interaction.editReply({ ...(await buildCombosMessage(weapon, Number(idx))), attachments: [] });
 }
 
 async function handleResetSeason(interaction, ctx) {
