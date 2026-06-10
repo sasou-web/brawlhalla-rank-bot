@@ -17,7 +17,7 @@ npm install --omit=dev
 
 echo "==> Verification rapide (lint + tests)..."
 npm run check
-node --test || { echo "!! Tests en echec : on arrete avant de redemarrer."; exit 1; }
+npm test || { echo "!! Tests en echec : on arrete avant de redemarrer."; exit 1; }
 
 echo "==> Enregistrement des slash commands..."
 npm run deploy
