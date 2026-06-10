@@ -50,15 +50,33 @@ export function initHealth(client) {
   if (clientRef) return; // déjà initialisé
   clientRef = client;
 
+  // Anti-spam : on n'alerte que si la coupure dure (vraie panne), pas sur les
+  // micro-reconnexions gateway normales. Et on ne poste "rétablie" que si on a
+  // réellement signalé une coupure avant.
+  let downNotified = false;
+  let downTimer = null;
+  const DOWN_GRACE_MS = 30 * 1000;
+
+  const onReconnect = (id) => {
+    if (downTimer) { clearTimeout(downTimer); downTimer = null; }
+    if (downNotified) {
+      downNotified = false;
+      notifyAdmin(`✅ **Connexion Discord rétablie** (shard ${id}).`);
+    }
+  };
+
   client.on("shardDisconnect", (event, id) => {
     console.warn(`Shard ${id} déconnecté (code ${event?.code}).`);
-    notifyAdmin(`⚠️ **Déconnexion Discord** (shard ${id}, code ${event?.code ?? "?"}). Reconnexion en cours…`);
+    if (downTimer || downNotified) return;
+    downTimer = setTimeout(() => {
+      downTimer = null;
+      downNotified = true;
+      notifyAdmin(`⚠️ **Déconnexion Discord** (shard ${id}, code ${event?.code ?? "?"}). Reconnexion en cours…`);
+    }, DOWN_GRACE_MS);
   });
   client.on("shardError", (err, id) => console.error(`Shard ${id} erreur :`, err?.message));
-  client.on("shardResume", (id) => {
-    console.log(`Shard ${id} reconnecté.`);
-    notifyAdmin(`✅ **Connexion Discord rétablie** (shard ${id}).`);
-  });
+  client.on("shardResume", (id) => { console.log(`Shard ${id} reconnecté (resume).`); onReconnect(id); });
+  client.on("shardReady", (id) => onReconnect(id));
   client.on("error", (err) => console.error("Erreur client Discord :", err?.message));
 
   if (healthTimer) clearInterval(healthTimer);
