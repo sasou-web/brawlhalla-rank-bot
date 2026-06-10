@@ -128,6 +128,7 @@ export async function handleChatInput(interaction, ctx) {
     case "refresh": return handleRefresh(interaction, ctx);
     case "reset-saison": return handleResetSeason(interaction, ctx);
     case "setup": return handleSetup(interaction, ctx);
+    case "setup-succes": return handleSetupSucces(interaction, ctx);
     case "clear": return handleClear(interaction, ctx);
     case "niveau": return handleNiveau(interaction, ctx);
     case "classement-niveaux": return handleClassementNiveaux(interaction, ctx);
@@ -441,9 +442,26 @@ async function handleSetup(interaction, ctx) {
       `• Rôle validateur : ${roleTxt}\n` +
       `• Salon d'audit : ${auditTxt}\n` +
       `• Salon des annonces de montée : ${announceTxt}\n` +
+      `• Salon des succès : ${s.achievementsChannelId ? `<#${s.achievementsChannelId}>` : "*(aucun → `/setup-succes`)*"}\n` +
       `• Seuil d'auto-validation : **${s.autoApproveTier}** (au-dessus = validation manuelle)\n\n` +
-      "Modifie via les menus ci-dessous (appliqué immédiatement) :",
+      "Modifie via les menus ci-dessous (appliqué immédiatement). Pour le salon des succès : `/setup-succes`.",
     components: [channelRow, roleRow, auditRow, announceRow, thresholdRow],
+    flags: EPHEMERAL,
+  });
+}
+
+// ---------- /setup-succes ----------
+
+async function handleSetupSucces(interaction, ctx) {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    return interaction.reply({ content: "Réservé aux admins.", flags: EPHEMERAL });
+  }
+  const salon = interaction.options.getChannel("salon");
+  await setSetting("achievementsChannelId", salon?.id ?? "");
+  return interaction.reply({
+    content: salon
+      ? `Salon des succès : <#${salon.id}> ✅ — les déblocages y seront annoncés (sans ping).`
+      : "Annonces de succès **désactivées**. ✅",
     flags: EPHEMERAL,
   });
 }

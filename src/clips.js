@@ -1,5 +1,5 @@
 import { loadDoc, saveDoc } from "./db.js";
-import { incrCounter, grantAchievements } from "./achievements.js";
+import { incrCounter, grantAndAnnounce } from "./achievements.js";
 
 const KEY = "clips";
 
@@ -155,7 +155,7 @@ export async function handleClipMessage(message) {
     try {
       if (message.author?.id && !message.author.bot) {
         const n = incrCounter(message.guild.id, message.author.id, "clips");
-        grantAchievements(message.guild.id, message.author.id, { clips: n });
+        grantAndAnnounce(message.guild, message.author.id, { clips: n }).catch(() => {});
       }
     } catch {
       /* best-effort */

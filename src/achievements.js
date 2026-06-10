@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { tierIndex } from "./config.js";
+import { getSettings } from "./settings.js";
 
 /**
  * Achievements / quêtes : badges débloqués par les membres selon leurs accomplissements
@@ -95,4 +96,39 @@ export function getCounter(guildId, userId, key) {
 export function incrCounter(guildId, userId, key, by = 1) {
   incrCounterStmt.run({ g: String(guildId), u: String(userId), k: key, by });
   return getCounter(guildId, userId, key);
+}
+
+// ---------- Annonce (salon dédié, sans ping) ----------
+
+/**
+ * Annonce une liste de succès fraîchement débloqués dans le salon dédié (settings.achievementsChannelId).
+ * Mentionne le membre mais SANS le ping (allowedMentions vide). Best-effort.
+ */
+export async function announceAchievements(guild, userId, freshDefs) {
+  if (!guild || !freshDefs?.length) return;
+  try {
+    const { achievementsChannelId } = await getSettings();
+    if (!achievementsChannelId) return;
+    const ch = await guild.channels.fetch(achievementsChannelId).catch(() => null);
+    if (!ch?.isTextBased?.()) return;
+    const list = freshDefs.map((a) => `${a.emoji} **${a.name}** — ${a.desc}`).join("\n");
+    const embed = {
+      color: 0xffd700,
+      title: freshDefs.length > 1 ? "🏅 Succès débloqués !" : "🏅 Succès débloqué !",
+      description: `<@${userId}>\n${list}`,
+      timestamp: new Date().toISOString(),
+    };
+    await ch.send({ embeds: [embed], allowedMentions: { parse: [] } }); // pas de ping
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Débloque les nouveaux succès ET les annonce (best-effort). Renvoie les defs débloquées.
+ */
+export async function grantAndAnnounce(guild, userId, stats) {
+  const fresh = grantAchievements(guild.id, userId, stats);
+  if (fresh.length) await announceAchievements(guild, userId, fresh);
+  return fresh;
 }

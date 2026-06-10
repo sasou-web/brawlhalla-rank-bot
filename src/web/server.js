@@ -49,7 +49,7 @@ function buildSections(guildId) {
     settings: {
       get: () => getSettings(),
       set: async (body) => {
-        const keys = ["reviewChannelId", "reviewerRoleId", "auditChannelId", "announceChannelId", "alertChannelId", "autoApproveTier"];
+        const keys = ["reviewChannelId", "reviewerRoleId", "auditChannelId", "announceChannelId", "alertChannelId", "achievementsChannelId", "autoApproveTier"];
         for (const k of keys) if (k in body) await setSetting(k, body[k]);
         return getSettings();
       },

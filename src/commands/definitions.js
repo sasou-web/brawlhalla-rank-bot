@@ -156,6 +156,18 @@ export const commandsData = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("setup-succes")
+    .setDescription("(Admin) Définit le salon où sont annoncés les succès (sans ping).")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption((o) =>
+      o
+        .setName("salon")
+        .setDescription("Salon des annonces de succès (laisse vide pour désactiver).")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false),
+    )
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("clear")
     .setDescription("(Staff) Supprime rapidement un nombre de messages dans ce salon.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)

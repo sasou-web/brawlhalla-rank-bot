@@ -533,6 +533,7 @@ function sectionSchema(id, cfg) {
             ["Salon d'audit (logs)", "Journal des actions du bot.", channelSelect(cfg, "auditChannelId", "text")],
             ["Salon des annonces", "Annonces de montée de rang.", channelSelect(cfg, "announceChannelId", "text")],
             ["Salon d'alertes (santé du bot)", "Crash, déconnexion Discord, API down. Vide = salon d'audit.", channelSelect(cfg, "alertChannelId", "text")],
+            ["Salon des succès", "Annonces des achievements débloqués (sans ping). Vide = désactivé.", channelSelect(cfg, "achievementsChannelId", "text")],
             ["Seuil d'auto-validation", "Tout ce qui est ≤ ce tier est validé automatiquement.", selectInput(cfg, "autoApproveTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
           ] },
         ],
