@@ -195,6 +195,7 @@ const NAV_GROUPS = [
   { label: "Général", items: [
     { id: "overview", label: "Vue d'ensemble", ico: "📊" },
     { id: "stats", label: "Statistiques", ico: "📈" },
+    { id: "metrics", label: "Fiabilité API", ico: "📡" },
     { id: "logs", label: "Logs en direct", ico: "📜" },
     { id: "settings", label: "Réglages généraux", ico: "⚙️" },
   ] },
@@ -642,6 +643,7 @@ function renderSection(id) {
 
   if (id === "overview") return renderOverview(content);
   if (id === "stats") return renderStats(content);
+  if (id === "metrics") return renderMetrics(content);
   if (id === "logs") return renderLogs(content);
   if (id === "welcome") return renderWelcome(content);
   if (id === "vocrank") return renderVocRank(content);
@@ -936,7 +938,77 @@ function renderLogs(content) {
   logTimer = setInterval(refresh, 3000);
 }
 
-// ----- Section Bienvenue (avec aperçu en direct) -----
+// ----- Page Fiabilité API (consomme /api/metrics, rafraîchi toutes les 5 s) -----
+function renderMetrics(content) {
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "📡 Fiabilité API" }),
+      el("p", {}, "Santé de l'API Brawlhalla observée par le bot depuis son démarrage. Rafraîchi toutes les 5 s."),
+    ),
+  );
+  const statsBox = el("div", { class: "stats" });
+  const detail = el("div", { class: "card", style: "margin-top:18px" });
+  content.append(statsBox, detail);
+
+  const fmtMs = (v) => (v == null ? "—" : v < 60000 ? `${Math.round(v / 1000)} s` : `${Math.floor(v / 60000)} min`);
+  const stat = (val, lbl, color) =>
+    el("div", { class: "stat" },
+      el("div", { class: "val", html: String(val), style: color ? `color:${color}` : null }),
+      el("div", { class: "lbl" }, lbl),
+    );
+  const row = (k, v) =>
+    el("div", { class: "field" },
+      el("div", {}, el("div", { class: "label" }, k)),
+      el("div", { class: "control" }, el("b", {}, String(v))),
+    );
+
+  const draw = (m) => {
+    const pct = m.meaningful > 0 ? Math.round(m.successRate * 100) : 100;
+    const pctColor = pct >= 90 ? "#3fb950" : pct >= 60 ? "#f1c40f" : "#ff6b6b";
+    const pending = (m.pendingProfiles || 0) + (m.pendingSearches || 0);
+
+    statsBox.innerHTML = "";
+    statsBox.append(
+      stat(`${pct}%`, "Taux de succès", pctColor),
+      stat((m.requests || 0).toLocaleString("fr-FR"), "Tentatives HTTP"),
+      stat((m.retries || 0).toLocaleString("fr-FR"), "Retries"),
+      stat(m.cooldownActiveMs > 0 ? `⏳ ${fmtMs(m.cooldownActiveMs)}` : "—", "Cooldown actif", m.cooldownActiveMs > 0 ? "#f1c40f" : null),
+      stat(pending, "File de récup", pending > 0 ? "#f1c40f" : null),
+      stat((m.index?.count || 0).toLocaleString("fr-FR"), "Index (joueurs)"),
+    );
+
+    detail.innerHTML = "";
+    detail.append(
+      el("h3", {}, "Détail"),
+      row("429 (rate-limit)", m.rateLimited || 0),
+      row("5xx (erreurs serveur)", m.serverErrors || 0),
+      row("Autres 4xx", m.otherClient || 0),
+      row("Erreurs réseau", m.networkErrors || 0),
+      row("404 (absences légitimes)", m.notFound || 0),
+      row("Cooldowns posés", m.cooldowns || 0),
+      row("Index — dernière synchro", m.index?.ageMs != null ? `il y a ${fmtMs(m.index.ageMs)}` : "jamais"),
+      row("Dernier succès", m.lastSuccessTs ? new Date(m.lastSuccessTs).toLocaleTimeString("fr-FR") : "—"),
+    );
+    if (m.lastError) {
+      const when = new Date(m.lastError.ts).toLocaleTimeString("fr-FR");
+      const head = m.lastError.status ? `HTTP ${m.lastError.status} — ` : "";
+      detail.append(
+        el("div", { class: "card-sub", style: "margin-top:12px;color:#ff8585" }, `⚠️ Dernière erreur : ${head}${m.lastError.message} (${when})`),
+      );
+    }
+  };
+
+  const refresh = async () => {
+    try {
+      const m = await api("/api/metrics");
+      if (current === "metrics") draw(m);
+    } catch {
+      /* silencieux */
+    }
+  };
+  refresh();
+  logTimer = setInterval(refresh, 5000);
+}
 function previewVars(str) {
   return String(str || "")
     .replaceAll("{user}", "@" + ME.username)

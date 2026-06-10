@@ -18,7 +18,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, "../data");
-const DB_PATH = resolve(DATA_DIR, "bot.db");
+// Base par defaut data/bot.db, surchargeable via BOT_DB_PATH (tests isoles).
+const DB_PATH = process.env.BOT_DB_PATH ? resolve(process.env.BOT_DB_PATH) : resolve(DATA_DIR, "bot.db");
 
 // Clé logique -> ancien fichier JSON (pour la migration unique).
 const JSON_MIGRATION = {
@@ -40,6 +41,50 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL"); // robustesse + lectures concurrentes
 db.pragma("synchronous = NORMAL");
 db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+
+// Tables dediees aux donnees a FORTE ecriture (au lieu de reecrire un gros blob JSON
+// a chaque message/refresh). Operations atomiques par ligne, index pour les classements.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS xp (
+    guild_id TEXT NOT NULL,
+    user_id  TEXT NOT NULL,
+    xp       INTEGER NOT NULL DEFAULT 0,
+    messages INTEGER NOT NULL DEFAULT 0,
+    last_ts  INTEGER NOT NULL DEFAULT 0,
+    day_key  TEXT NOT NULL DEFAULT '',
+    day_xp   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_xp_guild_xp ON xp(guild_id, xp DESC);
+
+  CREATE TABLE IF NOT EXISTS rating_history (
+    brawlhalla_id TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    ts   INTEGER NOT NULL,
+    r1   INTEGER NOT NULL DEFAULT 0,
+    r2   INTEGER NOT NULL DEFAULT 0,
+    lvl  INTEGER NOT NULL DEFAULT 0,
+    rank INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (brawlhalla_id, day_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_rating_player_ts ON rating_history(brawlhalla_id, ts);
+
+  CREATE TABLE IF NOT EXISTS achievements (
+    guild_id TEXT NOT NULL,
+    user_id  TEXT NOT NULL,
+    ach_id   TEXT NOT NULL,
+    unlocked_ts INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, ach_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS counters (
+    guild_id TEXT NOT NULL,
+    user_id  TEXT NOT NULL,
+    key      TEXT NOT NULL,
+    val      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id, key)
+  );
+`);
 
 const getStmt = db.prepare("SELECT value FROM kv WHERE key = ?");
 const setStmt = db.prepare(
@@ -69,7 +114,7 @@ function migrate() {
   }
 }
 migrate();
-console.log("Base SQLite prête (data/bot.db).");
+console.log(`Base SQLite prête (${DB_PATH}).`);
 
 function clone(v) {
   return v === undefined ? undefined : structuredClone(v);
@@ -89,4 +134,19 @@ export function loadDoc(key, fallback) {
 /** Écrit (upsert) un document JSON sous une clé. */
 export function saveDoc(key, value) {
   setStmt.run(key, JSON.stringify(value));
+}
+
+/** Handle SQLite brut (better-sqlite3), pour les modules qui gèrent leurs tables dédiées. */
+export { db };
+
+/**
+ * Garde de migration unique : renvoie true la PREMIÈRE fois qu'on appelle ce nom,
+ * puis false ensuite (le flag est persisté dans la table kv sous "_migrations").
+ */
+export function runOnce(name) {
+  const flags = loadDoc("_migrations", {});
+  if (flags[name]) return false;
+  flags[name] = true;
+  saveDoc("_migrations", flags);
+  return true;
 }

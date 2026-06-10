@@ -27,6 +27,10 @@ export async function getSettings() {
     alertChannelId: s.alertChannelId || "",
     autoApproveTier: s.autoApproveTier || DEFAULT_AUTO_APPROVE_TIER,
     validatorRoleId: s.validatorRoleId || "",
+    // Numéro de saison courant (incrémenté à chaque /reset-saison).
+    season: s.season || 1,
+    // Dernier récap hebdo de progression posté (ms epoch). 0 = jamais.
+    lastWeeklyRecapTs: s.lastWeeklyRecapTs || 0,
   };
 }
 

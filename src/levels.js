@@ -1,18 +1,16 @@
 import { SERVER_LEVEL_TIERS } from "./config.js";
-import { loadDoc, saveDoc } from "./db.js";
+import { db, loadDoc, saveDoc, runOnce } from "./db.js";
 
 const KEY = "levels";
 
 /**
- * Structure (clé SQLite "levels") :
- * {
- *   guilds: {
- *     [guildId]: {
- *       config: { enabled, cooldownSec, minXp, maxXp, announceChannelId, rewards: { [level]: roleId } },
- *       users:  { [userId]: { xp, messages, lastTs } }
- *     }
- *   }
- * }
+ * Niveaux / XP.
+ *
+ * - La CONFIG par serveur reste dans le document kv "levels" (faible écriture) :
+ *     { guilds: { [guildId]: { config: {...} } } }
+ * - Les DONNÉES XP des membres (forte écriture : chaque message/minute vocale) vivent
+ *   dans la table dédiée `xp` (clé (guild_id, user_id)), avec des opérations atomiques
+ *   par ligne au lieu de réécrire un gros blob JSON à chaque gain.
  */
 
 const DEFAULT_CONFIG = {
@@ -37,57 +35,110 @@ const DEFAULT_CONFIG = {
   dailyXpCap: 0, // plafond d'XP par membre et par jour (0 = illimite)
 };
 
+// ---------- Persistance de la CONFIG (kv JSON) ----------
+
 let cache = null;
-let saveTimer = null;
-// Chaine d'ecritures : garantit que deux sauvegardes ne s'executent jamais en parallele
-// (sinon risque de fichier corrompu). Chaque ecriture serialise l'etat le plus recent du cache.
 let writeChain = Promise.resolve();
 
-async function load() {
+function loadConfigDoc() {
   if (cache) return cache;
   cache = loadDoc(KEY, { guilds: {} });
   if (!cache.guilds) cache.guilds = {};
   return cache;
 }
 
-// Persistance SQLite (transaction atomique côté db.js).
 async function doWrite() {
   saveDoc(KEY, cache);
 }
 
-// Met en file une ecriture. Les ecritures s'enchainent sans se chevaucher.
+// Chaîne d'écritures : deux sauvegardes ne se chevauchent jamais.
 function enqueueWrite() {
   writeChain = writeChain.then(doWrite, doWrite);
   return writeChain;
 }
 
-// Ecriture differee : regroupe les rafales d'updates (messages) en une seule sauvegarde.
-function scheduleSave() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    enqueueWrite().catch(() => {});
-  }, 5000);
-}
-
-// Sauvegarde immediate et attendue (commandes admin : on veut une persistance sure).
 async function saveNow() {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
   await enqueueWrite();
 }
 
 async function getGuild(guildId) {
-  const c = await load();
-  if (!c.guilds[guildId]) {
-    c.guilds[guildId] = { config: { ...DEFAULT_CONFIG }, users: {} };
-  }
-  // Complete la config avec d'eventuelles nouvelles cles par defaut.
+  const c = loadConfigDoc();
+  if (!c.guilds[guildId]) c.guilds[guildId] = { config: { ...DEFAULT_CONFIG } };
   c.guilds[guildId].config = { ...DEFAULT_CONFIG, ...c.guilds[guildId].config };
-  if (!c.guilds[guildId].users) c.guilds[guildId].users = {};
   return c.guilds[guildId];
+}
+
+// ---------- Table XP (forte écriture) ----------
+
+const xpGetStmt = db.prepare(
+  "SELECT xp, messages, last_ts AS lastTs, day_key AS dayKey, day_xp AS dayXp FROM xp WHERE guild_id = ? AND user_id = ?",
+);
+const xpUpsertStmt = db.prepare(`
+  INSERT INTO xp (guild_id, user_id, xp, messages, last_ts, day_key, day_xp)
+  VALUES (@g, @u, @xp, @messages, @lastTs, @dayKey, @dayXp)
+  ON CONFLICT(guild_id, user_id) DO UPDATE SET
+    xp = @xp, messages = @messages, last_ts = @lastTs, day_key = @dayKey, day_xp = @dayXp
+`);
+const xpGreaterStmt = db.prepare("SELECT COUNT(*) AS c FROM xp WHERE guild_id = ? AND xp > ?");
+const xpTotalStmt = db.prepare("SELECT COUNT(*) AS c FROM xp WHERE guild_id = ?");
+const xpBoardStmt = db.prepare(
+  "SELECT user_id AS id, xp, messages FROM xp WHERE guild_id = ? AND xp > 0 ORDER BY xp DESC LIMIT ?",
+);
+const xpDelUserStmt = db.prepare("DELETE FROM xp WHERE guild_id = ? AND user_id = ?");
+const xpDelGuildStmt = db.prepare("DELETE FROM xp WHERE guild_id = ?");
+const xpInsertIgnoreStmt = db.prepare(
+  "INSERT OR IGNORE INTO xp (guild_id, user_id, xp, messages, last_ts, day_key, day_xp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+);
+
+function getUserRow(guildId, userId) {
+  return xpGetStmt.get(String(guildId), String(userId)) ?? null;
+}
+
+function blankUser() {
+  return { xp: 0, messages: 0, lastTs: 0, dayKey: "", dayXp: 0 };
+}
+
+function saveUserRow(guildId, userId, u) {
+  xpUpsertStmt.run({
+    g: String(guildId),
+    u: String(userId),
+    xp: Math.max(0, Math.floor(u.xp || 0)),
+    messages: Math.floor(u.messages || 0),
+    lastTs: Math.floor(u.lastTs || 0),
+    dayKey: u.dayKey ?? "",
+    dayXp: Math.floor(u.dayXp || 0),
+  });
+}
+
+// ---------- Migration unique : doc kv "levels".users -> table xp ----------
+migrateUsersToTable();
+function migrateUsersToTable() {
+  if (!runOnce("levelsXpTable")) return;
+  const doc = loadDoc(KEY, { guilds: {} });
+  if (!doc.guilds) return;
+  let migrated = 0;
+  const tx = db.transaction(() => {
+    for (const [gid, g] of Object.entries(doc.guilds)) {
+      const users = g.users || {};
+      for (const [uid, u] of Object.entries(users)) {
+        xpInsertIgnoreStmt.run(
+          String(gid),
+          String(uid),
+          Math.max(0, Math.floor(u.xp || 0)),
+          Math.floor(u.messages || 0),
+          Math.floor(u.lastTs || 0),
+          u.dayKey ?? "",
+          Math.floor(u.dayXp || 0),
+        );
+        migrated++;
+      }
+      delete g.users; // la config seule reste dans le doc kv
+    }
+  });
+  tx();
+  saveDoc(KEY, doc);
+  cache = null; // force le rechargement de la version nettoyée
+  if (migrated) console.log(`Migration XP -> table xp (${migrated} membre(s)).`);
 }
 
 // ---------- Courbe de niveaux (style MEE6) ----------
@@ -142,10 +193,7 @@ export async function setReward(guildId, level, roleId) {
 }
 
 // Calcule le "plan" de roles de recompense pour un membre a un niveau donne.
-// Renvoie { desired: string[], all: string[] } :
-//  - all    : tous les roleId de recompense configures (pour savoir lesquels nettoyer)
-//  - desired : ceux que le membre devrait avoir a ce niveau
-// Respecte stackRewards (cumul de tous les paliers atteints, ou seulement le plus haut).
+// Renvoie { desired: string[], all: string[] }. Respecte stackRewards.
 export async function rewardRolePlan(guildId, level) {
   const g = await getGuild(guildId);
   const entries = Object.entries(g.config.rewards)
@@ -159,11 +207,9 @@ export async function rewardRolePlan(guildId, level) {
   if (g.config.stackRewards) {
     desired = reached.map((e) => e.roleId);
   } else {
-    // Un seul role : celui du palier atteint le plus eleve.
     const top = reached[reached.length - 1];
     desired = top ? [top.roleId] : [];
   }
-  // Dedoublonne (deux niveaux peuvent pointer le meme role).
   return { desired: [...new Set(desired)], all: [...new Set(all)] };
 }
 
@@ -174,10 +220,10 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Applique le plafond d'XP/jour : reset si nouveau jour, puis borne le gain au reste autorise.
-// Met a jour user.dayKey / user.dayXp. Renvoie le gain effectif (>= 0).
-function applyDailyCap(g, user, gain) {
-  const cap = Math.max(0, Math.floor(g.config.dailyXpCap || 0));
+// Applique le plafond d'XP/jour : reset si nouveau jour, puis borne le gain au reste autorisé.
+// Met à jour user.dayKey / user.dayXp. Renvoie le gain effectif (>= 0).
+function applyDailyCap(cfg, user, gain) {
+  const cap = Math.max(0, Math.floor(cfg.dailyXpCap || 0));
   const day = todayKey();
   if (user.dayKey !== day) {
     user.dayKey = day;
@@ -194,10 +240,7 @@ function applyDailyCap(g, user, gain) {
 }
 
 /**
- * Calcule le multiplicateur d'XP a appliquer pour un gain, selon la config :
- *  - 0 si le salon est dans noXpChannels (aucune XP)
- *  - x weekendBonus le week-end (samedi/dimanche)
- *  - x boosterMultiplier si le membre a le role bonus
+ * Calcule le multiplicateur d'XP à appliquer pour un gain, selon la config.
  * @param ctx { channelId?, roleIds?: string[] }
  */
 export async function computeXpMultiplier(guildId, { channelId = "", roleIds = [] } = {}) {
@@ -217,7 +260,7 @@ export async function computeXpMultiplier(guildId, { channelId = "", roleIds = [
 
 /**
  * Comptabilise un message d'un membre.
- * Renvoie null si en cooldown / desactive, sinon { level, leveledUp, oldLevel, xp }.
+ * Renvoie null si en cooldown / désactivé, sinon { level, leveledUp, oldLevel, xp, gain }.
  */
 export async function addMessageXp(guildId, userId, multiplier = 1) {
   const g = await getGuild(guildId);
@@ -225,13 +268,12 @@ export async function addMessageXp(guildId, userId, multiplier = 1) {
   if (multiplier <= 0) return null; // salon sans XP
 
   const now = Date.now();
-  const user = g.users[userId] ?? { xp: 0, messages: 0, lastTs: 0 };
+  const user = getUserRow(guildId, userId) ?? blankUser();
   const cooldownMs = Math.max(0, g.config.cooldownSec) * 1000;
   if (now - (user.lastTs ?? 0) < cooldownMs) {
     // Toujours compter le message, mais pas d'XP en periode de cooldown.
     user.messages += 1;
-    g.users[userId] = user;
-    scheduleSave();
+    saveUserRow(guildId, userId, user);
     return null;
   }
 
@@ -239,41 +281,31 @@ export async function addMessageXp(guildId, userId, multiplier = 1) {
   const min = Math.min(g.config.minXp, g.config.maxXp);
   const max = Math.max(g.config.minXp, g.config.maxXp);
   const baseGain = Math.floor(Math.random() * (max - min + 1)) + min;
-  const gain = applyDailyCap(g, user, Math.max(0, Math.round(baseGain * multiplier)));
+  const gain = applyDailyCap(g.config, user, Math.max(0, Math.round(baseGain * multiplier)));
 
   user.xp += gain;
   user.messages += 1;
   user.lastTs = now;
-  g.users[userId] = user;
+  saveUserRow(guildId, userId, user);
 
   const newLevel = levelFromTotalXp(user.xp).level;
-  scheduleSave();
-
-  return {
-    leveledUp: newLevel > oldLevel,
-    oldLevel,
-    level: newLevel,
-    xp: user.xp,
-    gain,
-  };
+  return { leveledUp: newLevel > oldLevel, oldLevel, level: newLevel, xp: user.xp, gain };
 }
 
-// Accorde une quantite fixe d'XP (utilise pour le vocal, sans cooldown).
-// Renvoie { leveledUp, oldLevel, level, xp } ou null si XP desactivee.
+// Accorde une quantité fixe d'XP (vocal, sans cooldown).
+// Renvoie { leveledUp, oldLevel, level, xp } ou null si XP désactivée.
 export async function addVoiceXp(guildId, userId, amount, multiplier = 1) {
   const g = await getGuild(guildId);
   if (!g.config.enabled || !g.config.voiceEnabled) return null;
   if (amount <= 0 || multiplier <= 0) return null;
 
-  const user = g.users[userId] ?? { xp: 0, messages: 0, lastTs: 0 };
+  const user = getUserRow(guildId, userId) ?? blankUser();
   const oldLevel = levelFromTotalXp(user.xp).level;
-  const gain = applyDailyCap(g, user, Math.max(0, Math.round(amount * multiplier)));
+  const gain = applyDailyCap(g.config, user, Math.max(0, Math.round(amount * multiplier)));
   user.xp += gain;
-  g.users[userId] = user;
+  saveUserRow(guildId, userId, user);
 
   const newLevel = levelFromTotalXp(user.xp).level;
-  scheduleSave();
-
   return { leveledUp: newLevel > oldLevel, oldLevel, level: newLevel, xp: user.xp };
 }
 
@@ -289,11 +321,8 @@ function xpBar(value, max, size = 14) {
 const NF = new Intl.NumberFormat("fr-FR");
 
 /**
- * Construit l'embed d'annonce de montee de niveau pour un membre.
- * @param stats (optionnel) { rank, totalMembers, xp, xpIntoLevel, xpForNext } pour la barre/les champs.
- * Renvoie { embed, tierCrossed } :
- *   - tierCrossed : le palier (SERVER_LEVEL_TIERS) franchi durant cette montee, ou null.
- * Un palier est franchi si son niveau est dans l'intervalle (oldLevel, level].
+ * Construit l'embed d'annonce de montée de niveau pour un membre.
+ * Renvoie { embed, tierCrossed }.
  */
 export function buildLevelUpAnnounce(guild, member, level, oldLevel, stats = null) {
   const tierCrossed = SERVER_LEVEL_TIERS.find((t) => t.level > (oldLevel ?? level - 1) && t.level <= level) || null;
@@ -301,7 +330,6 @@ export function buildLevelUpAnnounce(guild, member, level, oldLevel, stats = nul
   const color = (tierCrossed ?? reachedTier)?.color ?? 0xfee75c;
   const avatar = member.displayAvatarURL({ extension: "png", size: 128 });
 
-  // En-tete compact : avatar + pseudo + niveau/palier sur une seule ligne.
   const author = {
     name: tierCrossed
       ? `🏆 ${member.displayName} • ${tierCrossed.name} débloqué !`
@@ -313,7 +341,6 @@ export function buildLevelUpAnnounce(guild, member, level, oldLevel, stats = nul
     ? `🎉 GG <@${member.id}>, tu franchis le palier **${tierCrossed.name}** ! 🔥`
     : `Bien joué <@${member.id}>, tu passes **niveau ${level}** ✨`;
 
-  // Ligne de stats discrete (petit texte) : barre + XP + rang, tout sur une ligne.
   const lines = [congrats];
   if (stats && typeof stats.xpForNext === "number") {
     const into = Math.max(0, Math.floor(stats.xpIntoLevel || 0));
@@ -334,52 +361,51 @@ export function buildLevelUpAnnounce(guild, member, level, oldLevel, stats = nul
 }
 
 // ---------- Lecture ----------
+
 export async function getUserStats(guildId, userId) {
-  const g = await getGuild(guildId);
-  const user = g.users[userId] ?? { xp: 0, messages: 0, lastTs: 0 };
+  const row = getUserRow(guildId, userId);
+  const user = row ?? blankUser();
   const info = levelFromTotalXp(user.xp);
-  // Rang du membre dans le serveur (par XP decroissante).
-  const sorted = Object.entries(g.users).sort((a, b) => (b[1].xp ?? 0) - (a[1].xp ?? 0));
-  const rank = sorted.findIndex(([id]) => id === userId) + 1;
+  const greater = xpGreaterStmt.get(String(guildId), user.xp).c;
+  const total = xpTotalStmt.get(String(guildId)).c;
   return {
     xp: user.xp ?? 0,
     messages: user.messages ?? 0,
     level: info.level,
     xpIntoLevel: info.xpIntoLevel,
     xpForNext: info.xpForNext,
-    rank: rank > 0 ? rank : null,
-    totalMembers: sorted.length,
+    // Rang = nombre de membres avec strictement plus d'XP, +1 (null si le membre n'a pas de ligne).
+    rank: row ? greater + 1 : null,
+    totalMembers: total,
   };
 }
 
 export async function getLeaderboard(guildId, limit = 10) {
-  const g = await getGuild(guildId);
-  return Object.entries(g.users)
-    .map(([id, u]) => ({ id, xp: u.xp ?? 0, messages: u.messages ?? 0, level: levelFromTotalXp(u.xp ?? 0).level }))
-    .filter((e) => e.xp > 0)
-    .sort((a, b) => b.xp - a.xp)
-    .slice(0, limit);
+  const lim = Math.max(0, Math.floor(limit));
+  const rows = xpBoardStmt.all(String(guildId), lim);
+  return rows.map((r) => ({
+    id: r.id,
+    xp: r.xp ?? 0,
+    messages: r.messages ?? 0,
+    level: levelFromTotalXp(r.xp ?? 0).level,
+  }));
 }
 
 // ---------- Admin ----------
 
 // Definit directement l'XP totale d'un membre.
 export async function setUserXp(guildId, userId, xp) {
-  const g = await getGuild(guildId);
-  const user = g.users[userId] ?? { xp: 0, messages: 0, lastTs: 0 };
+  const user = getUserRow(guildId, userId) ?? blankUser();
   user.xp = Math.max(0, Math.floor(xp));
-  g.users[userId] = user;
-  await saveNow();
+  saveUserRow(guildId, userId, user);
   return getUserStats(guildId, userId);
 }
 
 // Ajoute (ou retire si negatif) de l'XP a un membre.
 export async function addUserXp(guildId, userId, delta) {
-  const g = await getGuild(guildId);
-  const user = g.users[userId] ?? { xp: 0, messages: 0, lastTs: 0 };
+  const user = getUserRow(guildId, userId) ?? blankUser();
   user.xp = Math.max(0, (user.xp ?? 0) + Math.floor(delta));
-  g.users[userId] = user;
-  await saveNow();
+  saveUserRow(guildId, userId, user);
   return getUserStats(guildId, userId);
 }
 
@@ -390,14 +416,11 @@ export async function setUserLevel(guildId, userId, level) {
 
 // Remet a zero l'XP d'un membre, ou de tout le serveur si userId est null.
 export async function resetLevels(guildId, userId = null) {
-  const g = await getGuild(guildId);
   if (userId) {
-    const existed = Boolean(g.users[userId]);
-    delete g.users[userId];
-    await saveNow();
+    const existed = Boolean(getUserRow(guildId, userId));
+    xpDelUserStmt.run(String(guildId), String(userId));
     return existed;
   }
-  g.users = {};
-  await saveNow();
+  xpDelGuildStmt.run(String(guildId));
   return true;
 }

@@ -17,6 +17,10 @@ export const config = {
   // Pages de 50 joueurs : 500 pages = top ~25 000 classes 1v1. Mets 0 pour desactiver.
   leaderboardSyncPages: Number(process.env.LEADERBOARD_SYNC_PAGES || 500),
   leaderboardSyncIntervalMinutes: Number(process.env.LEADERBOARD_SYNC_INTERVAL_MINUTES || 180),
+  // Sync incrementale : pages "chaudes" (haut du classement) resynchronisees a CHAQUE cycle,
+  // + un bloc de pages "profondes" balayees par rotation entre cycles (doux pour l'API).
+  leaderboardSyncShallowPages: Number(process.env.LEADERBOARD_SYNC_SHALLOW_PAGES || 20),
+  leaderboardSyncDeepChunk: Number(process.env.LEADERBOARD_SYNC_DEEP_CHUNK || 80),
   // Salon ou sont envoyees les demandes de validation (vide = liaison directe sans modo).
   reviewChannelId: process.env.REVIEW_CHANNEL_ID || "",
   // Role autorise a valider/refuser (vide = permission "Manage Guild" requise a la place).
@@ -207,3 +211,11 @@ export const SERVER_LEVEL_TIERS = [
   { level: 70, name: "Niveau 70", color: 0x4ea1ff },
   { level: 100, name: "Niveau 100", color: 0x9b59b6 },
 ];
+
+// ---------- ROLES DE RECOMPENSE DE SAISON ----------
+// Badges PERMANENTS attribues en fin de saison selon le plus haut tier atteint.
+// Ex: "🏅 S3 Diamond". Ne sont PAS dans managedRoleNames/seasonalRoleNames (jamais retires).
+export const SEASON_ROLE_COLOR = 0xffd700;
+export function seasonRoleName(season, tier) {
+  return `🏅 S${season} ${tier}`;
+}

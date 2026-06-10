@@ -25,6 +25,8 @@ import { handleClipMessage, handleClipReaction } from "./clips.js";
 import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
+import { runWeeklyRecap } from "./progression.js";
+import { grantAchievements } from "./achievements.js";
 import {
   getTournament,
   matchesNeedingChannels,
@@ -174,6 +176,14 @@ client.once(Events.ClientReady, async (c) => {
   // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
   setInterval(() => tournamentTick(guild).catch(() => {}), 60 * 1000);
 
+  // Récap hebdo de progression : vérifié toutes les heures, posté une fois par semaine.
+  const recapTick = () =>
+    runWeeklyRecap(client, guild.id)
+      .then((r) => r.posted && console.log(`Récap hebdo posté (${r.count} progression(s)).`))
+      .catch(() => {});
+  setInterval(recapTick, 60 * 60 * 1000);
+  recapTick();
+
   // Démarre le dashboard web (si configuré).
   try {
     startWebServer(client);
@@ -256,32 +266,57 @@ async function handleLevelUp(guild, member, level, oldLevel, fallbackChannel) {
   if (!member) return; // pas de membre = on ne peut ni donner de role ni mentionner proprement
   await applyRewardRoles(member, level);
 
-  const cfg = await getLevelConfig(guild.id);
-  if (cfg.announceMode === "off") return;
-
-  const stats = await getUserStats(guild.id, member.id).catch(() => null);
-  const { embed, tierCrossed } = buildLevelUpAnnounce(guild, member, level, oldLevel, stats);
-
-  // Mode DM : embed prive, sans mention (la personne est deja la destinataire).
-  if (cfg.announceMode === "dm") {
-    await member.send({ embeds: [embed] }).catch(() => {});
-    return;
+  // Achievements liés au niveau (best-effort) — peut débloquer "Niveau 10/50".
+  let freshAch = [];
+  try {
+    freshAch = grantAchievements(guild.id, member.id, { level });
+  } catch {
+    /* best-effort */
   }
 
-  // Ping UNIQUEMENT au passage d'un palier. Sinon, la mention dans l'embed n'alerte pas.
-  const payload = tierCrossed
-    ? { content: `<@${member.id}>`, embeds: [embed], allowedMentions: { users: [member.id] } }
-    : { embeds: [embed], allowedMentions: { parse: [] } };
+  const cfg = await getLevelConfig(guild.id);
 
-  try {
-    if (cfg.announceChannelId) {
-      const ch = await guild.channels.fetch(cfg.announceChannelId).catch(() => null);
-      if (ch?.isTextBased?.()) await ch.send(payload);
-    } else if (fallbackChannel?.isTextBased?.()) {
-      await fallbackChannel.send(payload);
+  // Résout le salon d'annonce (mode "channel" : salon dédié, sinon le salon courant).
+  const resolveChannel = async () => {
+    if (cfg.announceChannelId) return guild.channels.fetch(cfg.announceChannelId).catch(() => null);
+    return fallbackChannel ?? null;
+  };
+
+  if (cfg.announceMode !== "off") {
+    const stats = await getUserStats(guild.id, member.id).catch(() => null);
+    const { embed, tierCrossed } = buildLevelUpAnnounce(guild, member, level, oldLevel, stats);
+
+    if (cfg.announceMode === "dm") {
+      // Mode DM : embed prive, sans mention (la personne est deja la destinataire).
+      await member.send({ embeds: [embed] }).catch(() => {});
+    } else {
+      // Ping UNIQUEMENT au passage d'un palier. Sinon, la mention dans l'embed n'alerte pas.
+      const payload = tierCrossed
+        ? { content: `<@${member.id}>`, embeds: [embed], allowedMentions: { users: [member.id] } }
+        : { embeds: [embed], allowedMentions: { parse: [] } };
+      try {
+        const ch = await resolveChannel();
+        if (ch?.isTextBased?.()) await ch.send(payload);
+      } catch {
+        /* annonce best-effort */
+      }
     }
-  } catch {
-    /* annonce best-effort */
+  }
+
+  // Annonce des nouveaux achievements débloqués (best-effort).
+  if (freshAch.length) {
+    const txt = freshAch.map((a) => `${a.emoji} **${a.name}**`).join(" · ");
+    const content = `🏅 <@${member.id}> débloque : ${txt} !`;
+    try {
+      if (cfg.announceMode === "dm") {
+        await member.send(content).catch(() => {});
+      } else if (cfg.announceMode !== "off") {
+        const ch = await resolveChannel();
+        if (ch?.isTextBased?.()) await ch.send({ content, allowedMentions: { users: [member.id] } });
+      }
+    } catch {
+      /* best-effort */
+    }
   }
 }
 

@@ -39,7 +39,7 @@ export function seasonalRoleNames() {
   return names;
 }
 
-async function ensureRole(guild, name, color) {
+export async function ensureRole(guild, name, color) {
   let role = guild.roles.cache.find((r) => r.name === name);
   if (!role) {
     role = await guild.roles.create({

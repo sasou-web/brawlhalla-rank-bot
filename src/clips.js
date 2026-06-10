@@ -1,4 +1,5 @@
 import { loadDoc, saveDoc } from "./db.js";
+import { incrCounter, grantAchievements } from "./achievements.js";
 
 const KEY = "clips";
 
@@ -150,6 +151,15 @@ export async function handleClipMessage(message) {
   // Le message "qualifie" pour des reactions si on ne filtre pas, ou si c'est une video.
   if (!g.requireVideo || video) {
     if (isReply) return false; // on ne reagit pas aux reponses/commentaires
+    // Compteur de clips postés + achievements (best-effort, n'empêche pas les réactions).
+    try {
+      if (message.author?.id && !message.author.bot) {
+        const n = incrCounter(message.guild.id, message.author.id, "clips");
+        grantAchievements(message.guild.id, message.author.id, { clips: n });
+      }
+    } catch {
+      /* best-effort */
+    }
     for (const emoji of g.reactions) {
       try {
         await message.react(emoji);

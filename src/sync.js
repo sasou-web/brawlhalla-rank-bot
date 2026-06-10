@@ -4,6 +4,7 @@ import { setLink, getLink } from "./store.js";
 import { getSettings } from "./settings.js";
 import { tierIndex, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
 import { recordRating } from "./ratingStore.js";
+import { grantAchievements, getCounter } from "./achievements.js";
 
 /**
  * Recupere le profil d'un joueur, applique tous ses roles (tiers, niveau, top),
@@ -65,6 +66,20 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
 
   // Role "main legende" : legende la plus jouee (stats globales). Best-effort.
   await applyMainLegend(member, profile);
+
+  // Achievements liés au rank/niveau/top (silencieux ici : éviter le spam au refresh global).
+  try {
+    grantAchievements(member.guild.id, member.id, {
+      linked: true,
+      tier1v1: tiers?.["1v1"] ?? null,
+      tier2v2: tiers?.["2v2"] ?? null,
+      level,
+      globalRank,
+      clips: getCounter(member.guild.id, member.id, "clips"),
+    });
+  } catch {
+    /* best-effort */
+  }
 
   return { profile, tiers, ratings: profile.ratings, level, globalRank, region, ...result };
 }

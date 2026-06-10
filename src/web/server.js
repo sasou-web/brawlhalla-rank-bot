@@ -35,7 +35,7 @@ import { getAllLinks } from "../store.js";
 import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos } from "../combos.js";
 import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
-import { getPlayerProfile } from "../brawlhalla.js";
+import { getPlayerProfile, getApiMetrics } from "../brawlhalla.js";
 import { setupRankVoiceChannels } from "../rankvoice.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -323,6 +323,15 @@ export function startWebServer(client) {
   app.get("/api/logs", requireAdmin, (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 200, 400);
     res.json({ lines: getRecentLogs(limit) });
+  });
+
+  // Métriques de fiabilité de l'API Brawlhalla (taux de succès, erreurs, cooldown, files, index).
+  app.get("/api/metrics", requireAdmin, async (req, res) => {
+    try {
+      res.json(await getApiMetrics());
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Envoi d'un message de bienvenue de test (pour l'admin connecte).

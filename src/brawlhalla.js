@@ -2,6 +2,7 @@ import { config, TIERS, RANKED_TIERS, BH_API_BASE } from "./config.js";
 import { getProfileEntry, setProfileEntry, getWarmIds } from "./profileStore.js";
 import { getSearchEntry, setSearchEntry } from "./searchStore.js";
 import { upsertPlayers, searchLocalPlayers, markSynced, getIndexStats, getLocalPlayer } from "./leaderboardStore.js";
+import { recordOutcome, recordRetry, recordCooldown, snapshot as metricsSnapshot } from "./apiMetrics.js";
 
 /**
  * Client de l'API officielle Brawlhalla v1.
@@ -107,8 +108,10 @@ async function apiGet(path, params = {}, deadline = null, attempt = 0) {
   try {
     res = await throttledFetch(url);
   } catch (err) {
+    recordOutcome("networkErrors", { message: err.message });
     // Erreur reseau : on reessaie avec backoff exponentiel tant qu'il reste du budget.
     if (Date.now() < deadline) {
+      recordRetry();
       await sleep((backoffSeconds(attempt, params) + 0.05) * 1000);
       return apiGet(path, params, deadline, attempt + 1);
     }
@@ -117,16 +120,19 @@ async function apiGet(path, params = {}, deadline = null, attempt = 0) {
 
   // 429 (rate limit) ou 5xx (origine Brawlhalla qui tombe par fenetres).
   if (res.status === 429 || res.status >= 500) {
+    recordOutcome(res.status === 429 ? "rateLimited" : "serverErrors", { status: res.status });
     const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
 
     // 429 / 503 = on est explicitement limites : on pose un cooldown GLOBAL (toutes les
     // requetes du bot patientent), borne a COOLDOWN_CAP_MS pour ne pas tout figer.
     if (res.status === 429 || res.status === 503) {
+      recordCooldown();
       const cd = Math.min(COOLDOWN_CAP_MS, (retryAfter ?? backoffSeconds(attempt, params)) * 1000);
       cooldownUntil = Math.max(cooldownUntil, Date.now() + cd);
     }
 
     if (Date.now() < deadline) {
+      recordRetry();
       const waitS = retryAfter ?? backoffSeconds(attempt, params);
       await sleep((waitS + 0.05) * 1000);
       return apiGet(path, params, deadline, attempt + 1);
@@ -137,12 +143,14 @@ async function apiGet(path, params = {}, deadline = null, attempt = 0) {
     throw e;
   }
   if (!res.ok) {
+    recordOutcome(res.status === 404 ? "notFound" : "otherClient", { status: res.status });
     const body = await res.text().catch(() => "");
     const short = body.slice(0, 120);
     const e = new Error(`HTTP ${res.status} sur ${path}${short ? ` : ${short}` : ""}`);
     e.status = res.status;
     throw e;
   }
+  recordOutcome("ok", { status: res.status });
   return res.json();
 }
 
@@ -217,7 +225,7 @@ export function resolveBaseTier(rating, rawTier) {
  * Gere les deux formes possibles de l'API : champ "players[0]" (recherche/equipes)
  * ou champs a plat (brawlhalla_id / name) selon les versions/endpoints.
  */
-function mapRankingEntry(r) {
+export function mapRankingEntry(r) {
   const p = r?.players?.[0] ?? r ?? {};
   return {
     id: p.id ?? p.brawlhalla_id ?? r?.brawlhalla_id,
@@ -306,41 +314,105 @@ export async function searchPlayers(name, limit = 5) {
 }
 
 /**
+ * Planifie les pages à synchroniser pour un cycle (fonction PURE, testable).
+ *  - pages "chaudes" 1..shallow : toujours incluses (haut du classement, très volatil)
+ *  - pages "profondes" : un bloc de `deepChunk` pages, en rotation via `deepCursor`,
+ *    pour couvrir tout le classement sur plusieurs cycles sans marteler l'API.
+ * `knownMaxPage` (>0) borne la zone profonde à la dernière page réellement peuplée.
+ * Renvoie { pages: number[], nextCursor }.
+ */
+export function planLeaderboardSync({ maxPages, shallowPages, deepChunk, knownMaxPage = 0, deepCursor = 0 }) {
+  const cap = knownMaxPage > 0 ? Math.min(maxPages, knownMaxPage) : maxPages;
+  const shallow = Math.min(cap, Math.max(0, shallowPages || 0));
+  const pages = [];
+  for (let p = 1; p <= shallow; p++) pages.push(p);
+
+  const deepCount = Math.max(0, cap - shallow);
+  let nextCursor = deepCursor;
+  if (deepCount > 0 && deepChunk > 0) {
+    const take = Math.min(deepChunk, deepCount);
+    const start = (((deepCursor % deepCount) + deepCount) % deepCount);
+    for (let i = 0; i < take; i++) pages.push(shallow + 1 + ((start + i) % deepCount));
+    nextCursor = (start + take) % deepCount;
+  }
+  return { pages, nextCursor };
+}
+
+// Etat de la rotation incrementale (persiste pour la duree du process).
+let deepCursor = 0;
+let knownMaxPage = 0; // derniere page connue contenant des joueurs (0 = inconnu)
+
+/**
  * Synchronise l'index local des joueurs classes 1v1 (toutes regions) en arriere-plan.
  * C'est ce qui donne l'effet "instantane" facon Raybot : les recherches /lier /stats
  * tapent ensuite l'index local au lieu de l'API officielle.
- * Borne par config.leaderboardSyncPages (50 joueurs/page). Doux pour l'API (file throttlee).
+ * INCREMENTAL : top du classement rafraichi a chaque cycle, reste balaye par rotation.
  */
 export async function syncLeaderboard() {
   const maxPages = Math.max(0, config.leaderboardSyncPages || 0);
   if (maxPages === 0) return { pages: 0, players: 0 };
 
+  const { pages, nextCursor } = planLeaderboardSync({
+    maxPages,
+    shallowPages: config.leaderboardSyncShallowPages || 20,
+    deepChunk: config.leaderboardSyncDeepChunk || 80,
+    knownMaxPage,
+    deepCursor,
+  });
+  deepCursor = nextCursor;
+
   let total = 0;
   let consecutiveFails = 0;
-  for (let page = 1; page <= maxPages; page++) {
+  for (const page of pages) {
     let rankings;
     try {
       rankings = await getRankings("1v1", "ALL", page, 50);
       consecutiveFails = 0;
     } catch {
-      // Une page a echoue (apres son budget de retry). On la SAUTE et on continue, au lieu
-      // d'arreter toute la synchro. Mais si plusieurs pages echouent d'affilee, l'API est
-      // probablement HS : on abandonne ce cycle (on reprendra au prochain, dans 3h).
+      // Page en echec (apres son budget de retry) : on la SAUTE. Si plusieurs echouent
+      // d'affilee, l'API est probablement HS : on abandonne ce cycle.
       if (++consecutiveFails >= 5) break;
       await sleep(450);
       continue;
     }
-    if (!rankings.length) break; // fin du leaderboard
+    if (!rankings.length) {
+      // Page vide = au-dela du classement reel : on memorise la borne pour eviter
+      // de balayer du vide aux prochains cycles.
+      if (knownMaxPage === 0 || page - 1 < knownMaxPage) knownMaxPage = Math.max(0, page - 1);
+      await sleep(450);
+      continue;
+    }
+    if (page > knownMaxPage) knownMaxPage = page; // on a vu des donnees plus loin que prevu
     const players = rankings.map(mapRankingEntry).filter((p) => p.id);
     await upsertPlayers(players);
     total += players.length;
-    await sleep(450); // pause douce entre pages : evite de se faire rate-limiter sur une longue synchro
+    await sleep(450); // pause douce entre pages : evite de se faire rate-limiter
   }
   if (total > 0) await markSynced();
-  return { players: total };
+  return { players: total, pages: pages.length };
 }
 
 export { getIndexStats };
+
+/**
+ * Métriques de fiabilité de l'API (pour le dashboard et /ping) :
+ * taux de succès, compteurs d'erreurs (429/5xx/réseau), cooldown global en cours,
+ * profondeur des files de récupération, et fraîcheur de l'index local du leaderboard.
+ */
+export async function getApiMetrics() {
+  const now = Date.now();
+  const index = await getIndexStats().catch(() => ({ count: 0, syncedAt: 0 }));
+  return metricsSnapshot({
+    cooldownActiveMs: Math.max(0, cooldownUntil - now),
+    pendingProfiles: pendingProfiles.size,
+    pendingSearches: pendingSearches.size,
+    index: {
+      count: index.count,
+      syncedAt: index.syncedAt || 0,
+      ageMs: index.syncedAt ? now - index.syncedAt : null,
+    },
+  });
+}
 
 /**
  * Recupere un profil consolide d'un joueur en 3 appels paralleles :
@@ -508,11 +580,24 @@ async function fetchPlayerProfile(brawlhallaId) {
   // fiable -> on propage l'erreur pour declencher le repli (cache / index local) en amont.
   if (rankedR.status === "rejected") throw rankedR.reason ?? new Error("Profil 1v1 indisponible");
 
-  const ranked = rankedR.value;
   const teamsData = teamsR.status === "fulfilled" ? teamsR.value : null;
   const all = allR.status === "fulfilled" ? allR.value : null;
   const partial = teamsR.status === "rejected" || allR.status === "rejected";
 
+  return buildPlayerProfile(brawlhallaId, { ranked: rankedR.value, teamsData, all, partial });
+}
+
+/**
+ * Construit la fiche joueur consolidee a partir des reponses BRUTES de l'API (fonction PURE,
+ * testable sans reseau) :
+ *  - ranked   : /player/stats?mode=ranked_1v1 (rating/tier/region/peak/rang + legendes classees)
+ *  - teamsData: /player/teams (equipes 2v2)
+ *  - all      : /player/stats?mode=all (niveau, games/wins totaux, stats par legende)
+ *  - partial  : true si un appel secondaire (teams/all) a echoue
+ * Le tier 2v2 retenu est celui de l'equipe au plus haut rating. Valhallan est deduit par
+ * resolveBaseTier quand l'API renvoie un tier vide sur un rating eleve.
+ */
+export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = null, all = null, partial = false } = {}) {
   const rating1v1 = ranked?.rating ?? 0;
   const tier1v1 = resolveBaseTier(rating1v1, ranked?.tier);
 
@@ -556,11 +641,15 @@ export async function getRankings(gameMode = "1v1", region = "ALL", page = 1, ma
 }
 
 let legendsCache = null;
+let legendsCacheTs = 0;
+// TTL du cache des legendes : sans expiration, un nouveau personnage Brawlhalla
+// n'apparaitrait qu'apres un redemarrage du bot. 24h est un bon compromis.
+const LEGENDS_TTL_MS = 24 * 60 * 60 * 1000;
 /**
- * Renvoie une Map legend_id -> { name, weaponOne, weaponTwo }, mise en cache.
+ * Renvoie une Map legend_id -> { name, weaponOne, weaponTwo }, mise en cache (TTL 24h).
  */
 export async function getLegends() {
-  if (legendsCache) return legendsCache;
+  if (legendsCache && Date.now() - legendsCacheTs < LEGENDS_TTL_MS) return legendsCache;
   const map = new Map();
   let page = 1;
   let totalPages = 1;
@@ -576,8 +665,14 @@ export async function getLegends() {
     totalPages = data?.total_pages ?? 1;
     page += 1;
   } while (page <= totalPages);
-  legendsCache = map;
-  return map;
+  // Ne remplace le cache que si on a bien recupere des legendes (evite de vider sur un echec partiel).
+  if (map.size > 0) {
+    legendsCache = map;
+    legendsCacheTs = Date.now();
+    return map;
+  }
+  // Repli : si l'appel n'a rien donne mais qu'on a un ancien cache, on le garde.
+  return legendsCache ?? map;
 }
 
 // ---------- Glory (formule reprise de corehalla/bhapi calculator.ts) ----------
