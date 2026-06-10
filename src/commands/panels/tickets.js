@@ -26,6 +26,7 @@ import {
   setTicketClaim,
   countOpenByOwner,
   buildTicketPanelPayload,
+  buildTicketBody,
   parseColor,
 } from "../../tickets.js";
 import { EPHEMERAL, logAudit } from "../shared.js";
@@ -301,24 +302,6 @@ async function openTicket(interaction, topicId) {
   return interaction.showModal(modal);
 }
 
-// Description de bienvenue affichée dans le salon de ticket (avec lien ToS éventuel).
-function buildTicketWelcome(cfg) {
-  let d = cfg.ticketWelcome || "Merci de patienter, un membre du staff va prendre en charge ton ticket.";
-  if (cfg.tosUrl) d += ` Merci de respecter nos [Terms of Service](${cfg.tosUrl}).`;
-  return d;
-}
-
-// Champs de l'embed de ticket : motif, demande du membre, et infos complémentaires.
-function buildTicketFields(topic, subject, cfg) {
-  const fields = [
-    { name: "📌 Motif", value: topic ? `${topic.emoji || "•"} ${topic.label}` : "Général" },
-    { name: "📝 Demande", value: subject.slice(0, 1024) },
-  ];
-  const info = (topic && topic.message) || cfg.ticketInfo;
-  if (info && info.trim()) fields.push({ name: "ℹ️ Informations", value: info.slice(0, 1024) });
-  return fields;
-}
-
 // Slug court et propre à partir du libellé d'un motif (sans accents, minuscules).
 function slugifyTopic(s) {
   return (
@@ -422,10 +405,8 @@ async function createTicketChannel(interaction, topicId, subject) {
   const embed = new EmbedBuilder()
     .setColor(parseColor(cfg.panelColor))
     .setTitle((cfg.ticketTitle || "🎫 Support Ticket").slice(0, 256))
-    .setDescription(buildTicketWelcome(cfg).slice(0, 4000))
-    .addFields(buildTicketFields(topic, subject, cfg))
-    .setFooter({ text: `Ticket #${number} • Ouvert par ${interaction.user.tag}` })
-    .setTimestamp();
+    .setDescription(buildTicketBody(cfg, { topic, subject, ownerId: interaction.user.id }))
+    .setFooter({ text: `Ticket #${number}` });
   if (cfg.thumbnailUrl) embed.setThumbnail(cfg.thumbnailUrl);
 
   const controls = new ActionRowBuilder().addComponents(

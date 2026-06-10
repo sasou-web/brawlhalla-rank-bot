@@ -200,24 +200,16 @@ function resolveEmoji(e) {
   return undefined;
 }
 
+// Ligne de séparation visuelle entre sections (style "sexy" type boutique).
+const DIVIDER = "──────────────────────────────";
+
 function buildDescription(cfg) {
-  let d = cfg.panelDescription || "Clique pour ouvrir un ticket privé avec le staff.";
-  if (cfg.tosUrl) d += `\n\n📜 [Terms of Service](${cfg.tosUrl})`;
-  return d.slice(0, 4000);
-}
-
-/** Payload Discord (embeds + components) du panneau public de tickets, à partir de la config. */
-export function buildTicketPanelPayload(cfg) {
-  const embed = new EmbedBuilder()
-    .setColor(parseColor(cfg.panelColor))
-    .setTitle((cfg.panelTitle || "🎫 Support & Tickets").slice(0, 256))
-    .setDescription(buildDescription(cfg));
-
-  if (cfg.thumbnailUrl) embed.setThumbnail(cfg.thumbnailUrl);
-  if (cfg.bannerUrl) embed.setImage(cfg.bannerUrl);
+  const parts = [];
+  parts.push(cfg.panelDescription || "Clique pour ouvrir un ticket privé avec le staff.");
 
   if (cfg.rulesText && cfg.rulesText.trim()) {
-    embed.addFields({ name: "📌 À lire avant d'ouvrir un ticket", value: cfg.rulesText.slice(0, 1024) });
+    parts.push(DIVIDER);
+    parts.push(`📋 **Étapes à suivre**\n${cfg.rulesText.trim()}`);
   }
 
   const topics = Array.isArray(cfg.topics) ? cfg.topics : [];
@@ -226,10 +218,36 @@ export function buildTicketPanelPayload(cfg) {
     .map((t) => `${t.emoji || "•"} **${t.label}** → ${t.description}`)
     .join("\n");
   if (optionsText) {
-    embed.addFields({ name: "🎫 Options de ticket", value: optionsText.slice(0, 1024) });
+    parts.push(DIVIDER);
+    parts.push(`🎫 **Options de ticket**\n${optionsText}`);
   }
 
+  parts.push(DIVIDER);
+  let footer = "🚀 Choisis un motif dans le menu ci-dessous pour ouvrir un ticket.";
+  if (cfg.tosUrl) footer += `\n📜 [Terms of Service](${cfg.tosUrl})`;
+  parts.push(footer);
+
+  return parts.join("\n\n").slice(0, 4096);
+}
+
+/** Payload Discord (embeds + components) du panneau public de tickets, à partir de la config. */
+export function buildTicketPanelPayload(cfg) {
+  const color = parseColor(cfg.panelColor);
+  const embeds = [];
+
+  // Bannière dans un embed SÉPARÉ placé en premier : Discord l'affiche AU-DESSUS du contenu
+  // (un setImage classique apparaîtrait en bas). Même couleur => bordure continue "sexy".
+  if (cfg.bannerUrl) embeds.push(new EmbedBuilder().setColor(color).setImage(cfg.bannerUrl));
+
+  const main = new EmbedBuilder()
+    .setColor(color)
+    .setTitle((cfg.panelTitle || "🎫 Support & Tickets").slice(0, 256))
+    .setDescription(buildDescription(cfg));
+  if (cfg.thumbnailUrl) main.setThumbnail(cfg.thumbnailUrl);
+  embeds.push(main);
+
   let row;
+  const topics = Array.isArray(cfg.topics) ? cfg.topics : [];
   if (topics.length) {
     const select = new StringSelectMenuBuilder()
       .setCustomId("tckopen_select")
@@ -250,5 +268,27 @@ export function buildTicketPanelPayload(cfg) {
     );
   }
 
-  return { embeds: [embed], components: [row] };
+  return { embeds, components: [row] };
+}
+
+/** Description (markdown) de l'embed posté DANS le salon de ticket : style compact + séparateurs. */
+export function buildTicketBody(cfg, { topic, subject, ownerId }) {
+  const parts = [];
+  let intro = cfg.ticketWelcome || "Merci de patienter, un membre du staff va prendre en charge ton ticket.";
+  if (cfg.tosUrl) intro += ` Merci de respecter nos [Terms of Service](${cfg.tosUrl}).`;
+  parts.push(intro);
+
+  parts.push(DIVIDER);
+  const lines = [
+    `📌 **Motif :** ${topic ? `${topic.emoji || ""} ${topic.label}`.trim() : "Général"}`,
+    `📝 **Demande :** ${subject}`,
+  ];
+  const info = (topic && topic.message) || cfg.ticketInfo;
+  if (info && info.trim()) lines.push(`\nℹ️ **Informations**\n${info.trim()}`);
+  parts.push(lines.join("\n"));
+
+  parts.push(DIVIDER);
+  parts.push(`🕓 Ouvert par <@${ownerId}> • <t:${Math.floor(Date.now() / 1000)}:f>`);
+
+  return parts.join("\n\n").slice(0, 4096);
 }
