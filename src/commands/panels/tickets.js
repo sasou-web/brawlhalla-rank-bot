@@ -319,6 +319,35 @@ function buildTicketFields(topic, subject, cfg) {
   return fields;
 }
 
+// Slug court et propre à partir du libellé d'un motif (sans accents, minuscules).
+function slugifyTopic(s) {
+  return (
+    String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // retire les accents
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20) || "ticket"
+  );
+}
+
+// Emoji utilisable dans un nom de salon : unicode uniquement (les emojis custom <:..:id> ne
+// s'affichent pas dans un nom de salon, on les ignore).
+function channelEmoji(emoji) {
+  if (!emoji || /^<a?:\w+:\d+>$/.test(emoji)) return "";
+  return emoji;
+}
+
+// Nom du salon de ticket : "🛒-devenir-vendeur-0004", ou "ticket-0004" sans motif.
+function buildTicketChannelName(topic, number) {
+  const num = String(number).padStart(4, "0");
+  if (!topic) return `ticket-${num}`;
+  const emo = channelEmoji(topic.emoji);
+  const slug = slugifyTopic(topic.label);
+  return `${emo}${emo ? "-" : ""}${slug}-${num}`.slice(0, 95);
+}
+
 async function createTicketChannel(interaction, topicId, subject) {
   const guild = interaction.guild;
   const cfg = await getTicketConfig(guild.id);
@@ -373,7 +402,7 @@ async function createTicketChannel(interaction, topicId, subject) {
   let channel;
   try {
     channel = await guild.channels.create({
-      name: `ticket-${String(number).padStart(4, "0")}`,
+      name: buildTicketChannelName(topic, number),
       type: ChannelType.GuildText,
       parent: cfg.categoryId,
       topic: `Ticket #${number} • ${interaction.user.tag} • ${topic ? topic.label : "Général"}`,
