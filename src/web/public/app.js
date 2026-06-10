@@ -240,6 +240,26 @@ function renderApp() {
       accentRow.append(dot);
     }
     $(".sidebar-foot").append(accentRow);
+
+    // Garde-fou : avertit avant de quitter/recharger la page si des modifications
+    // ne sont pas enregistrées (la navigation interne est déjà protégée par confirmModal).
+    window.addEventListener("beforeunload", (e) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+
+    // Raccourci Ctrl/Cmd+S : déclenche le bouton « Enregistrer » de la section active.
+    window.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        const saveBtn = $("#content .btn-save:not(:disabled)");
+        if (saveBtn) {
+          e.preventDefault();
+          saveBtn.click();
+        }
+      }
+    });
   }
 
   const nav = $("#nav");
@@ -722,6 +742,7 @@ function renderVocRank(content) {
         rangMin: state.rangMin,
         limite: Number(state.limite) || 0,
       });
+      setDirty(false);
       toast(r.message || "Vocaux prêts ✅", "ok");
     } catch (e) {
       toast("Erreur : " + e.message, "err");
@@ -773,6 +794,7 @@ async function renderCombos(content) {
     pub.disabled = true;
     try {
       await api("/api/combos/publish", "POST", { channelId: pubState.channelId });
+      setDirty(false);
       toast("Panneau publié ✅", "ok");
     } catch (e) {
       toast("Erreur : " + e.message, "err");
@@ -851,15 +873,18 @@ async function renderStats(content) {
   // Répartition par tier 1v1 (camembert via QuickChart).
   const entries = Object.entries(s.tierCounts || {}).sort((a, b) => b[1] - a[1]);
   if (entries.length) {
+    const light = document.body.classList.contains("light");
+    const legendColor = light ? "#16161c" : "#ccc";
+    const bkg = light ? "#ffffff" : "#0a0a0d";
     const chart = {
       type: "doughnut",
       data: {
         labels: entries.map(([t]) => t),
         datasets: [{ data: entries.map(([, n]) => n), backgroundColor: entries.map(([t]) => TIER_PALETTE[t] || "#777") }],
       },
-      options: { plugins: { legend: { position: "right", labels: { color: "#ccc" } } } },
+      options: { plugins: { legend: { position: "right", labels: { color: legendColor } } } },
     };
-    const url = "https://quickchart.io/chart?bkg=" + encodeURIComponent("#0a0a0d") + "&w=520&h=320&c=" + encodeURIComponent(JSON.stringify(chart));
+    const url = "https://quickchart.io/chart?bkg=" + encodeURIComponent(bkg) + "&w=520&h=320&c=" + encodeURIComponent(JSON.stringify(chart));
     const card = el("div", { class: "card", style: "margin-top:18px" }, el("h3", {}, "Répartition par tier (1v1)"));
     const img = el("img", { src: url, style: "max-width:100%;border-radius:12px;margin-top:10px" });
     card.append(img);
@@ -1012,9 +1037,13 @@ function renderWelcome(content) {
   );
   content.append(c4);
 
-  // Live preview : se rafraîchit à chaque édition
-  content.addEventListener("input", refreshPreview);
-  content.addEventListener("change", refreshPreview);
+  // Live preview : se rafraîchit à chaque édition. On attache les écouteurs aux
+  // cartes (recréées à chaque rendu) et non à #content (persistant) pour éviter
+  // d'empiler des listeners + des closures périmées à chaque visite de la section.
+  for (const card of [c1, c2]) {
+    card.addEventListener("input", refreshPreview);
+    card.addEventListener("change", refreshPreview);
+  }
 
   // Barre d'actions
   const save = el("button", { class: "btn-save" }, "💾 Enregistrer");

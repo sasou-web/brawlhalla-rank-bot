@@ -110,6 +110,23 @@ export function startWebServer(client) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "same-origin");
+    // Politique de sécurité du contenu. Autorise les origines réellement utilisées :
+    // Google Fonts (style + police), images Discord/QuickChart/nekos.best + URLs https
+    // saisies par l'admin (aperçus d'embed), et les appels fetch vers nekos.best.
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: https:",
+        "connect-src 'self' https://nekos.best",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+      ].join("; "),
+    );
     next();
   });
 
@@ -616,6 +633,9 @@ export function startWebServer(client) {
   });
 
   // ---- Frontend statique ----
+  // Toute route /api inconnue renvoie un 404 JSON (et non le HTML du dashboard).
+  app.use("/api", (req, res) => res.status(404).json({ error: "route inconnue" }));
+
   app.use(express.static(PUBLIC_DIR));
   app.get("*", (req, res) => res.sendFile(resolve(PUBLIC_DIR, "index.html")));
 
