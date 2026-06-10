@@ -209,6 +209,7 @@ const NAV_GROUPS = [
     { id: "tiktok", label: "TikTok", ico: "📱" },
     { id: "clips", label: "Clips", ico: "🎬" },
     { id: "combos", label: "Combos", ico: "🥊" },
+    { id: "tickets", label: "Tickets", ico: "🎫" },
   ] },
   { label: "Vocal", items: [
     { id: "tempvoice", label: "Vocaux temporaires", ico: "🔊" },
@@ -651,6 +652,7 @@ function renderSection(id) {
   if (id === "vocrank") return renderVocRank(content);
   if (id === "tournament") return renderTournament(content);
   if (id === "combos") return renderCombos(content);
+  if (id === "tickets") return renderTickets(content);
 
   const cfg = structuredClone(CONFIG[id] || {});
   const schema = sectionSchema(id, cfg);
@@ -832,6 +834,117 @@ async function renderCombos(content) {
   } catch (e) {
     body.textContent = "Erreur : " + e.message;
   }
+}
+
+// ----- Éditeur de motifs de tickets (options du menu déroulant) -----
+function topicsEditor(cfg) {
+  cfg.topics = Array.isArray(cfg.topics) ? cfg.topics : [];
+  const wrap = el("div", { style: "width:100%" });
+  const list = el("div");
+  const redraw = () => {
+    list.innerHTML = "";
+    cfg.topics.forEach((t, i) => {
+      const emo = el("input", { type: "text", value: t.emoji || "", placeholder: "🎫", style: "max-width:70px" });
+      const lab = el("input", { type: "text", value: t.label || "", placeholder: "Support" });
+      const desc = el("input", { type: "text", value: t.description || "", placeholder: "Description courte (affichée dans le menu)" });
+      emo.addEventListener("input", () => (cfg.topics[i].emoji = emo.value.trim()));
+      lab.addEventListener("input", () => (cfg.topics[i].label = lab.value));
+      desc.addEventListener("input", () => (cfg.topics[i].description = desc.value));
+      list.append(
+        el("div", { class: "hub-row", style: "flex-wrap:wrap" }, emo, lab, desc,
+          el("button", { class: "icon-btn", onclick: () => { cfg.topics.splice(i, 1); redraw(); setDirty(true); } }, "🗑")),
+      );
+    });
+    if (!cfg.topics.length) {
+      list.append(el("div", { class: "card-sub" }, "Aucun motif : un simple bouton « Ouvrir un ticket » s'affichera."));
+    }
+  };
+  const addBtn = el("button", { class: "btn-add", onclick: () => {
+    if (cfg.topics.length >= 25) return toast("Maximum 25 motifs.", "err");
+    cfg.topics.push({ label: "Nouveau motif", emoji: "🎫", description: "" });
+    redraw();
+    setDirty(true);
+  } }, "+ Ajouter un motif");
+  redraw();
+  wrap.append(list, addBtn);
+  return wrap;
+}
+
+// ----- Page Tickets (admin) -----
+function renderTickets(content) {
+  const cfg = structuredClone(CONFIG.tickets || {});
+  if (!Array.isArray(cfg.topics)) cfg.topics = [];
+
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "🎫 Tickets de support" }),
+      el("p", {}, "Panneau de support : les membres ouvrent un salon privé avec le staff via un menu déroulant de motifs.")),
+  );
+
+  // Configuration de base
+  const c1 = el("div", { class: "card" }, el("h3", {}, "Configuration"));
+  c1.append(fieldRow("Activé", "Active la création de tickets via le panneau.", toggle(cfg, "enabled")));
+  c1.append(fieldRow("Catégorie des tickets", "Où sont créés les salons de ticket.", channelSelect(cfg, "categoryId", "category")));
+  c1.append(fieldRow("Rôle staff", "Voit et gère tous les tickets (prise en charge, fermeture).", roleSelect(cfg, "staffRoleId")));
+  c1.append(fieldRow("Salon des transcripts", "Reçoit le .txt + récap à la fermeture (optionnel).", channelSelect(cfg, "logChannelId", "text")));
+  content.append(c1);
+
+  // Apparence du panneau
+  const c2 = el("div", { class: "card" }, el("h3", {}, "Apparence du panneau"));
+  c2.append(fieldRow("Titre", "", textInput(cfg, "panelTitle", "🎫 Support & Tickets")));
+  c2.append(fieldRow("Description", "Texte principal de l'embed.", textareaInput(cfg, "panelDescription", "Besoin d'aide ? Ouvre un ticket via le menu ci-dessous.")));
+  c2.append(fieldRow("Couleur", "Couleur de la barre de l'embed.", colorInput(cfg, "panelColor")));
+  c2.append(fieldRow("Image bannière (URL)", "Grande image affichée en bas de l'embed.", textInput(cfg, "bannerUrl", "https://…")));
+  c2.append(fieldRow("Vignette / logo (URL)", "Petite image en haut à droite.", textInput(cfg, "thumbnailUrl", "https://…")));
+  c2.append(fieldRow("À lire avant d'ouvrir", "Instructions affichées dans l'embed (une ligne par règle).", textareaInput(cfg, "rulesText", "• Explique ton problème directement\n• Reste respectueux et patient\n• Pas de ticket pour rien")));
+  c2.append(fieldRow("Lien Terms of Service", "Affiché comme lien dans la description (optionnel).", textInput(cfg, "tosUrl", "https://…")));
+  c2.append(fieldRow("Texte du menu déroulant", "Placeholder affiché sur le menu de motifs.", textInput(cfg, "selectPlaceholder", "Choisis un motif")));
+  content.append(c2);
+
+  // Motifs (options du menu déroulant)
+  const c3 = el("div", { class: "card" },
+    el("h3", {}, "Motifs du menu déroulant"),
+    el("div", { class: "card-sub" }, "Chaque motif = une option du menu (emoji + nom + description). Ex : Buy, Support, Replace."));
+  c3.append(topicsEditor(cfg));
+  content.append(c3);
+
+  // Publier le panneau
+  const pubState = { channelId: "" };
+  const c4 = el("div", { class: "card" },
+    el("h3", {}, "Publier le panneau"),
+    el("div", { class: "card-sub" }, "Enregistre tes réglages, puis publie le panneau de tickets dans un salon."));
+  c4.append(fieldRow("Salon", "", channelSelect(pubState, "channelId", "textann")));
+  const pub = el("button", { class: "tbtn primary", style: "margin-top:6px" }, "📌 Publier le panneau");
+  pub.addEventListener("click", async () => {
+    if (!pubState.channelId) return toast("Choisis un salon.", "err");
+    pub.disabled = true;
+    try {
+      CONFIG.tickets = await api("/api/config/tickets", "PUT", cfg);
+      setDirty(false);
+      await api("/api/tickets/publish", "POST", { channelId: pubState.channelId });
+      toast("Panneau publié ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    pub.disabled = false;
+  });
+  c4.append(el("div", {}, pub));
+  content.append(c4);
+
+  // Enregistrer
+  const btn = el("button", { class: "btn-save" }, "💾 Enregistrer");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      CONFIG.tickets = await api("/api/config/tickets", "PUT", cfg);
+      setDirty(false);
+      toast("Modifications enregistrées ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    btn.disabled = false;
+  });
+  content.append(el("div", { class: "save-bar" }, btn));
 }
 
 function renderOverview(content) {

@@ -25,6 +25,7 @@ import {
   getOpenTicket,
   setTicketClaim,
   countOpenByOwner,
+  buildTicketPanelPayload,
 } from "../../tickets.js";
 import { EPHEMERAL, logAudit } from "../shared.js";
 
@@ -48,7 +49,8 @@ async function buildConfigPanel(guildId) {
     .setColor(cfg.enabled ? 0x5865f2 : 0x747f8d)
     .setDescription(
       "Configure le système de tickets, puis **publie le panneau** dans le salon de ton choix.\n" +
-        "Les membres ouvrent un salon privé visible par eux et le staff.\n\u200b",
+        "Les membres ouvrent un salon privé visible par eux et le staff.\n" +
+        "💡 Design avancé (bannière, couleur, vignette, motifs) : **dashboard web → Tickets**.\n\u200b",
     )
     .addFields(
       { name: "État", value: cfg.enabled ? "🟢 **Activé**" : "🔴 **Désactivé**", inline: true },
@@ -124,35 +126,7 @@ async function refreshConfigPanel(interaction) {
 }
 
 // ---------- Panneau public (vu par les membres) ----------
-
-function buildPublicPanel(cfg) {
-  const embed = new EmbedBuilder()
-    .setTitle(cfg.panelTitle || "🎫 Support & Tickets")
-    .setColor(0x5865f2)
-    .setDescription(cfg.panelDescription || "Clique pour ouvrir un ticket privé avec le staff.");
-
-  let row;
-  if (cfg.topics.length) {
-    row = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId("tckopen_select")
-        .setPlaceholder("Choisis un motif pour ouvrir un ticket")
-        .addOptions(
-          cfg.topics.map((t) => ({
-            label: t.label.slice(0, 100),
-            description: t.description ? t.description.slice(0, 100) : undefined,
-            value: t.id,
-            emoji: t.emoji || undefined,
-          })),
-        ),
-    );
-  } else {
-    row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("tckopen_btn").setLabel("Ouvrir un ticket").setEmoji("🎫").setStyle(ButtonStyle.Primary),
-    );
-  }
-  return { embeds: [embed], components: [row] };
-}
+// Construit par buildTicketPanelPayload (partagé avec le dashboard), à partir de la config.
 
 // ====================================================================
 // Routage : boutons de config + actions de ticket
@@ -219,7 +193,7 @@ export async function handleTicketsButton(interaction, ctx) {
     if (!cfg.enabled) {
       return interaction.reply({ content: "Active d'abord le système (bouton 🔴/🟢).", flags: EPHEMERAL });
     }
-    await interaction.channel.send(buildPublicPanel(cfg)).catch(() => null);
+    await interaction.channel.send(buildTicketPanelPayload(cfg)).catch(() => null);
     return interaction.reply({ content: "📨 Panneau de tickets publié dans ce salon. ✅", flags: EPHEMERAL });
   }
 

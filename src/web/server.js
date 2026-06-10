@@ -13,6 +13,7 @@ import { getTikTokConfig, setTikTokConfig, postTest as tiktokPostTest } from "..
 import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
+import { getTicketConfig, setTicketConfig, buildTicketPanelPayload } from "../tickets.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
 import {
   getTournament,
@@ -61,6 +62,7 @@ function buildSections(guildId) {
     clips: { get: () => getClipsConfig(guildId), set: (b) => setClipsConfig(guildId, b) },
     guessrank: { get: () => getGuessRankConfig(guildId), set: (b) => setGuessRankConfig(guildId, b) },
     tempvoice: { get: () => getTempConfig(guildId), set: (b) => setTempConfig(guildId, b) },
+    tickets: { get: () => getTicketConfig(guildId), set: (b) => setTicketConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
   };
 }
@@ -684,6 +686,25 @@ export function startWebServer(client) {
       const ch = await client.channels.fetch(channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
       await ch.send(await buildPanelMessage());
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Tickets ----
+  app.post("/api/tickets/publish", requireAdmin, async (req, res) => {
+    try {
+      const cfg = await getTicketConfig(config.guildId);
+      if (!cfg.categoryId || !cfg.staffRoleId) {
+        return res.status(400).json({ error: "Configure d'abord la catégorie et le rôle staff." });
+      }
+      if (!cfg.enabled) return res.status(400).json({ error: "Active d'abord le système de tickets." });
+      const channelId = req.body?.channelId;
+      if (!channelId) return res.status(400).json({ error: "Choisis un salon." });
+      const ch = await client.channels.fetch(channelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      await ch.send(buildTicketPanelPayload(cfg));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
