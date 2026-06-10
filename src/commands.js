@@ -73,6 +73,7 @@ import {
 import { buildSignupPayload, refreshSignupPanel, buildModAlert, buildMatchPayload, refreshMatchMessage, tournamentAnnounce, buildMatchResultEmbed } from "./tournamentUI.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { renderBracketImage } from "./bracketImage.js";
+import { loadCombos, combosFor, weaponsWithCombos, weaponLabel, weaponEmoji, WEAPON_META } from "./combos.js";
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const LIER_COOLDOWN_MS = 30_000;
@@ -99,6 +100,19 @@ export const commandsData = [
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("Liste les commandes les plus utiles du bot.")
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("combos")
+    .setDescription("Parcours les true combos Brawlhalla par arme (vidéos via BrawlDatabase).")
+    .addStringOption((o) =>
+      o
+        .setName("arme")
+        .setDescription("Arme de départ (sinon la première).")
+        .addChoices(
+          ...Object.entries(WEAPON_META).map(([slug, m]) => ({ name: m.label, value: slug })),
+        )
+        .setRequired(false),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName("stats")
@@ -392,6 +406,7 @@ export async function handleChatInput(interaction, ctx) {
     case "top": return handleTop(interaction, ctx);
     case "ping": return handlePing(interaction, ctx);
     case "help": return handleHelp(interaction, ctx);
+    case "combos": return handleCombos(interaction, ctx);
     case "stats": return handleStats(interaction, ctx);
     case "rank": return handleRank(interaction, ctx);
     case "legendes": return handleLegendes(interaction, ctx);
@@ -1534,6 +1549,77 @@ async function handleHelp(interaction, ctx) {
   return interaction.reply({ embeds: [embed], flags: EPHEMERAL });
 }
 
+// ---------- /combos ----------
+
+// Construit le panneau d'un combo (vidéo + stats + menu arme + navigation).
+async function buildCombosPayload(weapon, index) {
+  const list = await combosFor(weapon);
+  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [] };
+  const i = Math.max(0, Math.min(index, list.length - 1));
+  const c = list[i];
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`${weaponEmoji(weapon)} ${weaponLabel(weapon)} — ${c.notation}`)
+    .setURL(c.url)
+    .addFields(
+      { name: "🎯 Facilité", value: `${c.usability}/10`, inline: true },
+      { name: "💥 Dégâts", value: String(c.damage), inline: true },
+      { name: "✋ Dextérité", value: String(c.dexterity), inline: true },
+      { name: "📊 Dégâts moyens", value: String(c.avgDamage), inline: true },
+    )
+    .setFooter({ text: `Combo ${i + 1}/${list.length} · trié par facilité · source BrawlDatabase.com` });
+
+  const weapons = await weaponsWithCombos();
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("cb_weapon")
+    .setPlaceholder(`${weaponLabel(weapon)} — choisir une arme`)
+    .addOptions(
+      weapons.map((w) => ({
+        label: weaponLabel(w),
+        value: w,
+        emoji: weaponEmoji(w),
+        default: w === weapon,
+      })),
+    );
+
+  const nav = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cb_nav:${weapon}:${i - 1}`).setLabel("◀").setStyle(ButtonStyle.Secondary).setDisabled(i === 0),
+    new ButtonBuilder().setCustomId("cb_count").setLabel(`${i + 1}/${list.length}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`cb_nav:${weapon}:${i + 1}`).setLabel("▶").setStyle(ButtonStyle.Secondary).setDisabled(i >= list.length - 1),
+    new ButtonBuilder().setLabel("BrawlDB").setStyle(ButtonStyle.Link).setURL(c.url),
+  );
+
+  // L'URL .mp4 dans le contenu → Discord l'affiche en lecteur vidéo intégré.
+  return {
+    content: c.video,
+    embeds: [embed],
+    components: [new ActionRowBuilder().addComponents(menu), nav],
+    allowedMentions: { parse: [] },
+  };
+}
+
+async function handleCombos(interaction) {
+  const combos = await loadCombos();
+  if (!combos.length) {
+    return interaction.reply({ content: "La base de combos est vide. Un admin doit lancer `node scripts/scrape-combos.js`.", flags: EPHEMERAL });
+  }
+  const opt = interaction.options.getString("arme");
+  const weapons = await weaponsWithCombos();
+  const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
+  return interaction.reply(await buildCombosPayload(weapon, 0));
+}
+
+// Composants du panneau combos : changement d'arme + navigation.
+async function handleCombosSelect(interaction) {
+  const weapon = interaction.values[0];
+  return interaction.update(await buildCombosPayload(weapon, 0));
+}
+async function handleCombosNav(interaction) {
+  const [, weapon, idx] = interaction.customId.split(":");
+  return interaction.update(await buildCombosPayload(weapon, Number(idx)));
+}
+
 async function handleResetSeason(interaction, ctx) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("season_reset").setLabel("Confirmer le reset").setStyle(ButtonStyle.Danger),
@@ -1657,6 +1743,7 @@ async function handleSetup(interaction, ctx) {
 }
 
 export async function handleSelect(interaction, ctx) {
+  if (interaction.customId === "cb_weapon") return handleCombosSelect(interaction);
   if (interaction.customId.startsWith("lvl_")) return handleLevelsPanelSelect(interaction, ctx);
   if (interaction.customId.startsWith("tt_")) return handleTikTokPanelSelect(interaction, ctx);
   if (interaction.customId.startsWith("clp_")) return handleClipsPanelSelect(interaction, ctx);
@@ -1687,6 +1774,8 @@ export async function handleSelect(interaction, ctx) {
 
 export async function handleButton(interaction, ctx) {
   const id = interaction.customId;
+  if (id === "cb_count") return interaction.deferUpdate();
+  if (id.startsWith("cb_nav:")) return handleCombosNav(interaction);
   if (id.startsWith("lvl_")) return handleLevelsPanelButton(interaction, ctx);
   if (id.startsWith("tt_")) return handleTikTokPanelButton(interaction, ctx);
   if (id.startsWith("clp_")) return handleClipsPanelButton(interaction, ctx);
