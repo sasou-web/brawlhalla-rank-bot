@@ -48,6 +48,32 @@ export function buildSignupPayload(t) {
   return { embeds: [embed], components: buttons.length ? [{ type: 1, components: buttons }] : [] };
 }
 
+// Embed "aucun tournoi en cours" — posté dans le salon d'inscription quand
+// un tournoi est archivé/supprimé, pour que les membres ne soient pas perdus.
+export function buildNoTournamentPayload() {
+  const embed = {
+    title: "🏆 Aucun tournoi en cours",
+    color: 0x5a606b,
+    description:
+      "Il n'y a pas de tournoi pour le moment.\n\n" +
+      "Reste à l'affût : le prochain sera annoncé **ici même**. " +
+      "Prends le rôle **🏆 Tournoi** pour être prévenu·e dès l'ouverture des inscriptions !",
+    footer: { text: "Brawlhalla · à très vite sur le ring ⚔️" },
+  };
+  return { embeds: [embed] };
+}
+
+// Poste l'embed "aucun tournoi" dans le salon d'inscription (best-effort).
+export async function postNoTournamentPanel(client, channelId) {
+  if (!channelId) return;
+  try {
+    const ch = await client.channels.fetch(channelId);
+    if (ch?.isTextBased?.()) await ch.send(buildNoTournamentPayload());
+  } catch {
+    /* ignore */
+  }
+}
+
 // Rafraîchit le message du panneau d'inscription si publié.
 export async function refreshSignupPanel(client, guildId) {
   const t = await getTournament(guildId);

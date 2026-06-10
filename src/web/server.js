@@ -29,7 +29,7 @@ import {
   getHistoryEntry,
   deleteHistoryEntry,
 } from "../tournament.js";
-import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, bracketSummary, buildHallOfFamePayload } from "../tournamentUI.js";
+import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, bracketSummary, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
 import { getLeaderboard } from "../levels.js";
@@ -427,7 +427,10 @@ export function startWebServer(client) {
   });
 
   app.delete("/api/tournament", requireAdmin, async (req, res) => {
+    const t = await getTournament(G);
+    const signupChannelId = t?.signupChannelId || null;
     await deleteTournament(G);
+    await postNoTournamentPanel(client, signupChannelId);
     res.json({ ok: true });
   });
 
@@ -547,9 +550,11 @@ export function startWebServer(client) {
   // ---- Historique ----
   app.post("/api/tournament/archive", requireAdmin, async (req, res) => {
     try {
+      let signupChannelId = null;
       // Recap "Hall of Fame" (podium + MVP) AVANT archivage (l'archivage supprime le tournoi courant).
       try {
         const t = await getTournament(G);
+        signupChannelId = t?.signupChannelId || null;
         if (t && t.hallOfFameChannelId) {
           const ch = await client.channels.fetch(t.hallOfFameChannelId).catch(() => null);
           if (ch?.isTextBased?.()) await ch.send(buildHallOfFamePayload(t));
@@ -558,6 +563,8 @@ export function startWebServer(client) {
         /* recap best-effort */
       }
       await archiveTournament(G);
+      // Le salon d'inscription repasse en "aucun tournoi" pour ne pas perdre les membres.
+      await postNoTournamentPanel(client, signupChannelId);
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
