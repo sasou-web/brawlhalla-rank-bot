@@ -190,21 +190,33 @@ function showLogin(err) {
 }
 
 // ----- Navigation -----
-const NAV = [
-  { id: "overview", label: "Vue d'ensemble", ico: "📊" },
-  { id: "stats", label: "Statistiques", ico: "📈" },
-  { id: "logs", label: "Logs en direct", ico: "📜" },
-  { id: "welcome", label: "Bienvenue", ico: "👋" },
-  { id: "settings", label: "Réglages généraux", ico: "⚙️" },
-  { id: "levels", label: "Niveaux", ico: "⭐" },
-  { id: "tiktok", label: "TikTok", ico: "📱" },
-  { id: "clips", label: "Clips", ico: "🎬" },
-  { id: "guessrank", label: "Devine ton rang", ico: "🏅" },
-  { id: "tempvoice", label: "Vocaux temporaires", ico: "🔊" },
-  { id: "vocrank", label: "Vocaux par rank", ico: "🎙️" },
-  { id: "tournament", label: "Tournoi", ico: "🏆" },
-  { id: "combos", label: "Combos", ico: "🥊" },
+// Regroupée en sections logiques (un intitulé par groupe dans la sidebar).
+const NAV_GROUPS = [
+  { label: "Général", items: [
+    { id: "overview", label: "Vue d'ensemble", ico: "📊" },
+    { id: "stats", label: "Statistiques", ico: "📈" },
+    { id: "logs", label: "Logs en direct", ico: "📜" },
+    { id: "settings", label: "Réglages généraux", ico: "⚙️" },
+  ] },
+  { label: "Engagement", items: [
+    { id: "welcome", label: "Bienvenue", ico: "👋" },
+    { id: "levels", label: "Niveaux", ico: "⭐" },
+    { id: "guessrank", label: "Devine ton rang", ico: "🏅" },
+  ] },
+  { label: "Contenu & modération", items: [
+    { id: "tiktok", label: "TikTok", ico: "📱" },
+    { id: "clips", label: "Clips", ico: "🎬" },
+    { id: "combos", label: "Combos", ico: "🥊" },
+  ] },
+  { label: "Vocal", items: [
+    { id: "tempvoice", label: "Vocaux temporaires", ico: "🔊" },
+    { id: "vocrank", label: "Vocaux par rank", ico: "🎙️" },
+  ] },
+  { label: "Compétition", items: [
+    { id: "tournament", label: "Tournoi", ico: "🏆" },
+  ] },
 ];
+const NAV = NAV_GROUPS.flatMap((g) => g.items);
 
 function renderApp() {
   $("#loading").style.display = "none";
@@ -264,24 +276,25 @@ function renderApp() {
 
   const nav = $("#nav");
   nav.innerHTML = "";
-  for (const item of NAV) {
-    nav.append(
-      el(
-        "button",
-        {
-          class: "nav-item" + (item.id === current ? " active" : ""),
-          onclick: async () => {
-            if (dirty && !(await confirmModal("Tu as des modifications non enregistrées. Changer de section quand même ?", { okLabel: "Quitter sans enregistrer", danger: true }))) return;
-            setDirty(false);
-            current = item.id;
-            $(".sidebar").classList.remove("open");
-            renderApp();
-          },
+  const makeNavItem = (item) =>
+    el(
+      "button",
+      {
+        class: "nav-item" + (item.id === current ? " active" : ""),
+        onclick: async () => {
+          if (dirty && !(await confirmModal("Tu as des modifications non enregistrées. Changer de section quand même ?", { okLabel: "Quitter sans enregistrer", danger: true }))) return;
+          setDirty(false);
+          current = item.id;
+          $(".sidebar").classList.remove("open");
+          renderApp();
         },
-        el("span", { class: "ico" }, item.ico),
-        item.label,
-      ),
+      },
+      el("span", { class: "ico" }, item.ico),
+      item.label,
     );
+  for (const group of NAV_GROUPS) {
+    nav.append(el("div", { class: "nav-group" }, group.label));
+    for (const item of group.items) nav.append(makeNavItem(item));
   }
   renderSection(current);
 }

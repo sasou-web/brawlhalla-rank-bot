@@ -83,6 +83,12 @@ button { font-family: inherit; cursor: pointer; }
 .brand .brand-name { font-weight: 700; font-size: 15px; }
 .brand .brand-sub { font-size: 12px; color: var(--muted); }
 
+.nav-group {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--muted); opacity: .75; padding: 15px 14px 6px;
+}
+.nav-group:first-child { padding-top: 2px; }
+
 .nav-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 14px; border-radius: 12px; color: var(--muted);
