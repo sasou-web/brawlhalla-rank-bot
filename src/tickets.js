@@ -281,7 +281,7 @@ export function buildTicketPanelPayload(cfg) {
   if (cfg.tosUrl) footer += `\n📜 [Terms of Service](${cfg.tosUrl})`;
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
 
-  // Menu déroulant (ou bouton unique) sous le cadre.
+  // Menu déroulant (ou bouton unique) intégré DANS le cadre, sous une ligne de séparation.
   let row;
   if (topics.length) {
     const select = new StringSelectMenuBuilder()
@@ -302,8 +302,10 @@ export function buildTicketPanelPayload(cfg) {
       new ButtonBuilder().setCustomId("tckopen_btn").setLabel("Ouvrir un ticket").setEmoji("🎫").setStyle(ButtonStyle.Primary),
     );
   }
+  container.addSeparatorComponents(divider());
+  container.addActionRowComponents(row);
 
-  return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
 /** Container (Components V2) de l'embed posté DANS le salon de ticket créé. */
