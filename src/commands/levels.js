@@ -11,6 +11,11 @@ import {
   ChannelType,
   AttachmentBuilder,
   PermissionFlagsBits,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
 } from "discord.js";
 import {
   getUserStats, getLeaderboard, getLevelConfig, setLevelConfig, setReward,
@@ -19,6 +24,19 @@ import {
 import { renderLevelCard } from "../levelCard.js";
 import { EPHEMERAL, logAudit } from "./shared.js";
 import { enforceCooldown } from "./cooldowns.js";
+
+// ---- Helpers Components V2 ----
+const V2 = MessageFlags.IsComponentsV2;
+const tdc = (s) => new TextDisplayBuilder().setContent(s);
+const SEP = { __sep: true };
+function v2Card(color, ...nodes) {
+  const c = new ContainerBuilder().setAccentColor(color);
+  for (const n of nodes) {
+    if (n && n.__sep) c.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    else if (n != null) c.addTextDisplayComponents(typeof n === "string" ? tdc(n) : n);
+  }
+  return c;
+}
 
 // ---------- Systeme de niveaux ----------
 
@@ -84,20 +102,17 @@ export async function handleNiveau(interaction, ctx) {
 }
 
 export async function handleClassementNiveaux(interaction, ctx) {
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
   const top = await getLeaderboard(interaction.guild.id, 10);
-  if (!top.length) return interaction.editReply("Personne n'a encore gagné d'XP sur le serveur.");
+  if (!top.length) return interaction.editReply({ components: [tdc("Personne n'a encore gagné d'XP sur le serveur.")], flags: V2 });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = top.map((e, i) => {
     const place = medals[i] ?? `**${i + 1}.**`;
     return `${place} <@${e.id}> — Niveau **${e.level}** (${e.xp} XP)`;
   });
-  const embed = new EmbedBuilder()
-    .setTitle("🏆 Classement des niveaux")
-    .setColor(0x5865f2)
-    .setDescription(lines.join("\n"));
-  return interaction.editReply({ embeds: [embed] });
+  const card = v2Card(0x5865f2, "## 🏆 Classement des niveaux", SEP, lines.join("\n"));
+  return interaction.editReply({ components: [card], flags: V2, allowedMentions: { parse: [] } });
 }
 
 // ---------- /leaderboard-xp : classement XP complet pagine ----------
@@ -117,22 +132,30 @@ async function buildXpLeaderboardPage(guild, page) {
     return `${place} <@${e.id}> — Niveau **${e.level}** · ${e.xp.toLocaleString("fr-FR")} XP`;
   });
 
-  const embed = new EmbedBuilder()
-    .setTitle("🏆 Classement XP du serveur")
-    .setColor(0x5865f2)
-    .setDescription(lines.join("\n") || "Personne n'a encore d'XP.")
-    .setFooter({ text: `Page ${p + 1}/${totalPages} • ${all.length} membre(s) classé(s)` });
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`xplb:${p - 1}`).setEmoji("◀️").setStyle(ButtonStyle.Secondary).setDisabled(p <= 0),
-    new ButtonBuilder().setCustomId(`xplb:${p + 1}`).setEmoji("▶️").setStyle(ButtonStyle.Secondary).setDisabled(p >= totalPages - 1),
+  const card = v2Card(
+    0x5865f2,
+    "## 🏆 Classement XP du serveur",
+    SEP,
+    lines.join("\n") || "Personne n'a encore d'XP.",
+    SEP,
+    `-# Page ${p + 1}/${totalPages} • ${all.length} membre(s) classé(s)`,
   );
 
-  return { embeds: [embed], components: all.length > XP_LB_PER_PAGE ? [row] : [] };
+  if (all.length > XP_LB_PER_PAGE) {
+    card.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    card.addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`xplb:${p - 1}`).setEmoji("◀️").setStyle(ButtonStyle.Secondary).setDisabled(p <= 0),
+        new ButtonBuilder().setCustomId(`xplb:${p + 1}`).setEmoji("▶️").setStyle(ButtonStyle.Secondary).setDisabled(p >= totalPages - 1),
+      ),
+    );
+  }
+
+  return { components: [card], flags: V2, allowedMentions: { parse: [] } };
 }
 
 export async function handleLeaderboardXp(interaction, ctx) {
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
   const page = await buildXpLeaderboardPage(interaction.guild, 0);
   return interaction.editReply(page);
 }
