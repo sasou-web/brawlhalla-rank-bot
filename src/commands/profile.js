@@ -141,8 +141,10 @@ function profileNavRow(active, brawlhallaId) {
 }
 
 // Coequipier d'une equipe 2v2 (l'autre que le joueur consulte).
+// Comparaison en String : l'API renvoie des IDs numeriques, mais brawlhallaId peut etre
+// une chaine (liaison) -> sans coercion, on renverrait toujours le mauvais joueur.
 function teammate(team, brawlhallaId) {
-  return team.brawlhalla_id_one !== brawlhallaId ? team.username_one : team.username_two;
+  return String(team.brawlhalla_id_one) !== String(brawlhallaId) ? team.username_one : team.username_two;
 }
 
 // Construit la CARTE V2 correspondant a un onglet. p = profil, legends = Map id->info.
