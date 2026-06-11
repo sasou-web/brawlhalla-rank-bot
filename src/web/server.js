@@ -25,7 +25,7 @@ import {
 } from "../giveaway.js";
 import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
-import { buildAnnouncePayload } from "../announce.js";
+import { buildAnnouncePayload, dataUrlToAttachment } from "../announce.js";
 import {
   getTournament,
   createTournament,
@@ -146,6 +146,9 @@ export function startWebServer(client) {
     next();
   });
 
+  // Parser large pour l'envoi d'annonces (images jointes en base64) — déclaré AVANT
+  // le parser global 1 Mo, sinon ce dernier rejetterait les gros corps en premier.
+  app.use("/api/announce", express.json({ limit: "12mb" }));
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
@@ -831,8 +834,15 @@ export function startWebServer(client) {
       const ch = await guild.channels.fetch(channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
 
-      const { payload, error } = buildAnnouncePayload(guild, body);
+      const { payload, error } = buildAnnouncePayload(guild, body, { hasAttachment: !!body.fileDataUrl });
       if (error) return res.status(400).json({ error });
+
+      // Pièce jointe optionnelle (image uploadée) — fonctionne même sans embed.
+      if (body.fileDataUrl) {
+        const { file, error: fileErr } = dataUrlToAttachment(body.fileDataUrl, body.fileName);
+        if (fileErr) return res.status(400).json({ error: fileErr });
+        payload.files = [file];
+      }
 
       // Édition d'un message existant si un messageId valide est fourni, sinon envoi.
       if (body.messageId) {

@@ -1557,6 +1557,10 @@ function buildAnnouncePreview(cfg) {
     if (e.image) embed.append(el("img", { src: e.image, class: "pe-image" }));
     wrap.append(embed);
   }
+  // Image jointe (upload) — affichée comme une pièce jointe, hors embed.
+  if (cfg.fileDataUrl) {
+    wrap.append(el("img", { src: cfg.fileDataUrl, class: "preview-attach" }));
+  }
   if (!wrap.children.length) wrap.append(el("div", { class: "preview-text", style: "color:var(--muted)" }, "(message vide)"));
   return wrap;
 }
@@ -1570,6 +1574,8 @@ function renderAnnounce(content) {
     content: "",
     mentionEveryone: false,
     mentionRoleIds: [],
+    fileDataUrl: "",
+    fileName: "",
     embed: {
       color: "#7c5cff",
       author: { name: "", iconUrl: "", url: "" },
@@ -1605,6 +1611,33 @@ function renderAnnounce(content) {
     fieldRow("Format", "Texte simple, embed, ou les deux.", selectInput(cfg, "mode", [{ value: "embed", label: "Embed" }, { value: "text", label: "Texte" }, { value: "both", label: "Texte + Embed" }])),
     fieldRow("Message texte", "Contenu hors embed (markdown supporté).", textareaInput(cfg, "content"), true),
   );
+
+  // Image jointe (upload) — fonctionne avec ou sans embed.
+  const fileInput = el("input", { type: "file", accept: "image/*" });
+  const fileInfo = el("div", { class: "desc", style: "margin-top:6px" });
+  const fileClear = el("button", { class: "btn-mini danger", style: "display:none;margin-top:6px" }, "✕ Retirer l'image");
+  const syncFile = () => {
+    fileInfo.textContent = cfg.fileName ? "📎 " + cfg.fileName : "";
+    fileClear.style.display = cfg.fileName ? "" : "none";
+  };
+  fileInput.addEventListener("change", () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) { toast("Image trop lourde (max 8 Mo).", "err"); fileInput.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      cfg.fileDataUrl = String(reader.result);
+      cfg.fileName = f.name;
+      syncFile(); refreshPreview(); setDirty(true);
+    };
+    reader.readAsDataURL(f);
+  });
+  fileClear.addEventListener("click", () => {
+    cfg.fileDataUrl = ""; cfg.fileName = ""; fileInput.value = "";
+    syncFile(); refreshPreview();
+  });
+  syncFile();
+  cDest.append(fieldRow("Image jointe (upload)", "Joins une image (max 8 Mo) — envoyée même sans embed.", el("div", { style: "width:100%" }, fileInput, fileInfo, fileClear), true));
   content.append(cDest);
 
   // Mentions

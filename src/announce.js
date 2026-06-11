@@ -74,7 +74,7 @@ function buildEmbed(guild, e) {
  * Construit le payload d'envoi (channel.send) pour une annonce personnalisée.
  * @returns {{ payload: object|null, error?: string }}
  */
-export function buildAnnouncePayload(guild, cfg) {
+export function buildAnnouncePayload(guild, cfg, { hasAttachment = false } = {}) {
   const mode = cfg.mode || "embed";
   const wantText = mode === "text" || mode === "both";
   const wantEmbed = mode === "embed" || mode === "both";
@@ -92,8 +92,8 @@ export function buildAnnouncePayload(guild, cfg) {
 
   const embed = wantEmbed ? buildEmbed(guild, cfg.embed) : null;
 
-  if (!content && !embed) {
-    return { payload: null, error: "Message vide : ajoute du texte ou un embed." };
+  if (!content && !embed && !hasAttachment) {
+    return { payload: null, error: "Message vide : ajoute du texte, un embed ou une image." };
   }
 
   const payload = {
@@ -106,4 +106,31 @@ export function buildAnnouncePayload(guild, cfg) {
   if (embed) payload.embeds = [embed];
 
   return { payload };
+}
+
+// Limite de taille des pièces jointes (8 Mo : sûr pour tous les serveurs).
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+// Nettoie un nom de fichier (Discord refuse certains caractères / chemins).
+function sanitizeFileName(name) {
+  const base = String(name || "image").split(/[\\/]/).pop().replace(/[^\w.\-]+/g, "_").slice(0, 80);
+  return base || "image.png";
+}
+
+/**
+ * Convertit une data URL (data:<mime>;base64,xxxx) en pièce jointe pour channel.send.
+ * @returns {{ file?: { attachment: Buffer, name: string }, error?: string }}
+ */
+export function dataUrlToAttachment(dataUrl, fileName) {
+  const m = String(dataUrl || "").match(/^data:([\w/+.-]+)?;base64,(.+)$/s);
+  if (!m) return { error: "Image invalide." };
+  let buffer;
+  try {
+    buffer = Buffer.from(m[2], "base64");
+  } catch {
+    return { error: "Image illisible." };
+  }
+  if (!buffer.length) return { error: "Image vide." };
+  if (buffer.length > MAX_ATTACHMENT_BYTES) return { error: "Image trop lourde (max 8 Mo)." };
+  return { file: { attachment: buffer, name: sanitizeFileName(fileName) } };
 }
