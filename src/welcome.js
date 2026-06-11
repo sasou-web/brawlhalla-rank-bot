@@ -120,11 +120,6 @@ export function buildWelcomePayload(member, guild, cfg) {
   const container = new ContainerBuilder().setAccentColor(hexToInt(e.color));
 
   const head = [];
-  // Ping intégré DANS la carte : un composant texte V2 à l'intérieur du container notifie
-  // bien le membre (grâce à allowedMentions), contrairement à un embed classique où une
-  // mention n'envoie aucune notification. Placé en tête, juste avant le titre.
-  const pingInside = cfg.pingUser && !wantText;
-  if (pingInside) head.push(mention);
   const title = e.title ? applyVars(e.title, member, guild) : `👋 Bienvenue ${member.displayName || user.username} !`;
   head.push(`## ${title}`.slice(0, 256));
   if (e.description) head.push(applyVars(e.description, member, guild));
@@ -144,12 +139,13 @@ export function buildWelcomePayload(member, guild, cfg) {
     container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(e.image)));
   }
 
-  // Pied : serveur + horodatage, en sous-texte discret.
+  // Pied : serveur + horodatage, en sous-texte discret. Le ping du membre est intégré ici
+  // (un composant texte V2 dans le container notifie bien, grâce à allowedMentions).
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   const footerName = e.footer ? applyVars(e.footer, member, guild) : guild.name;
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>`),
-  );
+  const pingInside = cfg.pingUser && !wantText;
+  const footerLine = `-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>${pingInside ? ` • ${mention}` : ""}`;
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
 
   // Le texte (mode « both ») reste un composant au-dessus de la carte. Le ping seul (mode
   // embed) est désormais intégré dans la carte (voir pingInside ci-dessus).
