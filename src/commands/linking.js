@@ -7,6 +7,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   PermissionFlagsBits,
+  ChannelType,
 } from "discord.js";
 import { searchPlayers, getPlayerProfile } from "../brawlhalla.js";
 import { removeLink, getLink, findUserByBrawlhallaId } from "../store.js";
@@ -53,8 +54,35 @@ export async function handleLier(interaction, ctx) {
   }
   lierCooldowns.set(interaction.user.id, now);
 
-  const pseudo = interaction.options.getString("pseudo", true).trim();
+  const pseudo = interaction.options.getString("pseudo")?.trim();
+  const idOption = interaction.options.getInteger("id");
+
+  if (!pseudo && !idOption) {
+    return interaction.reply({
+      content: "Indique ton **pseudo** ou ton **Brawlhalla ID**. Ex : `/lier pseudo:TonPseudo` ou `/lier id:123456`.",
+      flags: EPHEMERAL,
+    });
+  }
+
   await interaction.deferReply(); // public : le joueur sera mentionne/notifie au moment du choix
+
+  // ---- Liaison directe par ID : on saute la recherche par pseudo ----
+  if (idOption) {
+    const brawlhallaId = Number(idOption);
+    let data;
+    try {
+      data = await getPlayerProfile(brawlhallaId);
+    } catch (err) {
+      const msg = err.pending ? err.message : `Erreur API : ${err.message}`;
+      return interaction.editReply(`<@${interaction.user.id}> ${msg}`);
+    }
+    if (!data || !data.name || data.name === "?") {
+      return interaction.editReply(
+        `<@${interaction.user.id}> aucun compte Brawlhalla trouvé pour l'ID \`${brawlhallaId}\`. Vérifie ton ID en jeu.`,
+      );
+    }
+    return linkChosenAccount(interaction, { brawlhallaId, member: interaction.member, ctx, data });
+  }
 
   let players;
   try {
@@ -65,7 +93,7 @@ export async function handleLier(interaction, ctx) {
   }
   if (players.length === 0) {
     return interaction.editReply(
-      `<@${interaction.user.id}> aucun joueur classé trouvé pour **${pseudo}**. Seuls les joueurs ayant joué en ranked cette saison apparaissent.`,
+      `<@${interaction.user.id}> aucun joueur classé trouvé pour **${pseudo}**. Seuls les joueurs ayant joué en ranked cette saison apparaissent.\n💡 Astuce : tu peux aussi lier directement avec ton **ID** via \`/lier id:123456\`.`,
     );
   }
 
@@ -101,20 +129,33 @@ export async function handlePick(interaction, ctx) {
     });
   }
   await interaction.deferUpdate();
+  return linkChosenAccount(interaction, { brawlhallaId, member: interaction.member, ctx });
+}
+
+/**
+ * Logique commune de liaison d'un compte choisi (par bouton de sélection OU par /lier id:).
+ * L'interaction doit déjà être différée (deferReply ou deferUpdate) : tout passe par editReply.
+ * - auto-validation si rang ≤ seuil ;
+ * - sinon validation staff, avec preuve (fil privé + screenshot) pour les hauts rangs.
+ */
+async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data }) {
+  const userId = member.id;
 
   const owner = await findUserByBrawlhallaId(brawlhallaId);
-  if (owner && owner !== interaction.user.id) {
+  if (owner && owner !== userId) {
     return interaction.editReply({
-      content: `Ce compte est **déjà lié** par <@${owner}>. Si c'est le tien, contacte le staff.`,
+      content: `<@${userId}> ce compte est **déjà lié** par <@${owner}>. Si c'est le tien, contacte le staff.`,
       components: [],
+      allowedMentions: { users: [userId] },
     });
   }
 
-  let data;
-  try {
-    data = await getPlayerProfile(brawlhallaId);
-  } catch (err) {
-    return interaction.editReply({ content: `Erreur API : ${err.message}`, components: [] });
+  if (!data) {
+    try {
+      data = await getPlayerProfile(brawlhallaId);
+    } catch (err) {
+      return interaction.editReply({ content: `Erreur API : ${err.message}`, components: [] });
+    }
   }
 
   const settings = await getSettings();
@@ -124,25 +165,25 @@ export async function handlePick(interaction, ctx) {
 
   if (autoApprove) {
     try {
-      const result = await doSync(interaction.member, brawlhallaId, ctx, data);
+      const result = await doSync(member, brawlhallaId, ctx, data);
       await logAudit(
         interaction.guild,
-        `✅ Auto-liaison : <@${interaction.user.id}> → \`${data.name}\` (${tierSummary(result.tiers)})`,
+        `✅ Auto-liaison : <@${userId}> → \`${data.name}\` (${tierSummary(result.tiers)})`,
       );
       const note = data.partial
         ? "\n⚠️ API Brawlhalla indisponible : seul ton rank 1v1 a pu être appliqué. Le reste se mettra à jour automatiquement plus tard."
         : "\nTes rôles seront mis à jour automatiquement.";
       return interaction.editReply({
-        content: `<@${interaction.user.id}> compte lié ! ${tierSummary(result.tiers)}.${note}`,
+        content: `<@${userId}> compte lié ! ${tierSummary(result.tiers)}.${note}`,
         components: [],
-        allowedMentions: { users: [interaction.user.id] },
+        allowedMentions: { users: [userId] },
       });
     } catch (err) {
       return interaction.editReply({ content: `Échec de la liaison : ${err.message}`, components: [] });
     }
   }
 
-  // Sinon : demande de validation au staff.
+  // Validation staff requise.
   const channel = await interaction.guild.channels.fetch(settings.reviewChannelId).catch(() => null);
   if (!channel?.isTextBased?.()) {
     return interaction.editReply({
@@ -151,10 +192,28 @@ export async function handlePick(interaction, ctx) {
     });
   }
 
-  const embed = buildReviewEmbed(interaction.user, brawlhallaId, data);
+  // Hauts rangs : on exige une preuve (capture du profil en jeu) dans un fil privé.
+  const needsProof = settings.requireProofScreenshot && tierIndex(top) >= tierIndex(settings.proofTier);
+  if (needsProof) {
+    const res = await openProofThread(interaction, channel, { userId, brawlhallaId, data, settings });
+    if (res.ok) {
+      return interaction.editReply({
+        content:
+          `<@${userId}> ton rang **${top}** demande une **preuve** avant validation.\n` +
+          `📸 Un fil privé a été créé : ${res.thread}. Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`,
+        components: [],
+        allowedMentions: { users: [userId] },
+      });
+    }
+    // Échec de création du fil (permissions, fonctionnalité indispo) : repli sur la review classique.
+    await logAudit(interaction.guild, `⚠️ Création du fil de preuve impossible (${res.error}). Repli sur validation classique.`);
+  }
+
+  // Validation classique : embed + boutons dans le salon de validation.
+  const embed = buildReviewEmbed({ id: userId }, brawlhallaId, data);
   const actions = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ap:${interaction.user.id}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`rj:${interaction.user.id}:${brawlhallaId}`).setLabel("Refuser").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`ap:${userId}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`rj:${userId}:${brawlhallaId}`).setLabel("Refuser").setStyle(ButtonStyle.Danger),
   );
 
   try {
@@ -163,10 +222,48 @@ export async function handlePick(interaction, ctx) {
     return interaction.editReply({ content: `Impossible d'envoyer la demande : ${err.message}`, components: [] });
   }
   return interaction.editReply({
-    content: `<@${interaction.user.id}> ta demande a été envoyée au staff ✅. Tu recevras tes rôles une fois validée.`,
+    content: `<@${userId}> ta demande a été envoyée au staff ✅. Tu recevras tes rôles une fois validée.`,
     components: [],
-    allowedMentions: { users: [interaction.user.id] },
+    allowedMentions: { users: [userId] },
   });
+}
+
+/**
+ * Crée un fil PRIVÉ de validation (mod + joueur) dans le salon de validation, y ajoute le
+ * joueur, demande la capture d'écran et propose les boutons Valider/Refuser. Le joueur poste
+ * sa preuve directement dans le fil (upload natif Discord). Renvoie { ok, thread?, error? }.
+ */
+async function openProofThread(interaction, channel, { userId, brawlhallaId, data, settings }) {
+  try {
+    const thread = await channel.threads.create({
+      name: `🎟️ Liaison ${data.name ?? brawlhallaId}`.slice(0, 100),
+      type: ChannelType.PrivateThread,
+      invitable: false,
+      autoArchiveDuration: 1440, // 24 h
+      reason: "Validation de liaison Brawlhalla (preuve requise)",
+    });
+    await thread.members.add(userId).catch(() => {});
+
+    const embed = buildReviewEmbed({ id: userId }, brawlhallaId, data);
+    const actions = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`ap:${userId}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rj:${userId}:${brawlhallaId}`).setLabel("Refuser").setStyle(ButtonStyle.Danger),
+    );
+    const staffPing = settings.reviewerRoleId ? `<@&${settings.reviewerRoleId}> ` : "";
+    await thread.send({
+      content:
+        `${staffPing}Nouvelle demande de liaison à vérifier.\n` +
+        `📸 <@${userId}>, envoie **ici** une **capture d'écran de ta page de profil en jeu** ` +
+        `avec ton **pseudo** et ton **ID \`${brawlhallaId}\`** bien visibles.\n` +
+        `Le staff vérifiera la capture puis cliquera **Valider** ✅.`,
+      embeds: [embed],
+      components: [actions],
+      allowedMentions: { users: [userId], roles: settings.reviewerRoleId ? [settings.reviewerRoleId] : [] },
+    });
+    return { ok: true, thread: `<#${thread.id}>` };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 function buildReviewEmbed(user, brawlhallaId, data) {
@@ -238,7 +335,14 @@ async function concludeReview(interaction, conclusion) {
   const original = interaction.message?.embeds?.[0];
   const embed = original ? EmbedBuilder.from(original) : new EmbedBuilder();
   embed.addFields({ name: "Résultat", value: conclusion });
-  return interaction.editReply({ embeds: [embed], components: [] });
+  const res = await interaction.editReply({ embeds: [embed], components: [] });
+  // Si la validation s'est faite dans un fil de preuve, on le verrouille et l'archive.
+  const ch = interaction.channel;
+  if (ch?.isThread?.()) {
+    ch.setLocked(true).catch(() => {});
+    ch.setArchived(true).catch(() => {});
+  }
+  return res;
 }
 
 // ---------- /forcelink (admin) ----------

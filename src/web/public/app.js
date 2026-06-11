@@ -539,6 +539,10 @@ function sectionSchema(id, cfg) {
             ["Salon des succès", "Annonces des achievements débloqués (sans ping). Vide = désactivé.", channelSelect(cfg, "achievementsChannelId", "text")],
             ["Seuil d'auto-validation", "Tout ce qui est ≤ ce tier est validé automatiquement.", selectInput(cfg, "autoApproveTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
           ] },
+          { title: "Validation par preuve (hauts rangs)", sub: "À partir du rang choisi, un fil privé est créé : le joueur y poste une capture de sa page de profil en jeu (ID + pseudo visibles), le staff valide depuis ce fil.", fields: [
+            ["Preuve obligatoire", "Active la demande de capture d'écran pour les hauts rangs.", toggle(cfg, "requireProofScreenshot")],
+            ["Rang exigeant une preuve", "À partir de ce tier (inclus), une capture est demandée.", selectInput(cfg, "proofTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
+          ] },
         ],
       };
     case "levels":

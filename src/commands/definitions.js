@@ -9,7 +9,8 @@ export const commandsData = [
   new SlashCommandBuilder()
     .setName("lier")
     .setDescription("Lie ton compte Brawlhalla pour recevoir tes roles de rank.")
-    .addStringOption((o) => o.setName("pseudo").setDescription("Ton pseudo Brawlhalla en ranked.").setRequired(true))
+    .addStringOption((o) => o.setName("pseudo").setDescription("Ton pseudo Brawlhalla en ranked.").setRequired(false))
+    .addIntegerOption((o) => o.setName("id").setDescription("Ou directement ton Brawlhalla ID (le plus fiable).").setMinValue(1).setRequired(false))
     .toJSON(),
   new SlashCommandBuilder()
     .setName("delier")

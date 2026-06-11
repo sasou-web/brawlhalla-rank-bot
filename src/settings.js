@@ -33,6 +33,10 @@ export async function getSettings() {
     season: s.season || 1,
     // Dernier récap hebdo de progression posté (ms epoch). 0 = jamais.
     lastWeeklyRecapTs: s.lastWeeklyRecapTs || 0,
+    // Validation par preuve (screenshot) pour les hauts rangs : à partir de `proofTier`,
+    // un fil privé est créé où le joueur poste une capture de son profil en jeu (ID visible).
+    requireProofScreenshot: s.requireProofScreenshot ?? true,
+    proofTier: s.proofTier || "Diamond",
   };
 }
 

@@ -209,6 +209,11 @@ export async function handleModal(interaction, ctx) {
     const embed = msg.embeds[0] ? EmbedBuilder.from(msg.embeds[0]) : new EmbedBuilder();
     embed.addFields({ name: "Résultat", value: `❌ Refusé par <@${interaction.user.id}> — ${reason}` });
     await msg.edit({ embeds: [embed], components: [] });
+    // Fil de preuve : on le verrouille et l'archive après le refus.
+    if (ch?.isThread?.()) {
+      ch.setLocked(true).catch(() => {});
+      ch.setArchived(true).catch(() => {});
+    }
   } catch {
     /* message introuvable : on continue */
   }

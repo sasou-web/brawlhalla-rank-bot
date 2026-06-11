@@ -1,5 +1,30 @@
   # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — /lier par ID + validation par preuve (screenshot) pour les hauts rangs
+
+### 🔗 `/lier` accepte désormais un ID
+- Nouvelle option `id` sur `/lier` : `/lier id:123456` lie directement le compte sans passer
+  par la recherche de pseudo (utile quand la recherche par pseudo échoue côté API).
+- `pseudo` et `id` sont tous deux optionnels (l'un OU l'autre requis). Message d'aide si aucun.
+
+### 📸 Preuve par capture d'écran pour Diamond+ (fil privé)
+- Quand un membre lie un compte d'un rang ≥ **tier de preuve** (par défaut **Diamond**), le bot
+  crée un **fil privé** dans le salon de validation, y ajoute le joueur et le staff, et lui
+  demande de poster une **capture de sa page de profil en jeu** (pseudo + ID visibles).
+- Le staff voit la capture **et** les boutons Valider/Refuser au même endroit. À la décision,
+  le fil est verrouillé et archivé. Le membre est notifié (rôles attribués ou raison du refus).
+- *Note technique : les modals Discord n'acceptent pas d'images — le fil privé est la solution
+  la plus fluide pour collecter une preuve + valider au même endroit (upload natif Discord).*
+- Repli automatique sur la validation classique (embed dans le salon) si la création du fil
+  échoue (permissions, fonctionnalité indisponible).
+- Configurable depuis le **dashboard → Réglages** : activer/désactiver la preuve + choisir le
+  rang à partir duquel elle est exigée.
+
+### ✅ Vérifications
+- `npm run check` : **57 fichiers OK**. `npm test` : **93/93**.
+
+---
+
 ## Session — Bienvenue : ping intégré dans la carte V2
 
 - Le ping du nouveau membre était posté sur une **ligne séparée au-dessus** de l'embed de
