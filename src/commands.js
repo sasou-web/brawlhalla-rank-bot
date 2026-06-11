@@ -304,28 +304,24 @@ async function handleCombos(interaction) {
   const weapons = await weaponsWithCombos();
   const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
   await interaction.deferReply({ flags: EPHEMERAL_V2 }); // affichage privé V2 + le téléchargement vidéo peut dépasser 3s
-  const { flags, ...viewer } = await buildComboViewer(weapon);
-  return interaction.editReply(viewer);
+  return interaction.editReply(await buildComboViewer(weapon));
 }
 
 // Panneau public : ouvre un affichage PRIVÉ par utilisateur (usage simultané sans conflit).
 async function handleCombosOpen(interaction) {
   await interaction.deferReply({ flags: EPHEMERAL_V2 });
-  const { flags, ...viewer } = await buildComboViewer(interaction.values[0]);
-  return interaction.editReply(viewer);
+  return interaction.editReply(await buildComboViewer(interaction.values[0]));
 }
 // Dans l'affichage privé : changer d'arme.
 async function handleCombosWeapon(interaction) {
   await interaction.deferUpdate();
-  const { flags, ...viewer } = await buildComboViewer(interaction.values[0]);
-  return interaction.editReply({ ...viewer, attachments: [] });
+  return interaction.editReply({ ...(await buildComboViewer(interaction.values[0])), attachments: [] });
 }
 // Dans l'affichage privé : choisir un combo par son nom.
 async function handleCombosPick(interaction) {
   const weapon = interaction.customId.split(":")[1];
   await interaction.deferUpdate();
-  const { flags, ...viewer } = await buildComboViewer(weapon, interaction.values[0]);
-  return interaction.editReply({ ...viewer, attachments: [] });
+  return interaction.editReply({ ...(await buildComboViewer(weapon, interaction.values[0])), attachments: [] });
 }
 
 // ---------- /achievements ----------
@@ -335,7 +331,7 @@ async function handleAchievements(interaction, ctx) {
   await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 });
   const target = interaction.options.getUser("membre") ?? interaction.user;
   if (target.bot)
-    return interaction.editReply({ components: [new TextDisplayBuilder().setContent("Les bots n'ont pas de succès. 🤖")] });
+    return interaction.editReply({ components: [new TextDisplayBuilder().setContent("Les bots n'ont pas de succès. 🤖")], flags: MessageFlags.IsComponentsV2 });
 
   const unlocked = listUnlocked(interaction.guild.id, target.id); // Map id -> ts
   const lines = ACHIEVEMENTS.map((a) => {
@@ -348,7 +344,7 @@ async function handleAchievements(interaction, ctx) {
     .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join("\n").slice(0, 4000)))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${unlocked.size}/${ACHIEVEMENTS.length} débloqués`));
-  return interaction.editReply({ components: [container] });
+  return interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
 }
 
 async function handleResetSeason(interaction, ctx) {

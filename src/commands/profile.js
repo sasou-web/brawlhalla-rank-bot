@@ -47,7 +47,7 @@ export async function handleTop(interaction, ctx) {
     .slice(0, 15);
 
   if (entries.length === 0)
-    return interaction.editReply({ components: [tdc("Aucun membre lié avec un rank 1v1 pour le moment.")] });
+    return interaction.editReply({ components: [tdc("Aucun membre lié avec un rank 1v1 pour le moment.")], flags: V2 });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = entries.map((e, i) => {
@@ -56,7 +56,7 @@ export async function handleTop(interaction, ctx) {
     return `${place} <@${e.id}> — ${t ? `${tierEmoji(t)} ${t}` : "?"} (${e.rating})`;
   });
   const card = v2Card(0xf1c40f, "## 🏆 Classement 1v1 — membres liés", SEP, lines.join("\n"));
-  return interaction.editReply({ components: [card], allowedMentions: { parse: [] } });
+  return interaction.editReply({ components: [card], flags: V2, allowedMentions: { parse: [] } });
 }
 
 // ---------- /stats /rank /legendes /equipe (lookup) ----------
@@ -596,9 +596,9 @@ export async function handleLeaderboard(interaction, ctx) {
   try {
     rankings = await getRankings(mode, region, 1, 10);
   } catch (err) {
-    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)] });
+    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
   }
-  if (!rankings.length) return interaction.editReply({ components: [tdc("Aucun résultat.")] });
+  if (!rankings.length) return interaction.editReply({ components: [tdc("Aucun résultat.")], flags: V2 });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = rankings.slice(0, 10).map((r, i) => {
@@ -608,7 +608,7 @@ export async function handleLeaderboard(interaction, ctx) {
     return `${place} ${name} — ${t ? `${tierEmoji(t)} ${t}` : "?"} (${r.rating})`;
   });
   const card = v2Card(0xf1c40f, `## 🏆 Leaderboard ${mode} — ${region}`, SEP, lines.join("\n"));
-  return interaction.editReply({ components: [card] });
+  return interaction.editReply({ components: [card], flags: V2 });
 }
 
 // ---------- /ping ----------
@@ -653,7 +653,7 @@ export async function handlePing(interaction, ctx) {
     `-# ${allOk ? "Tout est opérationnel." : "Si « joueurs » est rouge mais « leaderboard » vert, c'est une panne côté API Brawlhalla (pas le bot)."}`,
   );
 
-  return interaction.editReply({ components: [v2Card(allOk ? 0x2ecc71 : 0xe74c3c, ...nodes)] });
+  return interaction.editReply({ components: [v2Card(allOk ? 0x2ecc71 : 0xe74c3c, ...nodes)], flags: V2 });
 }
 
 // ---------- /help ----------
