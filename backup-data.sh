@@ -27,7 +27,21 @@ mkdir -p backups
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 ARCHIVE="backups/data_${STAMP}.tar.gz"
 
-tar -czf "$ARCHIVE" data
+# Checkpoint WAL (best-effort) : fusionne data/bot.db-wal dans data/bot.db et tronque le
+# journal. Evite d'archiver un WAL gonfle (qui peut depasser la taille de la base elle-meme).
+# Connexion separee : sans danger pour le bot qui tourne (WAL partage).
+if command -v sqlite3 >/dev/null 2>&1 && [ -f data/bot.db ]; then
+  sqlite3 data/bot.db "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+fi
+
+# Archive data/, en EXCLUANT :
+#  - les anciens JSON deja migres vers SQLite (*.migrated) : poids mort, ne changent plus ;
+#  - bot.db-shm : index memoire partagee, reconstruit automatiquement (inutile au restore).
+# bot.db + bot.db-wal sont conserves : ensemble ils garantissent une restauration coherente.
+tar -czf "$ARCHIVE" \
+  --exclude='data/*.migrated' \
+  --exclude='data/bot.db-shm' \
+  data
 echo "[$(date '+%F %T')] Sauvegarde locale creee : ${ARCHIVE}"
 
 # Ne conserve que les 14 archives locales les plus recentes.
