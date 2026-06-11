@@ -8,6 +8,9 @@ import { syncMember } from "../sync.js";
 // Flag "reponse ephemere" (visible uniquement par l'auteur de l'interaction).
 export const EPHEMERAL = MessageFlags.Ephemeral;
 
+// Flag combiné éphémère + Components V2 (pour les réponses différées en V2).
+export const EPHEMERAL_V2 = MessageFlags.Ephemeral | MessageFlags.IsComponentsV2;
+
 /**
  * Défense en profondeur : vérifie que l'auteur de l'interaction possède la permission
  * requise côté serveur, sans se reposer uniquement sur `setDefaultMemberPermissions`

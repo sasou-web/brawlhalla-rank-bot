@@ -7,6 +7,19 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+} from "discord.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA = resolve(__dirname, "..", "data", "combos.json");
@@ -183,86 +196,135 @@ async function getComboVideo(weapon, c) {
   }
 }
 
-// ---------- Payloads Discord ----------
+// ---------- Payloads Discord (Components V2) ----------
 
-// Panneau PUBLIC persistant : juste un menu d'armes. Chaque clic ouvre un
-// affichage privé (ephemeral) propre à l'utilisateur -> usage simultané sans conflit.
+const COMBO_COLOR = 0xf1c40f;
+const cbDivider = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+
+// Panneau PUBLIC persistant : guide « comment ça marche » + menu d'armes, en un seul bloc V2.
+// Chaque clic ouvre un affichage privé (ephemeral) propre à l'utilisateur.
 export async function buildPanelMessage() {
   const weapons = await weaponsWithCombos();
-  const embed = {
-    color: 0xf1c40f,
-    title: "🥊 Combos Brawlhalla",
-    description:
-      "Choisis ton **arme** ci-dessous pour parcourir ses **true combos** (vidéo + stats).\n" +
-      "🔒 L'affichage est **privé** : chacun explore de son côté, sans déranger les autres.",
-    footer: { text: "Source : BrawlDatabase.com" },
-  };
-  const menu = {
-    type: 3,
-    custom_id: "cbp_open",
-    placeholder: "Choisis une arme…",
-    options: weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) } })),
-  };
-  return { embeds: [embed], components: [{ type: 1, components: [menu] }] };
+  const container = new ContainerBuilder().setAccentColor(COMBO_COLOR);
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "## 🥊 Combos Brawlhalla — comment ça marche\n" +
+        "Choisis ton **arme** ci-dessous (ou tape `/combos`) pour parcourir les meilleurs **true combos** du jeu.",
+    ),
+  );
+
+  container.addSeparatorComponents(cbDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "🎯 **Choisis ton arme** → tu vois ses combos, du plus simple au plus technique.\n" +
+        "🎬 **Pour chaque combo** : une vidéo, sa notation, sa **facilité /10**, ses **dégâts** et la **dextérité** requise.\n" +
+        "🔄 **Change d'arme ou de combo** quand tu veux via les menus déroulants.\n" +
+        "🔒 **C'est privé** : l'affichage n'est visible que par toi → plusieurs personnes peuvent l'utiliser en même temps.",
+    ),
+  );
+
+  container.addSeparatorComponents(cbDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "💡 **Conseil débutant** — commence par les combos **facilité 10/10**, les plus faciles à placer en match.",
+    ),
+  );
+
+  container.addSeparatorComponents(cbDivider());
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("cbp_open")
+    .setPlaceholder("Choisis une arme…")
+    .addOptions(weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) } })));
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(menu));
+
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent("-# Données & vidéos : BrawlDatabase.com"));
+
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
-// Affichage privé d'un combo : vidéo jointe + stats + menu arme + menu noms de combos.
+// Affichage privé d'un combo (Components V2) : vidéo + stats dans le cadre, menus + lien dessous.
+// Renvoie un payload SANS flags : l'appelant diffère la réponse avec EPHEMERAL_V2.
 export async function buildComboViewer(weapon, id) {
   const list = await combosFor(weapon);
-  if (!list.length) return { content: "Aucun combo pour cette arme.", embeds: [], components: [], files: [] };
+  if (!list.length) {
+    return {
+      components: [new TextDisplayBuilder().setContent("Aucun combo pour cette arme.")],
+      files: [],
+      flags: MessageFlags.IsComponentsV2,
+    };
+  }
   let c = id != null ? list.find((x) => String(x.id) === String(id)) : null;
   if (!c) c = list[0];
   const pos = list.indexOf(c);
   const weapons = await weaponsWithCombos();
 
-  const embed = {
-    color: 0xf1c40f,
-    title: `${weaponEmoji(weapon)} ${weaponLabel(weapon)} — ${c.notation}`,
-    url: c.url,
-    fields: [
-      { name: "🎯 Facilité", value: `${c.usability}/10`, inline: true },
-      { name: "💥 Dégâts", value: String(c.damage), inline: true },
-      { name: "✋ Dextérité", value: String(c.dexterity), inline: true },
-      { name: "📊 Dégâts moyens", value: String(c.avgDamage), inline: true },
-    ],
-    footer: { text: `Combo ${pos + 1}/${list.length} · source BrawlDatabase.com` },
-  };
+  const container = new ContainerBuilder().setAccentColor(COMBO_COLOR);
 
-  const weaponMenu = {
-    type: 3,
-    custom_id: "cbp_weapon",
-    placeholder: `${weaponLabel(weapon)} — changer d'arme`,
-    options: weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) }, default: w === weapon })),
-  };
-  // Discord limite un menu à 25 options : on liste les 25 meilleurs combos (par facilité).
-  const shown = list.slice(0, 25);
-  const comboMenu = {
-    type: 3,
-    custom_id: `cbp_pick:${weapon}`,
-    placeholder: "Choisis un combo…",
-    options: shown.map((x) => ({
-      label: x.notation.slice(0, 100),
-      description: `Facilité ${x.usability}/10 · ${x.avgDamage} dmg moy.`.slice(0, 100),
-      value: String(x.id),
-      default: x.id === c.id,
-    })),
-  };
-  const linkRow = {
-    type: 1,
-    components: [{ type: 2, style: 5, label: "Voir sur BrawlDB", url: c.url }],
-  };
-
+  // Vidéo en haut du cadre (Media Gallery). Repli sur un lien si le téléchargement échoue.
   let files = [];
-  let content = "";
+  const name = `${weapon}-${c.id}.mp4`;
   const buf = await getComboVideo(weapon, c);
-  if (buf) files = [{ attachment: buf, name: `${weapon}-${c.id}.mp4` }];
-  else content = c.video; // repli : lien brut si le téléchargement échoue
+  if (buf) {
+    files = [{ attachment: buf, name }];
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${name}`)),
+    );
+    container.addSeparatorComponents(cbDivider());
+  }
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`## ${weaponEmoji(weapon)} ${weaponLabel(weapon)}\n**${c.notation}**`),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `🎯 **Facilité :** ${c.usability}/10\n` +
+        `💥 **Dégâts :** ${c.damage}\n` +
+        `✋ **Dextérité :** ${c.dexterity}\n` +
+        `📊 **Dégâts moyens :** ${c.avgDamage}`,
+    ),
+  );
+  if (!buf) {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`🎥 [Voir la vidéo](${c.video})`));
+  }
+
+  container.addSeparatorComponents(cbDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# Combo ${pos + 1}/${list.length} · source BrawlDatabase.com`),
+  );
+
+  // Menus (changer d'arme / de combo) + lien, sous le cadre.
+  const weaponMenu = new StringSelectMenuBuilder()
+    .setCustomId("cbp_weapon")
+    .setPlaceholder(`${weaponLabel(weapon)} — changer d'arme`)
+    .addOptions(weapons.map((w) => ({ label: weaponLabel(w), value: w, emoji: { name: weaponEmoji(w) }, default: w === weapon })));
+
+  const shown = list.slice(0, 25); // Discord limite un menu à 25 options.
+  const comboMenu = new StringSelectMenuBuilder()
+    .setCustomId(`cbp_pick:${weapon}`)
+    .setPlaceholder("Choisis un combo…")
+    .addOptions(
+      shown.map((x) => ({
+        label: x.notation.slice(0, 100),
+        description: `Facilité ${x.usability}/10 · ${x.avgDamage} dmg moy.`.slice(0, 100),
+        value: String(x.id),
+        default: x.id === c.id,
+      })),
+    );
+
+  const linkRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Voir sur BrawlDB").setURL(c.url),
+  );
 
   return {
-    content,
-    embeds: [embed],
-    components: [{ type: 1, components: [weaponMenu] }, { type: 1, components: [comboMenu] }, linkRow],
+    components: [
+      container,
+      new ActionRowBuilder().addComponents(weaponMenu),
+      new ActionRowBuilder().addComponents(comboMenu),
+      linkRow,
+    ],
     files,
+    flags: MessageFlags.IsComponentsV2,
     allowedMentions: { parse: [] },
   };
 }

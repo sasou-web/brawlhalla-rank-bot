@@ -91,7 +91,7 @@ import {
 } from "./commands/tournament.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { loadCombos, weaponsWithCombos, buildComboViewer } from "./combos.js";
-import { EPHEMERAL, logAudit, dmUser, doSync, requirePermission } from "./commands/shared.js";
+import { EPHEMERAL, EPHEMERAL_V2, logAudit, dmUser, doSync, requirePermission } from "./commands/shared.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
 import { awardSeasonRewards } from "./season.js";
 import { ACHIEVEMENTS, listUnlocked } from "./achievements.js";
@@ -298,25 +298,29 @@ async function handleCombos(interaction) {
   const opt = interaction.options.getString("arme");
   const weapons = await weaponsWithCombos();
   const weapon = opt && weapons.includes(opt) ? opt : weapons[0];
-  await interaction.deferReply({ flags: EPHEMERAL }); // affichage privé + le téléchargement vidéo peut dépasser 3s
-  return interaction.editReply(await buildComboViewer(weapon));
+  await interaction.deferReply({ flags: EPHEMERAL_V2 }); // affichage privé V2 + le téléchargement vidéo peut dépasser 3s
+  const { flags, ...viewer } = await buildComboViewer(weapon);
+  return interaction.editReply(viewer);
 }
 
 // Panneau public : ouvre un affichage PRIVÉ par utilisateur (usage simultané sans conflit).
 async function handleCombosOpen(interaction) {
-  await interaction.deferReply({ flags: EPHEMERAL });
-  return interaction.editReply(await buildComboViewer(interaction.values[0]));
+  await interaction.deferReply({ flags: EPHEMERAL_V2 });
+  const { flags, ...viewer } = await buildComboViewer(interaction.values[0]);
+  return interaction.editReply(viewer);
 }
 // Dans l'affichage privé : changer d'arme.
 async function handleCombosWeapon(interaction) {
   await interaction.deferUpdate();
-  return interaction.editReply({ ...(await buildComboViewer(interaction.values[0])), attachments: [] });
+  const { flags, ...viewer } = await buildComboViewer(interaction.values[0]);
+  return interaction.editReply({ ...viewer, attachments: [] });
 }
 // Dans l'affichage privé : choisir un combo par son nom.
 async function handleCombosPick(interaction) {
   const weapon = interaction.customId.split(":")[1];
   await interaction.deferUpdate();
-  return interaction.editReply({ ...(await buildComboViewer(weapon, interaction.values[0])), attachments: [] });
+  const { flags, ...viewer } = await buildComboViewer(weapon, interaction.values[0]);
+  return interaction.editReply({ ...viewer, attachments: [] });
 }
 
 // ---------- /achievements ----------
