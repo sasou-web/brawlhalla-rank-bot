@@ -145,101 +145,89 @@ function teammate(team, brawlhallaId) {
   return team.brawlhalla_id_one !== brawlhallaId ? team.username_one : team.username_two;
 }
 
-// Construit l'embed correspondant a un onglet. p = profil, legends = Map id->info.
-function buildProfileEmbed(view, p, legends) {
-  const footer = { text: `Brawlhalla ID : ${p.brawlhallaId} · change d'onglet avec les boutons` };
+// Construit la CARTE V2 correspondant a un onglet. p = profil, legends = Map id->info.
+function buildProfileCard(view, p, legends) {
+  const footer = `-# Brawlhalla ID : ${p.brawlhallaId} · change d'onglet avec les boutons`;
 
-  // ---------- Onglet RANKED : tout le competitif (1v1 + 2v2 + legende classee) ----------
+  // ---------- Onglet RANKED ----------
   if (view === "ranked") {
-    const embed = new EmbedBuilder().setTitle(`🥊 Ranked — ${p.name}`).setColor(0x9b59b6).setFooter(footer);
-
+    const nodes = [`## 🥊 Ranked — ${p.name}`, SEP];
     if (p.ratings["1v1"] > 0) {
       const tier = p.tiers["1v1"] === "Valhallan" ? "Valhallan" : tierFromRating(p.ratings["1v1"]);
       const losses = Math.max(0, p.games1v1 - p.wins1v1);
       const lines = [
+        "**🥊 1v1**",
         `${tierEmoji(p.tiers["1v1"])} **${tier}** — ${p.ratings["1v1"]} / ${p.peak1v1} (peak)`,
         `**${p.wins1v1}** V • **${losses}** D — ${p.games1v1} games (**${winrate(p.wins1v1, p.games1v1)}**)`,
         `🌍 Rang mondial : **#${p.globalRank || "?"}** · Région : **${p.region}**`,
       ];
       const glory = estimateGlory(p);
       if (glory) lines.push(`🏅 Glory estimée : **≈ ${glory.totalGlory.toLocaleString("fr-FR")}**`);
-      embed.addFields({ name: "🥊 1v1", value: lines.join("\n") });
+      nodes.push(lines.join("\n"));
     } else {
-      embed.addFields({ name: "🥊 1v1", value: "Non classé" });
+      nodes.push("**🥊 1v1**\nNon classé");
     }
 
     const bestLeg = [...p.legendsRanked].sort((a, b) => (b.games ?? 0) - (a.games ?? 0))[0];
     if (bestLeg && bestLeg.games > 0) {
       const name = legends.get(bestLeg.legend_id)?.name ?? `#${bestLeg.legend_id}`;
       const lossL = Math.max(0, bestLeg.games - bestLeg.wins);
-      embed.addFields({
-        name: "⭐ Meilleure légende classée",
-        value:
+      nodes.push(
+        SEP,
+        `**⭐ Meilleure légende classée**\n` +
           `**${name}** — ${bestLeg.tier ?? tierFromRating(bestLeg.rating)} (${bestLeg.rating} / ${bestLeg.peak_rating})\n` +
           `${bestLeg.wins} V • ${lossL} D (${winrate(bestLeg.wins, bestLeg.games)})`,
-        inline: true,
-      });
+      );
     }
 
     if (p.best2v2) {
       const t = p.best2v2;
       const tier = p.tiers["2v2"] === "Valhallan" ? "Valhallan" : tierFromRating(t.rating);
       const loss2 = Math.max(0, t.games - t.wins);
-      embed.addFields({
-        name: "👥 Meilleure équipe 2v2",
-        value:
+      nodes.push(
+        SEP,
+        `**👥 Meilleure équipe 2v2**\n` +
           `${tierEmoji(p.tiers["2v2"])} **${tier}** — ${t.rating} / ${t.peak_rating} (peak)\n` +
           `🤝 avec **${teammate(t, p.brawlhallaId) ?? "?"}**\n` +
           `${t.wins} V • ${loss2} D (${winrate(t.wins, t.games)})`,
-        inline: true,
-      });
+      );
     } else {
-      embed.addFields({ name: "👥 Meilleure équipe 2v2", value: "Non classé", inline: true });
+      nodes.push(SEP, "**👥 Meilleure équipe 2v2**\nNon classé");
     }
-    return embed;
+    nodes.push(SEP, footer);
+    return v2Card(0x9b59b6, ...nodes);
   }
 
-  // ---------- Onglet LEGENDES : top legendes les plus jouees (tous modes) ----------
+  // ---------- Onglet LEGENDES ----------
   if (view === "legends") {
-    const embed = new EmbedBuilder().setTitle(`⚔️ Légendes — ${p.name}`).setColor(0xe67e22).setFooter(footer);
     const top = [...p.legendsAll].sort((a, b) => (b.games ?? 0) - (a.games ?? 0)).slice(0, 8);
-    if (!top.length) {
-      embed.setDescription("*Aucune statistique de légende.*");
-    } else {
-      embed.setDescription(
-        top
+    const body = top.length
+      ? top
           .map((l, i) => {
             const name = legends.get(l.legend_id)?.name ?? `#${l.legend_id}`;
             return `**${i + 1}.** ${name} — ${l.games.toLocaleString("fr-FR")} games · **${winrate(l.wins, l.games)}** WR`;
           })
-          .join("\n"),
-      );
-    }
-    return embed;
+          .join("\n")
+      : "*Aucune statistique de légende.*";
+    return v2Card(0xe67e22, `## ⚔️ Légendes — ${p.name}`, SEP, body, SEP, footer);
   }
 
-  // ---------- Onglet EQUIPES 2v2 : toutes les equipes classees ----------
+  // ---------- Onglet EQUIPES 2v2 ----------
   if (view === "teams") {
-    const embed = new EmbedBuilder().setTitle(`👥 Équipes 2v2 — ${p.name}`).setColor(0x1abc9c).setFooter(footer);
     const teams = [...p.teams].sort((a, b) => b.rating - a.rating).slice(0, 12);
-    if (!teams.length) {
-      embed.setDescription("*Aucune équipe 2v2 classée.*");
-    } else {
-      embed.setDescription(
-        teams
+    const body = teams.length
+      ? teams
           .map((t) => {
             const tier = t.tier ?? tierFromRating(t.rating);
             const loss = Math.max(0, t.games - t.wins);
             return `**${teammate(t, p.brawlhallaId) ?? "?"}** — ${tierEmoji(tier.split(" ")[0])} ${tier} (${t.rating}) · ${t.wins}V/${loss}D · ${winrate(t.wins, t.games)}`;
           })
-          .join("\n"),
-      );
-    }
-    return embed;
+          .join("\n")
+      : "*Aucune équipe 2v2 classée.*";
+    return v2Card(0x1abc9c, `## 👥 Équipes 2v2 — ${p.name}`, SEP, body, SEP, footer);
   }
 
-  // ---------- Onglet VUE D'ENSEMBLE : la carte de visite (carriere, pas le detail ranked) ----------
-  const embed = new EmbedBuilder().setTitle(`🪪 Profil — ${p.name}`).setColor(0x4ea1ff).setFooter(footer);
+  // ---------- Onglet VUE D'ENSEMBLE ----------
   const playSec = p.legendsAll.reduce((a, l) => a + (l.match_time ?? 0), 0);
   const totLoss = Math.max(0, p.totalGames - p.totalWins);
   const fav = [...p.legendsAll].sort((a, b) => (b.games ?? 0) - (a.games ?? 0))[0];
@@ -252,24 +240,23 @@ function buildProfileEmbed(view, p, legends) {
   const rank2 = p.tiers["2v2"]
     ? `${tierEmoji(p.tiers["2v2"])} **${p.tiers["2v2"]}**${p.ratings["2v2"] ? ` (${p.ratings["2v2"]})` : ""}`
     : "Non classé";
-  embed.addFields(
-    { name: "Niveau", value: `**${p.level}**`, inline: true },
-    { name: "Région", value: `${p.region}`, inline: true },
-    { name: "Temps de jeu", value: formatPlaytime(playSec), inline: true },
-    {
-      name: "Games (tous modes)",
-      value: `**${p.totalGames.toLocaleString("fr-FR")}** · ${winrate(p.totalWins, p.totalGames)} WR`,
-      inline: true,
-    },
-    {
-      name: "Victoires / Défaites",
-      value: `${p.totalWins.toLocaleString("fr-FR")} • ${totLoss.toLocaleString("fr-FR")}`,
-      inline: true,
-    },
-    { name: "Légende préférée", value: favTxt, inline: true },
-    { name: "Rangs", value: `🥊 1v1 : ${rank1}\n👥 2v2 : ${rank2}`, inline: false },
+  const info = [
+    `🎚️ **Niveau** ${p.level} · 🌍 **Région** ${p.region}`,
+    `⏱️ **Temps de jeu** ${formatPlaytime(playSec)}`,
+    `🎮 **Games (tous modes)** ${p.totalGames.toLocaleString("fr-FR")} · ${winrate(p.totalWins, p.totalGames)} WR`,
+    `✅ **${p.totalWins.toLocaleString("fr-FR")}** V • ❌ **${totLoss.toLocaleString("fr-FR")}** D`,
+    `⭐ **Légende préférée** ${favTxt}`,
+  ].join("\n");
+  return v2Card(
+    0x4ea1ff,
+    `## 🪪 Profil — ${p.name}`,
+    SEP,
+    info,
+    SEP,
+    `**Rangs**\n🥊 1v1 : ${rank1}\n👥 2v2 : ${rank2}`,
+    SEP,
+    footer,
   );
-  return embed;
 }
 
 // Logique commune aux 4 commandes : resout la cible, charge le profil, repond avec l'onglet + boutons.
@@ -499,7 +486,7 @@ export async function handleVersus(interaction, ctx) {
 
 async function respondProfile(interaction, view) {
   if (!(await enforceCooldown(interaction, "profile", 4000))) return;
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
 
   const idOpt = interaction.options.getInteger("id");
   const pseudo = interaction.options.getString("pseudo")?.trim();
@@ -507,7 +494,7 @@ async function respondProfile(interaction, view) {
   // Cas direct : Brawlhalla ID, ou membre/soi-meme lie -> profil direct (aucune recherche).
   if (idOpt || !pseudo) {
     const target = await resolveTarget(interaction);
-    if (target.error) return interaction.editReply(target.error);
+    if (target.error) return interaction.editReply({ components: [tdc(target.error)], flags: V2 });
     return showProfile(interaction, view, target.brawlhallaId);
   }
 
@@ -516,9 +503,10 @@ async function respondProfile(interaction, view) {
   try {
     players = await searchPlayers(pseudo);
   } catch (err) {
-    return interaction.editReply(err.pending ? err.message : `Erreur API : ${err.message}`);
+    return interaction.editReply({ components: [tdc(err.pending ? err.message : `Erreur API : ${err.message}`)], flags: V2 });
   }
-  if (!players.length) return interaction.editReply(`Aucun joueur classé trouvé pour **${pseudo}**.`);
+  if (!players.length)
+    return interaction.editReply({ components: [tdc(`Aucun joueur classé trouvé pour **${pseudo}**.`)], flags: V2 });
   if (players.length === 1) return showProfile(interaction, view, players[0].id);
 
   // Plusieurs joueurs (memes pseudos / pseudos proches) : on affiche un sélecteur.
@@ -534,8 +522,8 @@ async function respondProfile(interaction, view) {
     }),
   );
   return interaction.editReply({
-    content: `Plusieurs joueurs correspondent à **${pseudo}**. Choisis le bon :`,
-    components: [row],
+    components: [tdc(`Plusieurs joueurs correspondent à **${pseudo}**. Choisis le bon :`), row],
+    flags: V2,
   });
 }
 
@@ -545,13 +533,12 @@ async function showProfile(interaction, view, brawlhallaId) {
   try {
     p = await getPlayerProfile(brawlhallaId);
   } catch (err) {
-    return interaction.editReply({ content: `Erreur API : ${err.message}`, embeds: [], components: [] });
+    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
   }
   const legends = await getLegends().catch(() => new Map());
   return interaction.editReply({
-    content: "",
-    embeds: [buildProfileEmbed(view, p, legends)],
-    components: [profileNavRow(view, p.brawlhallaId)],
+    components: [buildProfileCard(view, p, legends), profileNavRow(view, p.brawlhallaId)],
+    flags: V2,
   });
 }
 
@@ -567,7 +554,7 @@ export async function handleProfilePick(interaction) {
   return showProfile(interaction, view, Number(idStr));
 }
 
-// Clic sur un onglet : recharge le profil (cache -> instantane) et remplace l'embed.
+// Clic sur un onglet : recharge le profil (cache -> instantane) et remplace la carte.
 export async function handleProfileNav(interaction) {
   const [, view, idStr] = interaction.customId.split(":");
   const brawlhallaId = Number(idStr);
@@ -577,12 +564,12 @@ export async function handleProfileNav(interaction) {
   try {
     p = await getPlayerProfile(brawlhallaId);
   } catch (err) {
-    return interaction.editReply({ content: `Erreur API : ${err.message}`, embeds: [], components: [] });
+    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
   }
   const legends = await getLegends().catch(() => new Map());
   return interaction.editReply({
-    embeds: [buildProfileEmbed(view, p, legends)],
-    components: [profileNavRow(view, brawlhallaId)],
+    components: [buildProfileCard(view, p, legends), profileNavRow(view, brawlhallaId)],
+    flags: V2,
   });
 }
 
