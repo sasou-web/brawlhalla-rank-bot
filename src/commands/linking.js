@@ -200,7 +200,8 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
       return interaction.editReply({
         content:
           `<@${userId}> ton rang **${top}** demande une **preuve** avant validation.\n` +
-          `📸 Un fil privé a été créé : ${res.thread}. Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`,
+          `📸 Tu as été ajouté à un **fil privé** : **[clique ici pour l'ouvrir](${res.url})**. ` +
+          `Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`,
         components: [],
         allowedMentions: { users: [userId] },
       });
@@ -260,7 +261,8 @@ async function openProofThread(interaction, channel, { userId, brawlhallaId, dat
       components: [actions],
       allowedMentions: { users: [userId], roles: settings.reviewerRoleId ? [settings.reviewerRoleId] : [] },
     });
-    return { ok: true, thread: `<#${thread.id}>` };
+    const url = `https://discord.com/channels/${interaction.guild.id}/${thread.id}`;
+    return { ok: true, threadId: thread.id, url };
   } catch (err) {
     return { ok: false, error: err.message };
   }
