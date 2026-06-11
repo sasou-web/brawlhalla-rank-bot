@@ -11,6 +11,11 @@ import {
   TextInputStyle,
   ChannelType,
   PermissionFlagsBits,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
 } from "discord.js";
 import { TIERS } from "./config.js";
 import { getAllLinks } from "./store.js";
@@ -327,21 +332,23 @@ async function handleCombosPick(interaction) {
 
 async function handleAchievements(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "achievements", 4000))) return;
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 });
   const target = interaction.options.getUser("membre") ?? interaction.user;
-  if (target.bot) return interaction.editReply("Les bots n'ont pas de succès. 🤖");
+  if (target.bot)
+    return interaction.editReply({ components: [new TextDisplayBuilder().setContent("Les bots n'ont pas de succès. 🤖")] });
 
   const unlocked = listUnlocked(interaction.guild.id, target.id); // Map id -> ts
   const lines = ACHIEVEMENTS.map((a) => {
     const got = unlocked.has(a.id);
     return `${got ? "✅" : "🔒"} ${a.emoji} **${a.name}** — ${got ? a.desc : `*${a.desc}*`}`;
   });
-  const embed = new EmbedBuilder()
-    .setTitle(`🏅 Succès — ${target.username}`)
-    .setColor(0xffd700)
-    .setDescription(lines.join("\n"))
-    .setFooter({ text: `${unlocked.size}/${ACHIEVEMENTS.length} débloqués` });
-  return interaction.editReply({ embeds: [embed] });
+  const container = new ContainerBuilder()
+    .setAccentColor(0xffd700)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 🏅 Succès — ${target.username}`))
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join("\n").slice(0, 4000)))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${unlocked.size}/${ACHIEVEMENTS.length} débloqués`));
+  return interaction.editReply({ components: [container] });
 }
 
 async function handleResetSeason(interaction, ctx) {

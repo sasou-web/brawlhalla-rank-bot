@@ -4,6 +4,11 @@ import {
   ButtonBuilder,
   ButtonStyle,
   AttachmentBuilder,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
 } from "discord.js";
 import {
   searchPlayers, getPlayerProfile, getRankings, getLegends, estimateGlory, tierFromRating, pingApi, getApiMetrics,
@@ -15,11 +20,25 @@ import { tierEmojiResolvable } from "../config.js";
 import { EPHEMERAL, tierEmoji } from "./shared.js";
 import { enforceCooldown } from "./cooldowns.js";
 
+// ---- Helpers Components V2 (cartes texte stylées : bordure de couleur + lignes fines) ----
+const V2 = MessageFlags.IsComponentsV2;
+const tdc = (s) => new TextDisplayBuilder().setContent(s);
+const sepc = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+function v2Card(color, ...nodes) {
+  const c = new ContainerBuilder().setAccentColor(color);
+  for (const n of nodes) {
+    if (n && n.__sep) c.addSeparatorComponents(sepc());
+    else if (n != null) c.addTextDisplayComponents(typeof n === "string" ? tdc(n) : n);
+  }
+  return c;
+}
+const SEP = { __sep: true };
+
 // ---------- /top ----------
 
 export async function handleTop(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "top", 5000))) return;
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
   const links = await getAllLinks();
   const entries = Object.entries(links)
     .map(([id, l]) => ({ id, name: l.name, rating: l.rating1v1 ?? 0, tiers: l.tiers }))
@@ -27,7 +46,8 @@ export async function handleTop(interaction, ctx) {
     .sort((a, b) => b.rating - a.rating)
     .slice(0, 15);
 
-  if (entries.length === 0) return interaction.editReply("Aucun membre lié avec un rank 1v1 pour le moment.");
+  if (entries.length === 0)
+    return interaction.editReply({ components: [tdc("Aucun membre lié avec un rank 1v1 pour le moment.")] });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = entries.map((e, i) => {
@@ -35,11 +55,8 @@ export async function handleTop(interaction, ctx) {
     const t = e.tiers?.["1v1"];
     return `${place} <@${e.id}> — ${t ? `${tierEmoji(t)} ${t}` : "?"} (${e.rating})`;
   });
-  const embed = new EmbedBuilder()
-    .setTitle("🏆 Classement 1v1 — membres liés")
-    .setColor(0xf1c40f)
-    .setDescription(lines.join("\n"));
-  return interaction.editReply({ embeds: [embed] });
+  const card = v2Card(0xf1c40f, "## 🏆 Classement 1v1 — membres liés", SEP, lines.join("\n"));
+  return interaction.editReply({ components: [card], allowedMentions: { parse: [] } });
 }
 
 // ---------- /stats /rank /legendes /equipe (lookup) ----------
@@ -571,7 +588,7 @@ export async function handleProfileNav(interaction) {
 
 export async function handleLeaderboard(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "leaderboard", 5000))) return;
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
   const mode = interaction.options.getString("mode") ?? "1v1";
   const region = interaction.options.getString("region") ?? "ALL";
 
@@ -579,9 +596,9 @@ export async function handleLeaderboard(interaction, ctx) {
   try {
     rankings = await getRankings(mode, region, 1, 10);
   } catch (err) {
-    return interaction.editReply(`Erreur API : ${err.message}`);
+    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)] });
   }
-  if (!rankings.length) return interaction.editReply("Aucun résultat.");
+  if (!rankings.length) return interaction.editReply({ components: [tdc("Aucun résultat.")] });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = rankings.slice(0, 10).map((r, i) => {
@@ -590,18 +607,15 @@ export async function handleLeaderboard(interaction, ctx) {
     const t = r.tier ?? null;
     return `${place} ${name} — ${t ? `${tierEmoji(t)} ${t}` : "?"} (${r.rating})`;
   });
-  const embed = new EmbedBuilder()
-    .setTitle(`🏆 Leaderboard ${mode} — ${region}`)
-    .setColor(0xf1c40f)
-    .setDescription(lines.join("\n"));
-  return interaction.editReply({ embeds: [embed] });
+  const card = v2Card(0xf1c40f, `## 🏆 Leaderboard ${mode} — ${region}`, SEP, lines.join("\n"));
+  return interaction.editReply({ components: [card] });
 }
 
 // ---------- /ping ----------
 
 export async function handlePing(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "ping", 5000))) return;
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: V2 });
   const r = await pingApi();
 
   const fmt = (c) =>
@@ -609,83 +623,64 @@ export async function handlePing(interaction, ctx) {
 
   const ws = interaction.client.ws.ping;
   const botTxt = ws >= 0 ? `${Math.round(ws)} ms` : "mesure en cours…";
-
   const allOk = r.leaderboard.ok && r.player.ok;
-  const embed = new EmbedBuilder()
-    .setTitle("🏓 Pong")
-    .setColor(allOk ? 0x2ecc71 : 0xe74c3c)
-    .addFields(
-      { name: "API — leaderboard", value: fmt(r.leaderboard), inline: true },
-      { name: "API — joueurs", value: fmt(r.player), inline: true },
-      { name: "Latence bot (gateway)", value: botTxt, inline: false },
-    );
 
-  // Fiabilité observée depuis le démarrage (compteurs en mémoire).
+  const nodes = [
+    "## 🏓 Pong",
+    SEP,
+    `🛰️ **API — leaderboard** : ${fmt(r.leaderboard)}\n` +
+      `🧑 **API — joueurs** : ${fmt(r.player)}\n` +
+      `📶 **Latence bot (gateway)** : ${botTxt}`,
+  ];
+
   const mx = await getApiMetrics().catch(() => null);
   if (mx && mx.meaningful > 0) {
     const pct = (mx.successRate * 100).toFixed(0);
     const cd = mx.cooldownActiveMs > 0 ? ` · ⏳ cooldown ${Math.ceil(mx.cooldownActiveMs / 1000)}s` : "";
     const pending = mx.pendingProfiles + mx.pendingSearches;
     const idxAge = mx.index.ageMs != null ? `il y a ${Math.floor(mx.index.ageMs / 60000)} min` : "jamais";
-    embed.addFields({
-      name: "Fiabilité API (depuis le démarrage)",
-      value:
+    nodes.push(
+      SEP,
+      `**Fiabilité API (depuis le démarrage)**\n` +
         `✅ **${pct}%** de succès sur ${mx.meaningful} appels${cd}\n` +
         `↻ ${mx.retries} retries · ⛔ ${mx.rateLimited} rate-limit · 💥 ${mx.serverErrors} erreurs serveur · 📡 ${mx.networkErrors} réseau\n` +
         `📥 file de récup : **${pending}** · 🗂️ index local : **${mx.index.count}** joueurs (sync ${idxAge})`,
-      inline: false,
-    });
+    );
   }
 
-  embed
-    .setFooter({
-      text: allOk
-        ? "Tout est opérationnel."
-        : "Si 'joueurs' est rouge mais 'leaderboard' vert, c'est une panne côté API Brawlhalla (pas le bot).",
-    })
-    .setTimestamp(new Date());
-  return interaction.editReply({ embeds: [embed] });
+  nodes.push(
+    SEP,
+    `-# ${allOk ? "Tout est opérationnel." : "Si « joueurs » est rouge mais « leaderboard » vert, c'est une panne côté API Brawlhalla (pas le bot)."}`,
+  );
+
+  return interaction.editReply({ components: [v2Card(allOk ? 0x2ecc71 : 0xe74c3c, ...nodes)] });
 }
 
 // ---------- /help ----------
 
 export async function handleHelp(interaction, ctx) {
-  const embed = new EmbedBuilder()
-    .setColor(0x7c5cff)
-    .setTitle("🐾 Aide — les commandes essentielles")
-    .setDescription("Voici l'essentiel pour bien démarrer. La plupart des commandes acceptent un **membre**, un **pseudo** ou un **Brawlhalla ID**.")
-    .addFields(
-      {
-        name: "🎮 Ton compte",
-        value: [
-          "`/lier` — Relie ton compte Brawlhalla et reçois tes **rôles de rank** automatiquement.",
-          "`/delier` — Retire la liaison de ton compte.",
-        ].join("\n"),
-      },
-      {
-        name: "📊 Tes stats",
-        value: [
-          "`/carte` — Ta **carte profil** en image (rank, winrate, main, Glory).",
-          "`/rank` — Le détail de ton **Ranked** 1v1 & 2v2.",
-          "`/stats` — Ta **fiche complète** (légendes, équipes…).",
-          "`/progression` — La **courbe** de ton rating au fil du temps.",
-          "`/versus` — **Compare-toi** à un autre joueur.",
-        ].join("\n"),
-      },
-      {
-        name: "🏆 Classements",
-        value: [
-          "`/top` — Classement des **membres liés** du serveur.",
-          "`/leaderboard` — Le **top 10 officiel** Brawlhalla.",
-          "`/niveau` · `/classement-niveaux` — Ton **XP** et le top du serveur.",
-        ].join("\n"),
-      },
-      {
-        name: "🎟️ Tournoi",
-        value: "`/bracket` — Affiche le **bracket** du tournoi en cours.",
-      },
-    )
-    .setFooter({ text: "Astuce : commence par /lier pour débloquer tes rôles et tes stats." });
-
-  return interaction.reply({ embeds: [embed], flags: EPHEMERAL });
+  const card = v2Card(
+    0x7c5cff,
+    "## 🐾 Aide — les commandes essentielles\nLa plupart des commandes acceptent un **membre**, un **pseudo** ou un **Brawlhalla ID**.",
+    SEP,
+    "### 🎮 Ton compte\n" +
+      "`/lier` — relie ton compte Brawlhalla & reçois tes **rôles de rank**\n" +
+      "`/delier` — retire la liaison",
+    SEP,
+    "### 📊 Tes stats\n" +
+      "`/carte` — ta **carte profil** en image\n" +
+      "`/rank` — détail **Ranked** 1v1 & 2v2\n" +
+      "`/stats` — ta **fiche complète** (légendes, équipes)\n" +
+      "`/progression` — la **courbe** de ton rating\n" +
+      "`/versus` — **compare-toi** à un autre joueur",
+    SEP,
+    "### 🏆 Classements\n" +
+      "`/top` — classement des **membres liés**\n" +
+      "`/leaderboard` — le **top 10 officiel** Brawlhalla\n" +
+      "`/niveau` · `/classement-niveaux` — ton **XP** et le top serveur",
+    SEP,
+    "### 🎟️ Tournoi\n`/bracket` — affiche le **bracket** du tournoi en cours",
+    "-# Astuce : commence par /lier pour débloquer tes rôles et tes stats.",
+  );
+  return interaction.reply({ components: [card], flags: EPHEMERAL | V2 });
 }
