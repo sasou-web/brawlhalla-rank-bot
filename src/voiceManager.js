@@ -1,4 +1,14 @@
-import { ChannelType } from "discord.js";
+import {
+  ChannelType,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+} from "discord.js";
 import {
   getTempConfig,
   getHub,
@@ -15,39 +25,72 @@ import {
  * - `cleanupTempChannels(guild)` : nettoyage des salons vides/orphelins au démarrage.
  */
 
-// Panneau de controle poste dans le chat du salon vocal (composants en JSON brut).
+// Panneau de controle poste dans le chat du salon vocal (Components V2).
+// Mise en page : en-tete + deux groupes thematiques (acces/apparence, membres/propriete)
+// avec leurs boutons juste en dessous, et le ping du proprietaire dans le pied de cadre.
+function vcDivider() {
+  return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+}
+
 function voiceControlPanel(ownerId) {
-  const embed = {
-    title: "🎛️ Panneau de contrôle du salon",
-    description:
-      `Salon de <@${ownerId}>. Le créateur peut :\n` +
-      "🔒 **Verrouiller** (personne ne rejoint) · 🔓 **Ouvrir**\n" +
-      "👥 **Limite** de membres · ✏️ **Renommer**\n" +
-      "⛔ **Bloquer** un membre · ✅ **Autoriser** un membre\n" +
-      "👑 **Réclamer** le salon (si le créateur est parti)",
-    color: 0x1abc9c,
-  };
-  const row1 = {
-    type: 1,
-    components: [
-      { type: 2, style: 2, emoji: { name: "🔒" }, label: "Verrouiller", custom_id: "vc_lock" },
-      { type: 2, style: 2, emoji: { name: "🔓" }, label: "Ouvrir", custom_id: "vc_unlock" },
-      { type: 2, style: 2, emoji: { name: "👥" }, label: "Limite", custom_id: "vc_limit" },
-      { type: 2, style: 2, emoji: { name: "✏️" }, label: "Renommer", custom_id: "vc_rename" },
-    ],
-  };
-  const row2 = {
-    type: 1,
-    components: [
-      { type: 2, style: 4, emoji: { name: "⛔" }, label: "Bloquer", custom_id: "vc_block" },
-      { type: 2, style: 3, emoji: { name: "✅" }, label: "Autoriser", custom_id: "vc_permit" },
-      { type: 2, style: 1, emoji: { name: "👑" }, label: "Réclamer", custom_id: "vc_claim" },
-    ],
-  };
+  const container = new ContainerBuilder().setAccentColor(0x1abc9c);
+
+  // En-tete : message d'accueil clair pour un membre lambda.
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "## 🎛️ Panneau de contrôle du salon\n" +
+        "Bienvenue dans **ta room** ! Gère-la en un clic avec les boutons ci-dessous.\n" +
+        "-# 👑 Seul le créateur du salon peut utiliser ces commandes.",
+    ),
+  );
+
+  // Groupe 1 : acces & apparence.
+  container.addSeparatorComponents(vcDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "### 🔧 Accès & apparence\n" +
+        "🔒 **Verrouiller** — plus personne ne peut rejoindre\n" +
+        "🔓 **Ouvrir** — tout le monde peut rejoindre\n" +
+        "👥 **Limite** — fixe le nombre max de membres\n" +
+        "✏️ **Renommer** — change le nom du salon",
+    ),
+  );
+  container.addActionRowComponents(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("vc_lock").setLabel("Verrouiller").setEmoji("🔒").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("vc_unlock").setLabel("Ouvrir").setEmoji("🔓").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("vc_limit").setLabel("Limite").setEmoji("👥").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("vc_rename").setLabel("Renommer").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+
+  // Groupe 2 : membres & propriete.
+  container.addSeparatorComponents(vcDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      "### 👥 Membres & propriété\n" +
+        "⛔ **Bloquer** — expulse un membre et l'empêche de revenir\n" +
+        "✅ **Autoriser** — réautorise un membre bloqué\n" +
+        "👑 **Réclamer** — deviens propriétaire si le créateur est parti",
+    ),
+  );
+  container.addActionRowComponents(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("vc_block").setLabel("Bloquer").setEmoji("⛔").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("vc_permit").setLabel("Autoriser").setEmoji("✅").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("vc_claim").setLabel("Réclamer").setEmoji("👑").setStyle(ButtonStyle.Primary),
+    ),
+  );
+
+  // Pied de cadre : ping du proprietaire (notifie grace a allowedMentions).
+  container.addSeparatorComponents(vcDivider());
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# 🎙️ Salon de <@${ownerId}> • ces réglages ne concernent que cette room`),
+  );
+
   return {
-    content: `<@${ownerId}> personnalise ta room 🎛️`,
-    embeds: [embed],
-    components: [row1, row2],
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
     allowedMentions: { users: [ownerId] },
   };
 }
