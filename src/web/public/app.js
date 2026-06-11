@@ -542,6 +542,7 @@ function sectionSchema(id, cfg) {
           { title: "Validation par preuve (hauts rangs)", sub: "À partir du rang choisi, un fil privé est créé : le joueur y poste une capture de sa page de profil en jeu (ID + pseudo visibles), le staff valide depuis ce fil.", fields: [
             ["Preuve obligatoire", "Active la demande de capture d'écran pour les hauts rangs.", toggle(cfg, "requireProofScreenshot")],
             ["Rang exigeant une preuve", "À partir de ce tier (inclus), une capture est demandée.", selectInput(cfg, "proofTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
+            ["Salon des fils de preuve", "⚠️ Doit être VISIBLE par les membres (sinon ils ne peuvent pas être ajoutés au fil privé). Vide = salon où /lier est lancé. Le staff doit avoir « Gérer les fils » pour les voir.", channelSelect(cfg, "proofChannelId", "text")],
           ] },
         ],
       };

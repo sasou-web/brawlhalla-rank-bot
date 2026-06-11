@@ -195,7 +195,8 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
   // Hauts rangs : on exige une preuve (capture du profil en jeu) dans un fil privé.
   const needsProof = settings.requireProofScreenshot && tierIndex(top) >= tierIndex(settings.proofTier);
   if (needsProof) {
-    const res = await openProofThread(interaction, channel, { userId, brawlhallaId, data, settings });
+    const proofParent = await resolveProofParent(interaction, settings);
+    const res = await openProofThread(interaction, proofParent, { userId, brawlhallaId, data, settings });
     if (res.ok) {
       return interaction.editReply({
         content:
@@ -206,8 +207,8 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
         allowedMentions: { users: [userId] },
       });
     }
-    // Échec de création du fil (permissions, fonctionnalité indispo) : repli sur la review classique.
-    await logAudit(interaction.guild, `⚠️ Création du fil de preuve impossible (${res.error}). Repli sur validation classique.`);
+    // Échec de création du fil (permissions, membre non ajoutable…) : repli sur la review classique.
+    await logAudit(interaction.guild, `⚠️ Fil de preuve impossible (${res.error}). Repli sur validation classique.`);
   }
 
   // Validation classique : embed + boutons dans le salon de validation.
@@ -230,21 +231,50 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
 }
 
 /**
- * Crée un fil PRIVÉ de validation (mod + joueur) dans le salon de validation, y ajoute le
- * joueur, demande la capture d'écran et propose les boutons Valider/Refuser. Le joueur poste
- * sa preuve directement dans le fil (upload natif Discord). Renvoie { ok, thread?, error? }.
+ * Choisit le salon hôte du fil de preuve. IMPORTANT : Discord refuse d'ajouter un membre
+ * à un fil privé s'il ne peut pas voir le salon parent. On privilégie donc un salon de
+ * vérification dédié (visible des membres), sinon le salon où /lier a été lancé (le membre
+ * y a forcément accès). En dernier recours, le salon de validation (l'ajout peut échouer).
+ */
+async function resolveProofParent(interaction, settings) {
+  if (settings.proofChannelId) {
+    const c = await interaction.guild.channels.fetch(settings.proofChannelId).catch(() => null);
+    if (c?.type === ChannelType.GuildText) return c;
+  }
+  if (interaction.channel?.type === ChannelType.GuildText) return interaction.channel;
+  return interaction.guild.channels.fetch(settings.reviewChannelId).catch(() => null);
+}
+
+/**
+ * Crée un fil PRIVÉ de validation (mod + joueur), y ajoute le joueur, demande la capture
+ * d'écran et propose les boutons Valider/Refuser. Le joueur poste sa preuve directement dans
+ * le fil (upload natif Discord). Si l'ajout du membre échoue (salon parent non visible par
+ * lui), on supprime le fil et on renvoie ok:false pour repli. Renvoie { ok, url?, error? }.
  */
 async function openProofThread(interaction, channel, { userId, brawlhallaId, data, settings }) {
+  if (!channel?.threads?.create) return { ok: false, error: "salon hôte invalide" };
+  let thread;
   try {
-    const thread = await channel.threads.create({
+    thread = await channel.threads.create({
       name: `🎟️ Liaison ${data.name ?? brawlhallaId}`.slice(0, 100),
       type: ChannelType.PrivateThread,
       invitable: false,
       autoArchiveDuration: 1440, // 24 h
       reason: "Validation de liaison Brawlhalla (preuve requise)",
     });
-    await thread.members.add(userId).catch(() => {});
+  } catch (err) {
+    return { ok: false, error: `création du fil : ${err.message}` };
+  }
 
+  // Ajout du membre : échoue s'il ne voit pas le salon parent → on annule proprement.
+  try {
+    await thread.members.add(userId);
+  } catch (err) {
+    await thread.delete("Membre non ajoutable au fil privé").catch(() => {});
+    return { ok: false, error: `ajout du membre impossible (${err.message})` };
+  }
+
+  try {
     const embed = buildReviewEmbed({ id: userId }, brawlhallaId, data);
     const actions = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`ap:${userId}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
@@ -264,6 +294,7 @@ async function openProofThread(interaction, channel, { userId, brawlhallaId, dat
     const url = `https://discord.com/channels/${interaction.guild.id}/${thread.id}`;
     return { ok: true, threadId: thread.id, url };
   } catch (err) {
+    await thread.delete("Échec d'envoi du message de preuve").catch(() => {});
     return { ok: false, error: err.message };
   }
 }

@@ -37,6 +37,9 @@ export async function getSettings() {
     // un fil privé est créé où le joueur poste une capture de son profil en jeu (ID visible).
     requireProofScreenshot: s.requireProofScreenshot ?? true,
     proofTier: s.proofTier || "Diamond",
+    // Salon hôte des fils de preuve. DOIT être visible par les membres (sinon Discord refuse
+    // de les ajouter au fil privé). Vide = salon où /lier a été lancé.
+    proofChannelId: s.proofChannelId || "",
   };
 }
 
