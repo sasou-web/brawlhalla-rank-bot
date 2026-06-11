@@ -236,8 +236,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const msg = `Erreur : ${err.message}`;
     try {
       if (interaction.deferred || interaction.replied) {
-        // Interaction deja differee (deferReply/deferUpdate) : on edite pour ne pas laisser "thinking..."
-        await interaction.editReply(msg);
+        // Interaction deja differee : on edite pour ne pas laisser "thinking...".
+        // V2-safe : un message peut etre en Components V2 (le champ `content` y est interdit) ;
+        // si l'edition texte echoue, on retombe sur un Text Display (composant V2).
+        await interaction.editReply(msg).catch(() =>
+          interaction.editReply({ components: [{ type: 10, content: msg }], flags: MessageFlags.IsComponentsV2 }),
+        );
       } else {
         await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
       }

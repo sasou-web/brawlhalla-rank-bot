@@ -555,19 +555,20 @@ export async function handleProfilePick(interaction) {
 }
 
 // Clic sur un onglet : recharge le profil (cache -> instantane) et remplace la carte.
+// On utilise interaction.update() (pattern canonique pour éditer depuis un composant) :
+// applique proprement le flag V2 en un seul appel, sans deferUpdate + editReply.
 export async function handleProfileNav(interaction) {
   const [, view, idStr] = interaction.customId.split(":");
   const brawlhallaId = Number(idStr);
-  await interaction.deferUpdate();
 
   let p;
   try {
     p = await getPlayerProfile(brawlhallaId);
   } catch (err) {
-    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
+    return interaction.update({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
   }
   const legends = await getLegends().catch(() => new Map());
-  return interaction.editReply({
+  return interaction.update({
     components: [buildProfileCard(view, p, legends), profileNavRow(view, brawlhallaId)],
     flags: V2,
   });
