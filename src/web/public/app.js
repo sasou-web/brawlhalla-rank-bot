@@ -1511,18 +1511,33 @@ function buildAnnouncePreview(cfg) {
   const wantText = mode === "text" || mode === "both";
   const wantEmbed = mode === "embed" || mode === "both";
 
-  // Bandeau de mentions (rôles + everyone).
+  // Mentions (rôles + everyone) sous forme de pastilles.
   const bits = [];
   if (cfg.mentionEveryone) bits.push("@everyone");
   for (const id of cfg.mentionRoleIds || []) {
     const r = GUILD.roles.find((x) => x.id === id);
     bits.push("@" + (r ? r.name : "rôle"));
   }
-  if (bits.length) wrap.append(el("div", { class: "preview-text", html: bits.map((b) => `<span class="mention">${b}</span>`).join(" ") }));
+  const mentionHtml = bits.map((b) => `<span class="mention">${b}</span>`).join(" ");
+  const hasPlaceholder = wantText && cfg.content && cfg.content.includes("{mentions}");
 
+  // Texte du message avec placement du ping.
+  let textHtml = "";
   if (wantText && cfg.content) {
-    wrap.append(el("div", { class: "preview-text", html: mdToHtml(previewVars(cfg.content)) }));
+    if (mentionHtml && hasPlaceholder) {
+      const SENT = "\u0000MENT\u0000";
+      const raw = previewVars(cfg.content).replaceAll("{mentions}", SENT);
+      textHtml = mdToHtml(raw).replaceAll(SENT, mentionHtml);
+    } else {
+      textHtml = mdToHtml(previewVars(cfg.content).replaceAll("{mentions}", ""));
+    }
   }
+  if (mentionHtml && !hasPlaceholder) {
+    const pos = cfg.mentionPosition || "top";
+    if (pos === "end") textHtml = textHtml ? textHtml + " " + mentionHtml : mentionHtml;
+    else textHtml = textHtml ? mentionHtml + "<br>" + textHtml : mentionHtml;
+  }
+  if (textHtml) wrap.append(el("div", { class: "preview-text", html: textHtml }));
 
   if (wantEmbed) {
     const e = cfg.embed || {};
@@ -1574,6 +1589,7 @@ function renderAnnounce(content) {
     content: "",
     mentionEveryone: false,
     mentionRoleIds: [],
+    mentionPosition: "top",
     fileDataUrl: "",
     fileName: "",
     embed: {
@@ -1644,6 +1660,11 @@ function renderAnnounce(content) {
   const cMent = el("div", { class: "card" }, el("h3", {}, "Mentions"), el("div", { class: "card-sub" }, "Ajoute un ping en tête du message. À utiliser avec parcimonie."));
   cMent.append(fieldRow("Mentionner @everyone", "Notifie tout le serveur.", toggle(cfg, "mentionEveryone")));
   cMent.append(fieldRow("Rôles à mentionner", "", multiRole(cfg, "mentionRoleIds")));
+  cMent.append(fieldRow("Position du ping", "Au début, à la fin, ou n'importe où dans le texte via la variable {mentions}.", selectInput(cfg, "mentionPosition", [
+    { value: "top", label: "Au début du message" },
+    { value: "end", label: "À la fin du message" },
+    { value: "inline", label: "Personnalisé (variable {mentions})" },
+  ])));
   content.append(cMent);
 
   // Embed
@@ -1696,7 +1717,7 @@ function renderAnnounce(content) {
     el("div", { class: "card" }, el("h3", {}, "Variables disponibles"),
       el("div", { class: "card-sub", html:
         "<code>{server}</code> nom du serveur · <code>{membercount}</code> nombre de membres · " +
-        "<code>{date}</code> date · <code>{time}</code> heure" })),
+        "<code>{date}</code> date · <code>{time}</code> heure · <code>{mentions}</code> emplacement du ping" })),
   );
 
   // Rafraîchissement de l'aperçu sur édition.

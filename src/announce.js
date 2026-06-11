@@ -79,16 +79,27 @@ export function buildAnnouncePayload(guild, cfg, { hasAttachment = false } = {})
   const wantText = mode === "text" || mode === "both";
   const wantEmbed = mode === "embed" || mode === "both";
 
-  // Préfixe de mentions (ajouté en tête du contenu pour réellement notifier).
+  // Mentions : @everyone et rôles sélectionnés.
   const roleIds = Array.isArray(cfg.mentionRoleIds) ? cfg.mentionRoleIds.filter(Boolean) : [];
   const mentionBits = [];
   if (cfg.mentionEveryone) mentionBits.push("@everyone");
   for (const id of roleIds) mentionBits.push(`<@&${id}>`);
-  const mentionPrefix = mentionBits.length ? mentionBits.join(" ") + "\n" : "";
+  const mentionStr = mentionBits.join(" ");
 
-  let content = "";
-  if (wantText && cfg.content) content = applyServerVars(cfg.content, guild);
-  content = (mentionPrefix + content).trim();
+  let content = wantText && cfg.content ? applyServerVars(cfg.content, guild) : "";
+
+  // Placement du ping : variable {mentions} dans le texte = priorité (placement libre),
+  // sinon au début ("top") ou à la fin ("end") du message.
+  if (mentionStr && content.includes("{mentions}")) {
+    content = content.replaceAll("{mentions}", mentionStr);
+  } else {
+    content = content.replaceAll("{mentions}", "");
+    if (mentionStr) {
+      const pos = cfg.mentionPosition || "top";
+      content = pos === "end" ? `${content} ${mentionStr}`.trim() : `${mentionStr}\n${content}`.trim();
+    }
+  }
+  content = content.trim();
 
   const embed = wantEmbed ? buildEmbed(guild, cfg.embed) : null;
 
