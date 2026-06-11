@@ -1,5 +1,20 @@
   # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Bienvenue : ping intégré dans la carte V2
+
+- Le ping du nouveau membre était posté sur une **ligne séparée au-dessus** de l'embed de
+  bienvenue. Il est désormais **intégré dans la carte** (en tête, avant le titre).
+- Possible grâce aux Components V2 : un composant texte à l'intérieur du container notifie
+  bien le membre (avec `allowedMentions`), là où une mention dans un embed classique n'envoie
+  aucune notification. Le ping reste donc fonctionnel.
+- Comportement inchangé en mode « texte » et « both ».
+
+### ✅ Vérifications
+- `npm run check` : **57 fichiers OK**. `npm test` : **93/93**. Smoke-test : 1 seul composant
+  top-level (la carte), mention présente dedans, `allowedMentions` ciblant le membre.
+
+---
+
 ## Session — Giveaways : messages personnalisables + onglets dashboard
 
 Améliorations du système de giveaways suite aux retours.

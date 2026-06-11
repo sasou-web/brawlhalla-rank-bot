@@ -120,6 +120,11 @@ export function buildWelcomePayload(member, guild, cfg) {
   const container = new ContainerBuilder().setAccentColor(hexToInt(e.color));
 
   const head = [];
+  // Ping intégré DANS la carte : un composant texte V2 à l'intérieur du container notifie
+  // bien le membre (grâce à allowedMentions), contrairement à un embed classique où une
+  // mention n'envoie aucune notification. Placé en tête, juste avant le titre.
+  const pingInside = cfg.pingUser && !wantText;
+  if (pingInside) head.push(mention);
   const title = e.title ? applyVars(e.title, member, guild) : `👋 Bienvenue ${member.displayName || user.username} !`;
   head.push(`## ${title}`.slice(0, 256));
   if (e.description) head.push(applyVars(e.description, member, guild));
@@ -146,14 +151,13 @@ export function buildWelcomePayload(member, guild, cfg) {
     new TextDisplayBuilder().setContent(`-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>`),
   );
 
-  // Le ping (et éventuellement le texte) passe en composant top-level pour notifier le membre.
+  // Le texte (mode « both ») reste un composant au-dessus de la carte. Le ping seul (mode
+  // embed) est désormais intégré dans la carte (voir pingInside ci-dessus).
   const components = [];
   if (wantText) {
     let content = applyVars(cfg.text, member, guild);
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
     components.push(new TextDisplayBuilder().setContent(content.slice(0, 2000)));
-  } else if (cfg.pingUser) {
-    components.push(new TextDisplayBuilder().setContent(mention));
   }
   components.push(container);
 
