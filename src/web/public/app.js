@@ -198,6 +198,7 @@ const NAV_GROUPS = [
     { id: "stats", label: "Statistiques", ico: "📈" },
     { id: "metrics", label: "Fiabilité API", ico: "📡" },
     { id: "logs", label: "Logs en direct", ico: "📜" },
+    { id: "announce", label: "Annonces", ico: "📢" },
     { id: "settings", label: "Réglages généraux", ico: "⚙️" },
   ] },
   { label: "Engagement", items: [
@@ -654,6 +655,7 @@ function renderSection(id) {
   if (id === "stats") return renderStats(content);
   if (id === "metrics") return renderMetrics(content);
   if (id === "logs") return renderLogs(content);
+  if (id === "announce") return renderAnnounce(content);
   if (id === "welcome") return renderWelcome(content);
   if (id === "vocrank") return renderVocRank(content);
   if (id === "tournament") return renderTournament(content);
@@ -1500,6 +1502,196 @@ function renderWelcome(content) {
     test.disabled = false;
   });
   content.append(el("div", { class: "save-bar" }, test, save));
+}
+
+// ----- Section Annonces / messages personnalisés -----
+function buildAnnouncePreview(cfg) {
+  const wrap = el("div", { class: "preview-wrap" });
+  const mode = cfg.mode || "embed";
+  const wantText = mode === "text" || mode === "both";
+  const wantEmbed = mode === "embed" || mode === "both";
+
+  // Bandeau de mentions (rôles + everyone).
+  const bits = [];
+  if (cfg.mentionEveryone) bits.push("@everyone");
+  for (const id of cfg.mentionRoleIds || []) {
+    const r = GUILD.roles.find((x) => x.id === id);
+    bits.push("@" + (r ? r.name : "rôle"));
+  }
+  if (bits.length) wrap.append(el("div", { class: "preview-text", html: bits.map((b) => `<span class="mention">${b}</span>`).join(" ") }));
+
+  if (wantText && cfg.content) {
+    wrap.append(el("div", { class: "preview-text", html: mdToHtml(previewVars(cfg.content)) }));
+  }
+
+  if (wantEmbed) {
+    const e = cfg.embed || {};
+    const embed = el("div", { class: "preview-embed", style: `border-left-color:${e.color || "#7c5cff"}` });
+    const body = el("div", { class: "pe-body" });
+    if (e.author && e.author.name) {
+      const a = el("div", { class: "pe-author" });
+      if (e.author.iconUrl) a.append(el("img", { src: e.author.iconUrl, class: "pe-author-ico" }));
+      a.append(document.createTextNode(previewVars(e.author.name)));
+      body.append(a);
+    }
+    if (e.title) body.append(el("div", { class: "pe-title", html: mdToHtml(previewVars(e.title)) }));
+    if (e.description) body.append(el("div", { class: "pe-desc", html: mdToHtml(previewVars(e.description)) }));
+    const fields = (e.fields || []).filter((f) => f && (f.name || f.value));
+    if (fields.length) {
+      const grid = el("div", { class: "pe-fields" });
+      for (const f of fields) {
+        grid.append(el("div", { class: "pe-field" + (f.inline ? " inline" : "") },
+          el("div", { class: "pe-field-name", html: mdToHtml(previewVars(f.name || "")) }),
+          el("div", { class: "pe-field-value", html: mdToHtml(previewVars(f.value || "")) })));
+      }
+      body.append(grid);
+    }
+    if (e.footer || e.footerIcon) {
+      const f = el("div", { class: "pe-footer" });
+      if (e.footerIcon && GUILD.icon) f.append(el("img", { src: GUILD.icon, class: "pe-footer-ico" }));
+      f.append(document.createTextNode((previewVars(e.footer) || GUILD.name) + (e.timestamp ? " • aujourd'hui" : "")));
+      body.append(f);
+    }
+    embed.append(body);
+    if (e.thumbnail) embed.append(el("img", { src: e.thumbnail, class: "pe-thumb" }));
+    if (e.image) embed.append(el("img", { src: e.image, class: "pe-image" }));
+    wrap.append(embed);
+  }
+  if (!wrap.children.length) wrap.append(el("div", { class: "preview-text", style: "color:var(--muted)" }, "(message vide)"));
+  return wrap;
+}
+
+function renderAnnounce(content) {
+  // Config locale (non persistée : page d'action ponctuelle).
+  const cfg = {
+    channelId: "",
+    messageId: "",
+    mode: "embed",
+    content: "",
+    mentionEveryone: false,
+    mentionRoleIds: [],
+    embed: {
+      color: "#7c5cff",
+      author: { name: "", iconUrl: "", url: "" },
+      title: "",
+      url: "",
+      description: "",
+      fields: [],
+      thumbnail: "",
+      image: "",
+      footer: "",
+      footerIcon: false,
+      timestamp: false,
+    },
+  };
+
+  content.append(el("div", { class: "page-head" },
+    el("h2", { html: "📢 Annonces & messages perso" }),
+    el("p", {}, "Compose un message entièrement personnalisable (texte + embed) et envoie-le dans le salon de ton choix.")));
+
+  // Aperçu en direct
+  const previewCard = el("div", { class: "card" }, el("h3", {}, "Aperçu en direct"), el("div", { class: "card-sub" }, "Rendu approximatif — se met à jour pendant que tu édites."));
+  const previewHolder = el("div");
+  previewHolder.append(buildAnnouncePreview(cfg));
+  previewCard.append(previewHolder);
+  content.append(previewCard);
+  const refreshPreview = () => { previewHolder.innerHTML = ""; previewHolder.append(buildAnnouncePreview(cfg)); };
+
+  // Destination
+  const cDest = el("div", { class: "card" }, el("h3", {}, "Destination"));
+  cDest.append(
+    fieldRow("Salon", "Où publier le message.", channelSelect(cfg, "channelId", "textann", false)),
+    fieldRow("ID du message à éditer", "Optionnel : colle l'ID d'un message du bot pour le modifier au lieu d'en envoyer un nouveau.", textInput(cfg, "messageId", "Laisser vide pour un nouveau message")),
+    fieldRow("Format", "Texte simple, embed, ou les deux.", selectInput(cfg, "mode", [{ value: "embed", label: "Embed" }, { value: "text", label: "Texte" }, { value: "both", label: "Texte + Embed" }])),
+    fieldRow("Message texte", "Contenu hors embed (markdown supporté).", textareaInput(cfg, "content"), true),
+  );
+  content.append(cDest);
+
+  // Mentions
+  const cMent = el("div", { class: "card" }, el("h3", {}, "Mentions"), el("div", { class: "card-sub" }, "Ajoute un ping en tête du message. À utiliser avec parcimonie."));
+  cMent.append(fieldRow("Mentionner @everyone", "Notifie tout le serveur.", toggle(cfg, "mentionEveryone")));
+  cMent.append(fieldRow("Rôles à mentionner", "", multiRole(cfg, "mentionRoleIds")));
+  content.append(cMent);
+
+  // Embed
+  const cEmbed = el("div", { class: "card" }, el("h3", {}, "Embed"), el("div", { class: "card-sub" }, "Personnalise entièrement l'apparence de l'embed."));
+  cEmbed.append(
+    fieldRow("Couleur", "Bande latérale de l'embed.", colorInput(cfg.embed, "color")),
+    fieldRow("Auteur", "Petit titre tout en haut.", textInput(cfg.embed.author, "name")),
+    fieldRow("Icône de l'auteur (URL)", "", textInput(cfg.embed.author, "iconUrl", "https://...")),
+    fieldRow("Lien de l'auteur (URL)", "", textInput(cfg.embed.author, "url", "https://...")),
+    fieldRow("Titre", "", textInput(cfg.embed, "title")),
+    fieldRow("Lien du titre (URL)", "Rend le titre cliquable.", textInput(cfg.embed, "url", "https://...")),
+    fieldRow("Description", "Markdown supporté.", textareaInput(cfg.embed, "description"), true),
+    fieldRow("Miniature (URL)", "Petite image en haut à droite.", textInput(cfg.embed, "thumbnail", "https://...")),
+    fieldRow("Grande image (URL)", "Bannière en bas de l'embed.", textInput(cfg.embed, "image", "https://...")),
+    fieldRow("Footer", "Texte de bas d'embed.", textInput(cfg.embed, "footer")),
+    fieldRow("Icône du serveur dans le footer", "", toggle(cfg.embed, "footerIcon")),
+    fieldRow("Afficher l'horodatage", "Date/heure d'envoi en bas.", toggle(cfg.embed, "timestamp")),
+  );
+  content.append(cEmbed);
+
+  // Champs (fields)
+  const cFields = el("div", { class: "card" }, el("h3", {}, "Champs de l'embed"), el("div", { class: "card-sub" }, "Jusqu'à 25 champs (titre + valeur). « En ligne » place les champs côte à côte."));
+  const fieldsHolder = el("div");
+  const drawFields = () => {
+    fieldsHolder.innerHTML = "";
+    cfg.embed.fields.forEach((f, idx) => {
+      const row = el("div", { class: "card", style: "background:var(--surface-2);margin:8px 0" });
+      row.append(
+        fieldRow("Titre du champ", "", textInput(f, "name")),
+        fieldRow("Valeur", "", textareaInput(f, "value"), true),
+        fieldRow("En ligne", "", toggle(f, "inline")),
+      );
+      const del = el("button", { class: "btn-mini danger", onclick: () => { cfg.embed.fields.splice(idx, 1); drawFields(); refreshPreview(); setDirty(true); } }, "🗑 Supprimer ce champ");
+      row.append(del);
+      row.addEventListener("input", refreshPreview);
+      row.addEventListener("change", refreshPreview);
+      fieldsHolder.append(row);
+    });
+  };
+  drawFields();
+  const addField = el("button", { class: "btn-mini", onclick: () => {
+    if (cfg.embed.fields.length >= 25) return toast("25 champs maximum.", "err");
+    cfg.embed.fields.push({ name: "", value: "", inline: false }); drawFields(); setDirty(true);
+  } }, "➕ Ajouter un champ");
+  cFields.append(fieldsHolder, addField);
+  content.append(cFields);
+
+  // Variables
+  content.append(
+    el("div", { class: "card" }, el("h3", {}, "Variables disponibles"),
+      el("div", { class: "card-sub", html:
+        "<code>{server}</code> nom du serveur · <code>{membercount}</code> nombre de membres · " +
+        "<code>{date}</code> date · <code>{time}</code> heure" })),
+  );
+
+  // Rafraîchissement de l'aperçu sur édition.
+  for (const card of [cDest, cMent, cEmbed]) {
+    card.addEventListener("input", refreshPreview);
+    card.addEventListener("change", refreshPreview);
+  }
+
+  // Barre d'actions : envoi / édition.
+  const send = el("button", { class: "btn-save" }, "📨 Envoyer le message");
+  send.addEventListener("click", async () => {
+    if (!cfg.channelId) return toast("Choisis d'abord un salon.", "err");
+    const editing = !!(cfg.messageId && cfg.messageId.trim());
+    if (cfg.mentionEveryone && !editing) {
+      if (!(await confirmModal("Ce message va ping @everyone. Confirmer l'envoi ?", { okLabel: "Envoyer", danger: true }))) return;
+    }
+    send.disabled = true;
+    try {
+      const r = await api("/api/announce/send", "POST", cfg);
+      setDirty(false);
+      toast(r.edited ? "Message modifié ✅" : "Message envoyé ✅", "ok");
+      if (!editing && r.messageId) cfg.messageId = r.messageId;
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    send.disabled = false;
+  });
+  content.append(el("div", { class: "save-bar" }, send));
 }
 
 // ----- Section Tournoi -----

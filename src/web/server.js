@@ -25,6 +25,7 @@ import {
 } from "../giveaway.js";
 import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
+import { buildAnnouncePayload } from "../announce.js";
 import {
   getTournament,
   createTournament,
@@ -814,6 +815,36 @@ export function startWebServer(client) {
       const result = await cancelGiveaway(client, id);
       if (!result.ok) return res.status(400).json({ error: result.error });
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Annonces / messages personnalisés ----
+  // Envoie un message entièrement personnalisable (texte + embed) dans un salon choisi.
+  app.post("/api/announce/send", requireAdmin, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const channelId = body.channelId;
+      if (!channelId) return res.status(400).json({ error: "Choisis un salon." });
+      const guild = await client.guilds.fetch(config.guildId);
+      const ch = await guild.channels.fetch(channelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+
+      const { payload, error } = buildAnnouncePayload(guild, body);
+      if (error) return res.status(400).json({ error });
+
+      // Édition d'un message existant si un messageId valide est fourni, sinon envoi.
+      if (body.messageId) {
+        const msg = await ch.messages.fetch(String(body.messageId)).catch(() => null);
+        if (!msg) return res.status(400).json({ error: "Message à éditer introuvable dans ce salon." });
+        if (msg.author?.id !== client.user.id) return res.status(400).json({ error: "Je ne peux éditer que mes propres messages." });
+        const edited = await msg.edit(payload);
+        return res.json({ ok: true, edited: true, messageId: edited.id });
+      }
+
+      const sent = await ch.send(payload);
+      res.json({ ok: true, messageId: sent.id });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
