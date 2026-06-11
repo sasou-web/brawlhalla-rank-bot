@@ -61,6 +61,12 @@ const DEFAULT_CONFIG = {
   footerText: "Bonne chance à toutes et à tous ! 🍀",
   // Envoie un MP aux gagnants à la clôture.
   dmWinners: true,
+  // Message d'annonce posté dans le salon à la clôture (placeholders : {winners} {prize} {count} {host}).
+  winnerAnnounce: "🎉 Félicitations {winners} ! Vous remportez **{prize}** 🏆",
+  // Message privé envoyé à chaque gagnant (placeholders : {prize} {host}).
+  winnerDm: "🎉 Tu as gagné **{prize}** dans le giveaway ! Rapproche-toi du staff pour récupérer ta récompense.",
+  // Message si aucun participant (placeholders : {prize}).
+  noWinnerMessage: "😢 Le giveaway **{prize}** se termine sans participant. Aucun gagnant.",
   // Valeurs par défaut proposées dans le formulaire de création.
   defaultDuration: "24h",
   defaultWinners: 1,
@@ -405,7 +411,7 @@ export async function rerollGiveaway(client, id, count) {
       })
       .catch(() => null);
   }
-  if (cfg.dmWinners) await dmWinners(client, gw, fresh);
+  if (cfg.dmWinners) await dmWinners(client, gw, fresh, cfg);
   return { ok: true, winners: fresh };
 }
 
@@ -469,6 +475,15 @@ export async function toggleEntry(interaction, id) {
 // Helpers internes d'annonce / édition
 // ====================================================================
 
+// Remplace les placeholders d'un modèle de message.
+function applyTemplate(tpl, { winners = "", prize = "", count = 0, host = "" } = {}) {
+  return String(tpl || "")
+    .split("{winners}").join(winners)
+    .split("{prize}").join(prize)
+    .split("{count}").join(String(count))
+    .split("{host}").join(host ? `<@${host}>` : "");
+}
+
 async function updateMessageToEnded(client, gw, cfg, winners) {
   if (!gw.message_id) return;
   try {
@@ -486,22 +501,32 @@ async function announceWinners(client, gw, cfg, winners) {
   if (channel?.isTextBased?.()) {
     let text;
     if (winners.length) {
-      text = `🎉 Félicitations ${winners.map((w) => `<@${w}>`).join(", ")} ! Vous remportez **${gw.prize}** 🏆`;
+      const mentions = winners.map((w) => `<@${w}>`).join(", ");
+      text = applyTemplate(cfg.winnerAnnounce || "🎉 Félicitations {winners} ! Vous remportez **{prize}** 🏆", {
+        winners: mentions,
+        prize: gw.prize,
+        count: countEntries(gw.id),
+        host: gw.host_id,
+      });
     } else {
-      text = `😢 Le giveaway **${gw.prize}** se termine sans participant. Aucun gagnant.`;
+      text = applyTemplate(cfg.noWinnerMessage || "😢 Le giveaway **{prize}** se termine sans participant. Aucun gagnant.", {
+        prize: gw.prize,
+      });
     }
-    const replyOpts = { content: text, allowedMentions: { users: winners } };
+    const replyOpts = { content: text.slice(0, 2000), allowedMentions: { users: winners } };
     if (gw.message_id) replyOpts.reply = { messageReference: gw.message_id, failIfNotExists: false };
     await channel.send(replyOpts).catch(() => null);
   }
-  if (cfg.dmWinners) await dmWinners(client, gw, winners);
+  if (cfg.dmWinners) await dmWinners(client, gw, winners, cfg);
 }
 
-async function dmWinners(client, gw, winners) {
+async function dmWinners(client, gw, winners, cfg) {
+  const tpl = cfg?.winnerDm || "🎉 Tu as gagné **{prize}** dans le giveaway ! Rapproche-toi du staff pour récupérer ta récompense.";
+  const text = applyTemplate(tpl, { prize: gw.prize, host: gw.host_id }).slice(0, 2000);
   for (const userId of winners) {
     try {
       const user = await client.users.fetch(userId);
-      await user.send(`🎉 Tu as gagné **${gw.prize}** dans le giveaway ! Rapproche-toi du staff pour récupérer ta récompense.`);
+      await user.send(text);
     } catch {
       /* MP fermés : on ignore */
     }

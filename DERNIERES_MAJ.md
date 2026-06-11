@@ -1,5 +1,27 @@
   # Dernières mises à jour — Brawlhalla Rank Bot
 
+## Session — Giveaways : messages personnalisables + onglets dashboard
+
+Améliorations du système de giveaways suite aux retours.
+
+### ✏️ Messages personnalisables (dashboard → Giveaway → Réglages)
+- **Annonce des gagnants** (postée dans le salon) et **message privé** au gagnant désormais
+  éditables, avec placeholders : `{winners}`, `{prize}`, `{count}`, `{host}`.
+- Ajout d'un message configurable pour le cas **sans participant**.
+
+### 🐛 Correctif d'affichage + ergonomie
+- La barre « Enregistrer » (sticky) chevauchait le contenu du dessous. La page est passée à
+  **deux onglets** (comme Tournoi) : **Réglages** (config, apparence, messages) et
+  **Giveaways** (création + liste). La barre d'enregistrement reste en bas de l'onglet Réglages.
+- **Bouton 🔄 Rafraîchir** sur la liste : recharge les giveaways et le compteur de participants
+  sans recharger toute la page. Les actions (terminer/annuler/reroll) rafraîchissent aussi la
+  liste seule.
+
+### ✅ Vérifications
+- `npm run check` : **57 fichiers OK**. `npm test` : **93/93**.
+
+---
+
 ## Session — Système de giveaways (concours) Components V2
 
 Ajout d'un système complet de giveaways, configurable depuis le dashboard web et utilisable
