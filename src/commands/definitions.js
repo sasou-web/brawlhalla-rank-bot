@@ -307,6 +307,11 @@ export const commandsData = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("setup-giveaway")
+    .setDescription("(Admin) Panneau des giveaways : crée et gère des concours.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("tournoi-panneau")
     .setDescription("(Admin) Publie le panneau d'inscription du tournoi dans ce salon.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)

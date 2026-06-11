@@ -14,6 +14,16 @@ import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
 import { getTicketConfig, setTicketConfig, buildTicketPanelPayload } from "../tickets.js";
+import {
+  getGiveawayConfig,
+  setGiveawayConfig,
+  createGiveaway,
+  endGiveaway,
+  rerollGiveaway,
+  cancelGiveaway,
+  parseDuration,
+} from "../giveaway.js";
+import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
 import {
   getTournament,
@@ -63,6 +73,7 @@ function buildSections(guildId) {
     guessrank: { get: () => getGuessRankConfig(guildId), set: (b) => setGuessRankConfig(guildId, b) },
     tempvoice: { get: () => getTempConfig(guildId), set: (b) => setTempConfig(guildId, b) },
     tickets: { get: () => getTicketConfig(guildId), set: (b) => setTicketConfig(guildId, b) },
+    giveaway: { get: () => getGiveawayConfig(guildId), set: (b) => setGiveawayConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
   };
 }
@@ -705,6 +716,103 @@ export function startWebServer(client) {
       const ch = await client.channels.fetch(channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
       await ch.send(buildTicketPanelPayload(cfg));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Giveaways ----
+  // Liste : actifs + récents, avec le nombre de participants (pour le dashboard).
+  app.get("/api/giveaway/list", requireAdmin, async (req, res) => {
+    try {
+      const decorate = (g) => ({
+        id: g.id,
+        prize: g.prize,
+        description: g.description,
+        channelId: g.channel_id,
+        messageId: g.message_id,
+        winnersCount: g.winners_count,
+        requiredRoleId: g.required_role_id,
+        hostId: g.host_id,
+        endsTs: g.ends_ts,
+        createdTs: g.created_ts,
+        status: g.status,
+        winnerIds: g.winnerIds || [],
+        entries: countEntries(g.id),
+      });
+      res.json({
+        active: listActiveGiveaways(config.guildId).map(decorate),
+        recent: listGiveaways(config.guildId, 20).map(decorate),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Création d'un giveaway depuis le dashboard.
+  app.post("/api/giveaway/create", requireAdmin, async (req, res) => {
+    try {
+      const cfg = await getGiveawayConfig(config.guildId);
+      if (!cfg.enabled) return res.status(400).json({ error: "Active d'abord le système de giveaways." });
+      const { prize, description, duration, winnersCount, channelId, requiredRoleId } = req.body || {};
+      const durationMs = parseDuration(duration);
+      if (!prize || !String(prize).trim()) return res.status(400).json({ error: "Précise une récompense." });
+      if (!durationMs || durationMs < 10_000) return res.status(400).json({ error: "Durée invalide (ex : 30m, 2h, 1d, 1w)." });
+      const targetChannel = channelId || cfg.defaultChannelId;
+      if (!targetChannel) return res.status(400).json({ error: "Choisis un salon." });
+
+      const result = await createGiveaway(client, {
+        guildId: config.guildId,
+        channelId: targetChannel,
+        prize,
+        description: description || "",
+        durationMs,
+        winnersCount: Number(winnersCount) || 1,
+        requiredRoleId: requiredRoleId || cfg.requiredRoleId || null,
+        hostId: req.session?.id || "0",
+      });
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      res.json({ ok: true, id: result.giveaway.id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Fin anticipée d'un giveaway (tirage immédiat).
+  app.post("/api/giveaway/end", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.body?.id);
+      if (!getGiveaway(id)) return res.status(404).json({ error: "Giveaway introuvable." });
+      const result = await endGiveaway(client, id);
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      res.json({ ok: true, winners: result.winners });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Reroll d'un giveaway terminé.
+  app.post("/api/giveaway/reroll", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.body?.id);
+      const count = Number(req.body?.count) || undefined;
+      if (!getGiveaway(id)) return res.status(404).json({ error: "Giveaway introuvable." });
+      const result = await rerollGiveaway(client, id, count);
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      res.json({ ok: true, winners: result.winners });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Annulation d'un giveaway actif (sans tirage).
+  app.post("/api/giveaway/cancel", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.body?.id);
+      if (!getGiveaway(id)) return res.status(404).json({ error: "Giveaway introuvable." });
+      const result = await cancelGiveaway(client, id);
+      if (!result.ok) return res.status(400).json({ error: result.error });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

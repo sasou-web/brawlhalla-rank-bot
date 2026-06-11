@@ -204,6 +204,7 @@ const NAV_GROUPS = [
     { id: "welcome", label: "Bienvenue", ico: "👋" },
     { id: "levels", label: "Niveaux", ico: "⭐" },
     { id: "guessrank", label: "Devine ton rang", ico: "🏅" },
+    { id: "giveaway", label: "Giveaway", ico: "🎉" },
   ] },
   { label: "Contenu & modération", items: [
     { id: "tiktok", label: "TikTok", ico: "📱" },
@@ -653,6 +654,7 @@ function renderSection(id) {
   if (id === "tournament") return renderTournament(content);
   if (id === "combos") return renderCombos(content);
   if (id === "tickets") return renderTickets(content);
+  if (id === "giveaway") return renderGiveaway(content);
 
   const cfg = structuredClone(CONFIG[id] || {});
   const schema = sectionSchema(id, cfg);
@@ -959,6 +961,166 @@ function renderTickets(content) {
     btn.disabled = false;
   });
   content.append(el("div", { class: "save-bar" }, btn));
+}
+
+// ----- Page Giveaway (admin) -----
+async function renderGiveaway(content) {
+  const cfg = structuredClone(CONFIG.giveaway || {});
+
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "🎉 Giveaways" }),
+      el("p", {}, "Crée et gère des concours en Components V2. Les gagnants sont tirés au sort automatiquement à l'échéance.")),
+  );
+
+  // --- Configuration générale ---
+  const c1 = el("div", { class: "card" }, el("h3", {}, "Configuration"));
+  c1.append(fieldRow("Activé", "Active le système de giveaways (requis pour en créer).", toggle(cfg, "enabled")));
+  c1.append(fieldRow("Salon par défaut", "Salon où sont publiés les giveaways par défaut.", channelSelect(cfg, "defaultChannelId", "textann")));
+  c1.append(fieldRow("Rôle pingé", "Mentionné à la publication d'un giveaway (optionnel).", roleSelect(cfg, "pingRoleId")));
+  c1.append(fieldRow("Rôle requis", "Seuls les membres ayant ce rôle peuvent participer (optionnel).", roleSelect(cfg, "requiredRoleId")));
+  c1.append(fieldRow("MP aux gagnants", "Envoie un message privé à chaque gagnant à la clôture.", toggle(cfg, "dmWinners")));
+  content.append(c1);
+
+  // --- Apparence ---
+  const c2 = el("div", { class: "card" }, el("h3", {}, "Apparence de l'embed"));
+  c2.append(fieldRow("Titre", "Affiché en haut du giveaway (mis en majuscules).", textInput(cfg, "embedTitle", "GIVEAWAY")));
+  c2.append(fieldRow("Couleur", "Couleur de la barre de l'embed.", colorInput(cfg, "embedColor")));
+  c2.append(fieldRow("Bannière (URL)", "Grande image intégrée en haut (optionnel).", textInput(cfg, "bannerUrl", "https://…")));
+  c2.append(fieldRow("Texte du bouton", "Libellé du bouton de participation.", textInput(cfg, "buttonLabel", "Participer")));
+  c2.append(fieldRow("Emoji du bouton", "Emoji unicode ou custom (<:nom:id>).", textInput(cfg, "buttonEmoji", "🎉")));
+  c2.append(fieldRow("Pied de page", "Petite phrase en bas de l'embed.", textInput(cfg, "footerText", "Bonne chance à toutes et à tous ! 🍀")));
+  content.append(c2);
+
+  // --- Enregistrer la config ---
+  const saveBtn = el("button", { class: "btn-save" }, "💾 Enregistrer");
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    try {
+      CONFIG.giveaway = await api("/api/config/giveaway", "PUT", cfg);
+      setDirty(false);
+      toast("Réglages enregistrés ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    saveBtn.disabled = false;
+  });
+  content.append(el("div", { class: "save-bar" }, saveBtn));
+
+  // --- Créer un giveaway ---
+  const form = { prize: "", description: "", duration: cfg.defaultDuration || "24h", winnersCount: cfg.defaultWinners || 1, channelId: cfg.defaultChannelId || "" };
+  const c3 = el("div", { class: "card" },
+    el("h3", {}, "🎉 Lancer un giveaway"),
+    el("div", { class: "card-sub" }, "Enregistre d'abord tes réglages, puis lance un concours. Durée : 30m, 2h, 1d, 1w (combinable : 1d12h)."));
+  c3.append(fieldRow("Récompense", "Ce que les gagnants remportent.", textInput(form, "prize", "Nitro classique 1 mois")));
+  c3.append(fieldRow("Description", "Texte additionnel affiché dans l'embed (optionnel).", textareaInput(form, "description", "Détails, conditions, etc.")));
+  c3.append(fieldRow("Durée", "Ex : 30m, 2h, 1d, 1w.", textInput(form, "duration", "24h")));
+  c3.append(fieldRow("Nombre de gagnants", "Combien de gagnants tirer au sort.", numberInput(form, "winnersCount", 1, 50)));
+  c3.append(fieldRow("Salon", "Où publier (vide = salon par défaut).", channelSelect(form, "channelId", "textann")));
+  const createBtn = el("button", { class: "tbtn primary", style: "margin-top:6px" }, "🎉 Lancer le giveaway");
+  createBtn.addEventListener("click", async () => {
+    if (!form.prize || !form.prize.trim()) return toast("Indique une récompense.", "err");
+    createBtn.disabled = true;
+    try {
+      CONFIG.giveaway = await api("/api/config/giveaway", "PUT", cfg);
+      await api("/api/giveaway/create", "POST", {
+        prize: form.prize,
+        description: form.description,
+        duration: form.duration,
+        winnersCount: Number(form.winnersCount) || 1,
+        channelId: form.channelId || undefined,
+      });
+      setDirty(false);
+      toast("Giveaway lancé 🎉", "ok");
+      renderApp();
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    createBtn.disabled = false;
+  });
+  c3.append(el("div", {}, createBtn));
+  content.append(c3);
+
+  // --- Giveaways en cours / récents ---
+  const listCard = el("div", { class: "card" }, el("h3", {}, "Giveaways"), el("div", { class: "card-sub" }, "Chargement…"));
+  content.append(listCard);
+
+  let data;
+  try {
+    data = await api("/api/giveaway/list");
+  } catch (e) {
+    listCard.innerHTML = "";
+    listCard.append(el("h3", {}, "Giveaways"), el("div", { class: "card-sub" }, "Erreur : " + e.message));
+    return;
+  }
+
+  listCard.innerHTML = "";
+  listCard.append(el("h3", {}, "Giveaways en cours"));
+  const fmtDate = (ts) => new Date(ts).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+  const roleName = (rid) => (GUILD.roles.find((r) => r.id === rid) || {}).name;
+  const chanName = (cid) => {
+    const all = [...GUILD.channels.text, ...GUILD.channels.announcement];
+    return (all.find((c) => c.id === cid) || {}).name;
+  };
+
+  const gwRow = (g) => {
+    const meta = [`🎟️ ${g.entries} participant(s)`, `🏅 ${g.winnersCount} gagnant(s)`];
+    if (chanName(g.channelId)) meta.push(`# ${chanName(g.channelId)}`);
+    if (g.requiredRoleId && roleName(g.requiredRoleId)) meta.push(`🔒 @${roleName(g.requiredRoleId)}`);
+    const head = el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap" },
+      el("div", {},
+        el("div", { style: "font-weight:600" }, `🎁 ${g.prize}`),
+        el("div", { class: "desc", style: "margin-top:4px" }, meta.join(" · "))));
+    const actions = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" });
+
+    if (g.status === "active") {
+      head.append(el("span", { class: "tag" }, `Fin : ${fmtDate(g.endsTs)}`));
+      const endBtn = el("button", { class: "tbtn" }, "🏁 Terminer");
+      endBtn.addEventListener("click", async () => {
+        if (!(await confirmModal(`Terminer le giveaway <b>${g.prize}</b> maintenant ?`, { okLabel: "Terminer" }))) return;
+        endBtn.disabled = true;
+        try { await api("/api/giveaway/end", "POST", { id: g.id }); toast("Giveaway terminé 🏁", "ok"); renderApp(); }
+        catch (e) { toast("Erreur : " + e.message, "err"); endBtn.disabled = false; }
+      });
+      const cancelBtn = el("button", { class: "tbtn danger" }, "🚫 Annuler");
+      cancelBtn.addEventListener("click", async () => {
+        if (!(await confirmModal(`Annuler le giveaway <b>${g.prize}</b> (sans tirage) ?`, { okLabel: "Annuler le giveaway", danger: true }))) return;
+        cancelBtn.disabled = true;
+        try { await api("/api/giveaway/cancel", "POST", { id: g.id }); toast("Giveaway annulé", "ok"); renderApp(); }
+        catch (e) { toast("Erreur : " + e.message, "err"); cancelBtn.disabled = false; }
+      });
+      actions.append(endBtn, cancelBtn);
+    } else {
+      const label = g.status === "cancelled" ? "Annulé" : "Terminé";
+      head.append(el("span", { class: "tag" }, label));
+      if (g.winnerIds && g.winnerIds.length) {
+        head.querySelector("div").append(el("div", { class: "desc", style: "margin-top:4px" }, `🥳 Gagnant(s) : ${g.winnerIds.map((w) => "<@" + w + ">").join(", ")}`));
+      }
+      if (g.status === "ended") {
+        const rerollBtn = el("button", { class: "tbtn" }, "🔁 Reroll");
+        rerollBtn.addEventListener("click", async () => {
+          rerollBtn.disabled = true;
+          try { const r = await api("/api/giveaway/reroll", "POST", { id: g.id }); toast("Reroll : " + (r.winners || []).length + " nouveau(x) gagnant(s) 🔁", "ok"); }
+          catch (e) { toast("Erreur : " + e.message, "err"); }
+          rerollBtn.disabled = false;
+        });
+        actions.append(rerollBtn);
+      }
+    }
+    return el("div", { class: "card", style: "background:var(--surface-2);margin-top:10px" }, head, actions.children.length ? el("div", { style: "margin-top:10px" }, actions) : null);
+  };
+
+  if (data.active.length) {
+    for (const g of data.active) listCard.append(gwRow(g));
+  } else {
+    listCard.append(el("div", { class: "card-sub" }, "Aucun giveaway en cours."));
+  }
+
+  const ended = data.recent.filter((g) => g.status !== "active");
+  if (ended.length) {
+    listCard.append(el("h3", { style: "margin-top:18px" }, "Historique récent"));
+    for (const g of ended.slice(0, 10)) listCard.append(gwRow(g));
+  }
 }
 
 function renderOverview(content) {

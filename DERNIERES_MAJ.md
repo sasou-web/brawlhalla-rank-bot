@@ -1,4 +1,63 @@
-# Dernières mises à jour — Brawlhalla Rank Bot
+  # Dernières mises à jour — Brawlhalla Rank Bot
+
+## Session — Système de giveaways (concours) Components V2
+
+Ajout d'un système complet de giveaways, configurable depuis le dashboard web et utilisable
+via la commande `/setup-giveaway`. Embeds en **Components V2** (style boutique, comme les tickets).
+
+### 🎉 Fonctionnement
+- **Création** : via `/setup-giveaway` (bouton « Créer un giveaway » → modal prix/durée/gagnants/
+  description) ou depuis le **dashboard web → Giveaway**. Publie un message V2 avec un bouton
+  « Participer ».
+- **Participation** : clic sur le bouton (toggle : recliquer retire la participation). Compteur
+  de participants mis à jour en direct. Rôle requis vérifié si défini (impossible de tricher).
+- **Clôture automatique** : un tick chaque minute (`endDueGiveaways` dans `index.js`) tire N
+  gagnants au hasard (Fisher-Yates) à l'échéance, édite le message et annonce les gagnants
+  (mention + MP optionnel).
+- **Reroll / fin anticipée / annulation** : depuis le dashboard ou le panneau Discord.
+- **Durées** lisibles : `30m`, `2h`, `1d`, `1w`, combinables (`1d12h`).
+
+### 🗂️ Fichiers ajoutés
+- `src/giveawayStore.js` : tables SQLite dédiées `giveaways` + `giveaway_entries` (participation
+  idempotente via PRIMARY KEY composite).
+- `src/giveaway.js` : config par serveur (clé doc `giveaway`), parsing de durée, payloads
+  Components V2 (actif/terminé), logique création/participation/tirage/reroll/annulation.
+- `src/commands/panels/giveaway.js` : handlers du panneau `/setup-giveaway` (préfixe customId `gw`).
+
+### 🔌 Intégrations
+- `commands/definitions.js` + `commands.js` : commande `setup-giveaway` (Gérer le serveur) +
+  routage boutons/selects/modals `gw`.
+- `web/server.js` : section `giveaway` dans la config + routes `/api/giveaway/{list,create,end,
+  reroll,cancel}`.
+- `web/public/app.js` : page **Giveaway** (réglages, apparence, création, liste avec actions).
+
+### ✅ Vérifications
+- `npm run check` : **57 fichiers OK**. `npm test` : **93/93**. Smoke-test runtime des payloads V2
+  (sérialisation `toJSON`, flag `IsComponentsV2`), `parseDuration`, `drawWinners` : OK.
+
+> ⚠️ Pense à lancer `npm run deploy` pour enregistrer la nouvelle commande `/setup-giveaway`.
+
+---
+
+## Session — Guides explicatifs dans les salons dédiés
+
+Mise en place de messages d'explication (embeds) dans chaque salon dédié à une commande/feature
+du bot, pour que les membres comprennent quoi faire où, sans avoir à demander.
+
+### 📌 Embeds « comment ça marche » postés
+- Script utilitaire (hors dépôt, à la racine du workspace) : `post_guides_live.py`, qui poste
+  un embed adapté dans chaque salon **actif** dédié (archives exclues). Mapping explicite par ID
+  de salon, token via variable d'environnement, mode DRY-RUN par défaut + `CONFIRM=SEND`.
+- **11 salons couverts** : `clips`, `devine-le-rank`, `combos`, `tiktok`, `niveaux-succès`
+  (XP + succès), `brawlbot` (hub des commandes), `valider-rank` (staff), `logs-brawlbot` (audit
+  staff), `inscription`/`alertes` (tournoi), et `guide` (vue d'ensemble).
+- Le salon **guide** présente un récap en 3 sections : Démarrer (`/lier`), Salons & rôles, et
+  Tournois & niveaux, avec mentions cliquables vers les salons concernés.
+
+*Note : opération ponctuelle de communauté (envoi de messages), sans impact sur le code du bot.
+Les tests restent à 93/93.*
+
+---
 
 ## Session — Points ciblés : fuite mémoire & plafond bracket
 

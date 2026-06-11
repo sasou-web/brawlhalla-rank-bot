@@ -30,6 +30,7 @@ import { runWeeklyRecap } from "./progression.js";
 import { tournamentTick } from "./tournamentAutomation.js";
 import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
 import { handleMessageXp, tickVoiceXp, VOICE_TICK_MS } from "./xpEvents.js";
+import { endDueGiveaways } from "./giveaway.js";
 
 const client = new Client({
   intents: [
@@ -179,6 +180,15 @@ client.once(Events.ClientReady, async (c) => {
 
   // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
   every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
+
+  // Clôture des giveaways arrivés à échéance (tirage des gagnants) chaque minute.
+  every(
+    () =>
+      endDueGiveaways(client)
+        .then((r) => r.ended && console.log(`Giveaways clôturés : ${r.ended}.`))
+        .catch(() => {}),
+    60 * 1000,
+  );
 
   // Récap hebdo de progression : vérifié toutes les heures, posté une fois par semaine.
   const recapTick = () =>
