@@ -1,3 +1,14 @@
+import {
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  ThumbnailBuilder,
+  MessageFlags,
+} from "discord.js";
 import { loadDoc, saveDoc } from "./db.js";
 
 const KEY = "welcome";
@@ -93,35 +104,64 @@ function hexToInt(hex) {
 export function buildWelcomePayload(member, guild, cfg) {
   const user = member.user || member;
   const mention = `<@${user.id}>`;
-  const payload = { allowedMentions: { users: cfg.pingUser ? [user.id] : [] } };
-
   const wantText = cfg.mode === "text" || cfg.mode === "both";
   const wantEmbed = cfg.mode === "embed" || cfg.mode === "both";
 
+  // Mode texte seul : message classique (pas de Components V2).
+  if (!wantEmbed) {
+    let content = applyVars(cfg.text, member, guild);
+    if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
+    return { content: content.slice(0, 2000), allowedMentions: { users: cfg.pingUser ? [user.id] : [] } };
+  }
+
+  // Mode embed / both : Components V2 (carte stylée, bordure de couleur, avatar à droite).
+  const e = cfg.embed || {};
+  const avatar = user.displayAvatarURL ? user.displayAvatarURL({ size: 256 }) : null;
+  const container = new ContainerBuilder().setAccentColor(hexToInt(e.color));
+
+  const head = [];
+  const title = e.title ? applyVars(e.title, member, guild) : `👋 Bienvenue ${member.displayName || user.username} !`;
+  head.push(`## ${title}`.slice(0, 256));
+  if (e.description) head.push(applyVars(e.description, member, guild));
+  const headText = head.join("\n").slice(0, 4000);
+
+  if (e.thumbnailUser && avatar) {
+    container.addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(headText))
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatar)),
+    );
+  } else {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(headText));
+  }
+
+  if (e.image) {
+    container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(e.image)));
+  }
+
+  // Pied : serveur + horodatage, en sous-texte discret.
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  const footerName = e.footer ? applyVars(e.footer, member, guild) : guild.name;
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>`),
+  );
+
+  // Le ping (et éventuellement le texte) passe en composant top-level pour notifier le membre.
+  const components = [];
   if (wantText) {
     let content = applyVars(cfg.text, member, guild);
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
-    payload.content = content.slice(0, 2000);
+    components.push(new TextDisplayBuilder().setContent(content.slice(0, 2000)));
   } else if (cfg.pingUser) {
-    payload.content = mention; // ping hors embed (les embeds ne pingent pas)
+    components.push(new TextDisplayBuilder().setContent(mention));
   }
+  components.push(container);
 
-  if (wantEmbed) {
-    const e = cfg.embed || {};
-    const embed = { color: hexToInt(e.color) };
-    if (e.title) embed.title = applyVars(e.title, member, guild).slice(0, 256);
-    if (e.description) embed.description = applyVars(e.description, member, guild).slice(0, 4096);
-    if (e.thumbnailUser) embed.thumbnail = { url: user.displayAvatarURL ? user.displayAvatarURL({ size: 256 }) : member.user.displayAvatarURL() };
-    if (e.image) embed.image = { url: e.image };
-    if (e.footer) {
-      embed.footer = { text: applyVars(e.footer, member, guild).slice(0, 2048) };
-      if (e.footerIcon && guild.iconURL()) embed.footer.icon_url = guild.iconURL();
-    }
-    embed.timestamp = new Date().toISOString();
-    payload.embeds = [embed];
-  }
-
-  return payload;
+  return {
+    components,
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { users: cfg.pingUser ? [user.id] : [] },
+  };
 }
 
 export function buildGoodbyePayload(member, guild, cfg) {

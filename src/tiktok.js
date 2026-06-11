@@ -1,3 +1,15 @@
+import {
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+} from "discord.js";
 import { loadDoc, saveDoc } from "./db.js";
 
 /**
@@ -169,40 +181,41 @@ export function buildMessagePayload(cfg, item, { test = false } = {}) {
   if (captionText.length > 280) captionText = captionText.slice(0, 277).trimEnd() + "…";
 
   const firstLine = test ? `${ping} 🧪 **Test** — ${intro}`.trim() : `${ping} ${intro}`.trim();
-  const lines = [firstLine];
+
+  // Carte TikTok en Components V2 : annonce (ping) au-dessus, puis cadre rose avec
+  // la légende, la miniature 9:16, un pied "TikTok • date" et le bouton "Voir sur TikTok".
+  const container = new ContainerBuilder().setAccentColor(0xfe2c55);
+
   if (captionText) {
-    // Lien masque cliquable vers la video. On retire [ ] pour ne pas casser le markdown.
-    const safe = captionText.replace(/[[\]]/g, "");
-    lines.push(`> [${safe}](${videoUrl})`);
+    const safe = captionText.replace(/[[\]]/g, ""); // évite de casser le lien markdown
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`> [${safe}](${videoUrl})`));
   }
-  if (tags) lines.push(`-# ${tags}`); // petit texte gris pour les hashtags
-  const content = lines.join("\n");
-
-  // Embed minimal : uniquement l'image (recadree 9:16), pour qu'il fasse la taille de la miniature.
-  const embed = {
-    color: 0xfe2c55, // rose/rouge TikTok
-  };
-  if (item.image) embed.image = { url: cropImage(item.image) };
-  // Footer optionnel : "TikTok • <date/heure de la video>" (toggle dans le dashboard).
-  if (cfg.showDate !== false) {
-    embed.footer = { text: "TikTok" };
-    if (item.date) {
-      const d = new Date(item.date);
-      if (!Number.isNaN(d.getTime())) embed.timestamp = d.toISOString();
-    }
+  if (item.image) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(cropImage(item.image))),
+    );
   }
 
-  const components = [
-    {
-      type: 1,
-      components: [{ type: 2, style: 5, label: "Voir sur TikTok", emoji: { name: "▶️" }, url: videoUrl }],
-    },
-  ];
+  // Pied : "📱 TikTok • <date>" + hashtags, en sous-texte.
+  const footParts = ["📱 **TikTok**"];
+  if (cfg.showDate !== false && item.date) {
+    const d = new Date(item.date);
+    if (!Number.isNaN(d.getTime())) footParts.push(`<t:${Math.floor(d.getTime() / 1000)}:f>`);
+  }
+  let footer = `-# ${footParts.join(" • ")}`;
+  if (tags) footer += `\n-# ${tags}`;
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
+
+  container.addActionRowComponents(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Voir sur TikTok").setEmoji("▶️").setURL(videoUrl),
+    ),
+  );
 
   return {
-    content,
-    embeds: [embed],
-    components,
+    components: [new TextDisplayBuilder().setContent(firstLine), container],
+    flags: MessageFlags.IsComponentsV2,
     allowedMentions: { roles: cfg.roleId ? [cfg.roleId] : [] },
   };
 }
