@@ -664,9 +664,15 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
   const tier1v1 = resolveBaseTier(rating1v1, ranked?.tier);
 
   const teams = teamsData?.teams?.ranked_2v2 ?? [];
+  // Meilleure équipe 2v2 = celle au plus HAUT rating, comparé NUMÉRIQUEMENT.
+  // (L'API peut renvoyer rating en chaîne : une comparaison brute "987" > "2156" est vraie
+  // alphabétiquement et ferait choisir une équipe solo basse au lieu du vrai meilleur rang.)
+  const teamRating = (t) => Number(t?.rating) || 0;
   let best2v2 = null;
-  if (teams.length > 0) best2v2 = teams.reduce((a, b) => (b.rating > a.rating ? b : a));
-  const tier2v2 = best2v2 ? resolveBaseTier(best2v2.rating, best2v2.tier) : null;
+  for (const t of teams) {
+    if (!best2v2 || teamRating(t) > teamRating(best2v2)) best2v2 = t;
+  }
+  const tier2v2 = best2v2 ? resolveBaseTier(teamRating(best2v2), best2v2.tier) : null;
 
   return {
     brawlhallaId,
@@ -680,7 +686,7 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     games1v1: ranked?.games ?? 0, // games/wins classees 1v1 (niveau joueur)
     wins1v1: ranked?.wins ?? 0,
     tiers: { "1v1": tier1v1, "2v2": tier2v2 },
-    ratings: { "1v1": rating1v1, "2v2": best2v2?.rating ?? 0 },
+    ratings: { "1v1": rating1v1, "2v2": best2v2 ? teamRating(best2v2) : 0 },
     best2v2, // equipe 2v2 au plus haut rating (objet brut) ou null
     teams, // toutes les equipes 2v2 (brut)
     legendsRanked: Array.isArray(ranked?.legends) ? ranked.legends : [], // pour la Glory (peak_rating)
