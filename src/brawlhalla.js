@@ -543,8 +543,11 @@ function revalidate(brawlhallaId) {
   })();
 
   inflight.set(key, p);
-  // Nettoyage de l'inflight : on isole cette chaine pour qu'une rejection de `p`
-  // n'y devienne pas un unhandledRejection (les appelants gerent `p` de leur cote).
+  // Nettoyage de l'inflight ET neutralisation de toute rejection non consommee :
+  // on attache un handler dédié à `p` lui-même (pas seulement à la chaîne `.finally`),
+  // pour qu'un appelant en arrière-plan qui n'attend pas le résultat ne provoque jamais
+  // d'unhandledRejection. Les appelants qui veulent l'erreur reçoivent toujours `p` et la gèrent.
+  p.catch(() => {});
   p.finally(() => inflight.delete(key)).catch(() => {});
   return p;
 }

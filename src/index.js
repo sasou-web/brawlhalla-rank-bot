@@ -7,6 +7,9 @@ installLogCapture(); // capture les logs console pour la page "Logs" du dashboar
 
 // Filets de sécurité process : on log (et on tente d'alerter) sans faire planter le bot.
 process.on("unhandledRejection", (reason) => {
+  // "Joueur introuvable / API momentanément vide" (404) est un cas ATTENDU, déjà géré par
+  // les replis (cache, index local, file de récupération). On ne pollue pas error.log avec.
+  if (reason && (reason.empty === true || reason.status === 404)) return;
   console.error("unhandledRejection :", reason instanceof Error ? reason.message : reason);
 });
 process.on("uncaughtException", (err) => {
