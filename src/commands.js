@@ -112,6 +112,8 @@ import {
   handleLinkSelect,
   handleLinkConfirm,
   handleLinkCancel,
+  handleLinkPanelButton,
+  handleLinkPanelModal,
   handleApprove,
   handleReject,
   handleForcelink,
@@ -200,6 +202,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("tck")) return handleTicketsModal(interaction, ctx);
   if (interaction.customId.startsWith("gw")) return handleGiveawayModal(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
+  if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
   if (!interaction.customId.startsWith("rm:")) return;
   const [, requesterId, , channelId, messageId] = interaction.customId.split(":");
   const reason = interaction.fields.getTextInputValue("raison")?.trim() || "Non précisée";
@@ -563,6 +566,7 @@ export async function handleButton(interaction, ctx) {
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);
+  if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);
   if (id.startsWith("lnkok:")) return handleLinkConfirm(interaction, ctx);
   if (id.startsWith("lnkno:")) return handleLinkCancel(interaction, ctx);
   if (id.startsWith("profpick:")) return handleProfilePick(interaction);

@@ -14,6 +14,7 @@ import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
 import { getRemindersConfig, setRemindersConfig, sendReminderNow } from "../reminders.js";
+import { getLinkPanelConfig, setLinkPanelConfig, buildLinkPanelPayload } from "../linkpanel.js";
 import { getTicketConfig, setTicketConfig, buildTicketPanelPayload } from "../tickets.js";
 import {
   getGiveawayConfig,
@@ -75,6 +76,7 @@ function buildSections(guildId) {
     guessrank: { get: () => getGuessRankConfig(guildId), set: (b) => setGuessRankConfig(guildId, b) },
     tempvoice: { get: () => getTempConfig(guildId), set: (b) => setTempConfig(guildId, b) },
     reminders: { get: () => getRemindersConfig(guildId), set: (b) => setRemindersConfig(guildId, b) },
+    linkpanel: { get: () => getLinkPanelConfig(guildId), set: (b) => setLinkPanelConfig(guildId, b) },
     tickets: { get: () => getTicketConfig(guildId), set: (b) => setTicketConfig(guildId, b) },
     giveaway: { get: () => getGiveawayConfig(guildId), set: (b) => setGiveawayConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
@@ -433,6 +435,21 @@ export function startWebServer(client) {
     try {
       const r = await sendReminderNow(client, config.guildId);
       if (!r.ok) return res.status(400).json({ error: r.reason || "Test impossible." });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Publie le panneau de liaison (embed + bouton) dans le salon configure.
+  app.post("/api/linkpanel/publish", requireAdmin, async (req, res) => {
+    try {
+      const cfg = await getLinkPanelConfig(config.guildId);
+      const channelId = req.body?.channelId || cfg.channelId;
+      if (!channelId) return res.status(400).json({ error: "Choisis d'abord un salon." });
+      const ch = await client.channels.fetch(channelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      await ch.send(buildLinkPanelPayload(cfg));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

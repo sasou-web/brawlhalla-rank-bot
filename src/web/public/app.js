@@ -200,6 +200,7 @@ const NAV_GROUPS = [
     { id: "logs", label: "Logs en direct", ico: "📜" },
     { id: "announce", label: "Annonces", ico: "📢" },
     { id: "reminders", label: "Rappels auto", ico: "🔔" },
+    { id: "linkpanel", label: "Panneau de liaison", ico: "🔗" },
     { id: "settings", label: "Réglages généraux", ico: "⚙️" },
   ] },
   { label: "Engagement", items: [
@@ -684,6 +685,23 @@ function sectionSchema(id, cfg) {
           { title: "Messages", sub: "Un rappel par bloc. Les rappels sont postés sans mention (pas de ping en masse).", fields: [], extra: messagesEditor(cfg, "messages") },
         ],
       };
+    case "linkpanel":
+      return {
+        title: "🔗 Panneau de liaison",
+        sub: "Un embed + bouton « Lier mon compte » : au clic, un modal (ID / pseudo) lance la liaison. Plus besoin de taper /lier.",
+        cards: [
+          { title: "Apparence", fields: [
+            ["Titre", "", textInput(cfg, "title", "🔗 Lier ton compte Brawlhalla")],
+            ["Texte du bouton", "", textInput(cfg, "buttonLabel", "Lier mon compte")],
+            ["Couleur (hex)", "Ex : #4ea1ff", textInput(cfg, "color", "#4ea1ff")],
+            ["Vignette (URL image)", "Optionnel.", textInput(cfg, "thumbnailUrl", "https://...")],
+          ] },
+          { title: "Description", fields: [], extra: textareaInput(cfg, "description", "Explique comment lier son compte (markdown supporté).") },
+          { title: "Publication", sub: "Salon où publier le panneau (le bouton « Publier » l'envoie).", fields: [
+            ["Salon du panneau", "", channelSelect(cfg, "channelId", "text")],
+          ] },
+        ],
+      };
   }
 }
 
@@ -768,6 +786,24 @@ function renderSection(id) {
       test.disabled = false;
     });
     barItems.push(test);
+  }
+  // Bouton Publier pour le panneau de liaison : enregistre puis poste l'embed + bouton.
+  if (id === "linkpanel") {
+    const pub = el("button", { class: "btn-save", style: "background:var(--surface-3);box-shadow:none" }, "📤 Publier le panneau");
+    pub.addEventListener("click", async () => {
+      if (!cfg.channelId) return toast("Choisis d'abord un salon.", "err");
+      pub.disabled = true;
+      try {
+        CONFIG[id] = await api(`/api/config/${id}`, "PUT", cfg);
+        setDirty(false);
+        await api("/api/linkpanel/publish", "POST", { channelId: cfg.channelId });
+        toast("Panneau publié ✅", "ok");
+      } catch (e) {
+        toast("Erreur : " + e.message, "err");
+      }
+      pub.disabled = false;
+    });
+    barItems.push(pub);
   }
   // Bouton de test pour les Niveaux : enregistre puis poste un apercu (niveau simple + palier).
   if (id === "levels") {

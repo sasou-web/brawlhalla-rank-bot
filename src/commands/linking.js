@@ -224,6 +224,88 @@ export async function handleLinkCancel(interaction) {
   });
 }
 
+// ---------- Panneau de liaison persistant (bouton public -> modal) ----------
+
+// Clic sur le bouton du panneau : ouvre un modal de saisie (pseudo / ID).
+export async function handleLinkPanelButton(interaction) {
+  const modal = new ModalBuilder().setCustomId("lnkp_modal").setTitle("Lier mon compte Brawlhalla");
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("id")
+        .setLabel("Brawlhalla ID (le plus fiable)")
+        .setPlaceholder("Ex : 123456 — visible sur corehalla.com")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(20),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("pseudo")
+        .setLabel("OU ton pseudo Brawlhalla")
+        .setPlaceholder("Ton pseudo en jeu (recherche moins fiable)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(64),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+// Soumission du modal : résout par ID (direct) ou par pseudo (menu), en éphémère.
+export async function handleLinkPanelModal(interaction, ctx) {
+  const idRaw = interaction.fields.getTextInputValue("id")?.trim() || "";
+  const pseudo = interaction.fields.getTextInputValue("pseudo")?.trim() || "";
+
+  if (!idRaw && !pseudo) {
+    return interaction.reply({ content: "Indique ton **Brawlhalla ID** ou ton **pseudo**.", flags: EPHEMERAL });
+  }
+  await interaction.deferReply({ flags: EPHEMERAL });
+
+  // ---- Par ID : liaison directe (fiable) -> carte de confirmation ----
+  if (idRaw) {
+    const brawlhallaId = Number(idRaw.replace(/\D/g, ""));
+    if (!brawlhallaId) {
+      return interaction.editReply("Brawlhalla ID invalide : ce doit être un nombre (ex : `123456`).");
+    }
+    let data;
+    try {
+      data = await getPlayerProfile(brawlhallaId);
+    } catch (err) {
+      const msg = err.pending ? err.message : `Erreur API : ${err.message}`;
+      return interaction.editReply(msg);
+    }
+    if (!data || !data.name || data.name === "?") {
+      return interaction.editReply(`Aucun compte Brawlhalla trouvé pour l'ID \`${brawlhallaId}\`. Vérifie ton ID en jeu.`);
+    }
+    return interaction.editReply({
+      content: "Voici le compte correspondant à cet ID :",
+      ...buildConfirmPayload(interaction.user.id, brawlhallaId, data),
+    });
+  }
+
+  // ---- Par pseudo : recherche -> menu de sélection ----
+  let players;
+  try {
+    players = await searchPlayers(pseudo);
+  } catch (err) {
+    const msg = err.pending ? err.message : `Erreur lors de la recherche : ${err.message}`;
+    return interaction.editReply(msg);
+  }
+  if (players.length === 0) {
+    return interaction.editReply(
+      `Aucun joueur classé trouvé pour **${pseudo}**. Seuls les joueurs ayant joué en ranked cette saison apparaissent.\n` +
+        `💡 Astuce : relie-toi directement avec ton **ID** (le bouton, champ « Brawlhalla ID »).`,
+    );
+  }
+  return interaction.editReply({
+    content:
+      "Sélectionne **ton** compte Brawlhalla :\n" +
+      "-# 💡 La recherche par pseudo est capricieuse. Pour un résultat fiable, relie-toi avec ton ID.",
+    components: [buildAccountSelect(interaction.user.id, players)],
+  });
+}
+
 /**
  * Logique commune de liaison d'un compte choisi (par bouton de sélection OU par /lier id:).
  * L'interaction doit déjà être différée (deferReply ou deferUpdate) : tout passe par editReply.
