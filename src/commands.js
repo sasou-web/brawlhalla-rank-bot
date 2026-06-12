@@ -564,6 +564,7 @@ export async function handleSelect(interaction, ctx) {
 }
 
 async function routeSelect(interaction, ctx) {
+  if (interaction.customId === "cbp_open") return handleCombosOpen(interaction);
   if (interaction.customId === "cbp_weapon") return handleCombosWeapon(interaction);
   if (interaction.customId.startsWith("cbp_pick:")) return handleCombosPick(interaction);
   if (interaction.customId.startsWith("lvl_")) return handleLevelsPanelSelect(interaction, ctx);
