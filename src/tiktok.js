@@ -222,6 +222,17 @@ export function buildMessagePayload(cfg, item, { test = false } = {}) {
 
 // ---------- Poll : detecte et poste les nouveaux items ----------
 
+// ID STABLE d'une vidéo : le numéro TikTok extrait de l'URL (/video/123...), qui ne change
+// jamais. On dédoublonne là-dessus, et PAS sur le guid du flux RSS : RSS.app régénère parfois
+// le guid/lien de la MÊME vidéo, ce qui faisait reposter un doublon. Repli : URL sans
+// paramètres, puis id brut.
+export function stableVideoId(item) {
+  const m = String(item?.url || "").match(/\/video\/(\d+)/);
+  if (m) return m[1];
+  const base = String(item?.url || "").split(/[?#]/)[0];
+  return base || item?.id || "";
+}
+
 export async function pollGuild(client, guildId) {
   const cfg = await getGuild(guildId);
   if (!cfg.enabled || !cfg.feedUrl || !cfg.channelId) return { posted: 0 };
@@ -236,14 +247,27 @@ export async function pollGuild(client, guildId) {
 
   // Premier passage : memorise le plus recent sans spammer l'historique.
   if (!cfg.lastItemId) {
-    await setTikTokConfig(guildId, { lastItemId: items[0].id });
+    await setTikTokConfig(guildId, { lastItemId: stableVideoId(items[0]) });
     return { posted: 0 };
   }
 
+  // Le dernier posté est reconnu via son ID stable, mais aussi via l'id brut / l'URL pour
+  // tolérer les anciennes valeurs stockées (migration) sans tout reposter.
+  const lastId = cfg.lastItemId;
+  const isLast = (it) => stableVideoId(it) === lastId || it.id === lastId || it.url === lastId;
+
+  let matched = false;
   const newOnes = [];
   for (const it of items) {
-    if (it.id === cfg.lastItemId) break;
+    if (isLast(it)) { matched = true; break; }
     newOnes.push(it);
+  }
+
+  // Dernier posté introuvable dans le flux (guid régénéré, flux purgé...) : on NE reposte PAS
+  // tout l'historique. On resynchronise simplement sur la vidéo la plus récente, sans rien poster.
+  if (!matched) {
+    await setTikTokConfig(guildId, { lastItemId: stableVideoId(items[0]) });
+    return { posted: 0 };
   }
   if (!newOnes.length) return { posted: 0 };
 
@@ -259,7 +283,7 @@ export async function pollGuild(client, guildId) {
       break;
     }
   }
-  await setTikTokConfig(guildId, { lastItemId: items[0].id });
+  await setTikTokConfig(guildId, { lastItemId: stableVideoId(items[0]) });
   return { posted };
 }
 
