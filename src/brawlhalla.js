@@ -543,7 +543,9 @@ function revalidate(brawlhallaId) {
   })();
 
   inflight.set(key, p);
-  p.finally(() => inflight.delete(key));
+  // Nettoyage de l'inflight : on isole cette chaine pour qu'une rejection de `p`
+  // n'y devienne pas un unhandledRejection (les appelants gerent `p` de leur cote).
+  p.finally(() => inflight.delete(key)).catch(() => {});
   return p;
 }
 
