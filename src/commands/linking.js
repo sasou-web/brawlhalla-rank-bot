@@ -382,8 +382,31 @@ async function concludeReview(interaction, conclusion) {
 
 export async function handleForcelink(interaction, ctx) {
   const target = interaction.options.getUser("membre", true);
-  const pseudo = interaction.options.getString("pseudo", true).trim();
+  const pseudo = interaction.options.getString("pseudo", false)?.trim() || "";
+  const directId = interaction.options.getInteger("id", false);
   await interaction.deferReply({ flags: EPHEMERAL });
+
+  if (!pseudo && !directId) {
+    return interaction.editReply("Fournis un **pseudo** (recherche) ou un **id** (liaison directe).");
+  }
+
+  // Liaison directe par Brawlhalla ID : on contourne la recherche (endpoint /search casse).
+  if (directId) {
+    const brawlhallaId = Number(directId);
+    const owner = await findUserByBrawlhallaId(brawlhallaId);
+    if (owner && owner !== target.id) {
+      return interaction.editReply(`Ce compte (ID ${brawlhallaId}) est déjà lié par <@${owner}>. Fais d'abord /unlink sur lui.`);
+    }
+    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+    if (!member) return interaction.editReply("Membre introuvable.");
+    try {
+      const result = await doSync(member, brawlhallaId, ctx);
+      await logAudit(interaction.guild, `🔧 <@${interaction.user.id}> a force-lié <@${target.id}> via ID ${brawlhallaId} (${tierSummary(result.tiers)}).`);
+      return interaction.editReply(`<@${target.id}> lié au compte ID **${brawlhallaId}** ! ${tierSummary(result.tiers)}.`);
+    } catch (err) {
+      return interaction.editReply(`Échec : ${err.message} (vérifie le Brawlhalla ID).`);
+    }
+  }
 
   let players;
   try {
@@ -391,7 +414,9 @@ export async function handleForcelink(interaction, ctx) {
   } catch (err) {
     return interaction.editReply(`Erreur : ${err.message}`);
   }
-  if (players.length === 0) return interaction.editReply(`Aucun joueur classé pour **${pseudo}**.`);
+  if (players.length === 0) {
+    return interaction.editReply(`Aucun joueur classé pour **${pseudo}**. Tu peux aussi utiliser l'option **id** pour lier directement.`);
+  }
 
   const row = new ActionRowBuilder().addComponents(
     players.map((p) => {

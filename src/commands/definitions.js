@@ -133,7 +133,8 @@ export const commandsData = [
     .setDescription("(Admin) Lie un membre a un compte Brawlhalla sans validation.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((o) => o.setName("membre").setDescription("Le membre a lier.").setRequired(true))
-    .addStringOption((o) => o.setName("pseudo").setDescription("Pseudo Brawlhalla.").setRequired(true))
+    .addStringOption((o) => o.setName("pseudo").setDescription("Pseudo Brawlhalla (recherche).").setRequired(false))
+    .addIntegerOption((o) => o.setName("id").setDescription("Brawlhalla ID (liaison directe, sans recherche).").setRequired(false).setMinValue(1))
     .toJSON(),
   new SlashCommandBuilder()
     .setName("unlink")
