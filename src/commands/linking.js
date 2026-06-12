@@ -334,10 +334,11 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
 
   const settings = await getSettings();
   const top = highestTier(data.tiers);
-  const autoApprove =
-    !settings.reviewChannelId || tierIndex(top) <= tierIndex(settings.autoApproveTier);
+  const aboveAuto = tierIndex(top) > tierIndex(settings.autoApproveTier);
+  const needsProof = settings.requireProofScreenshot && tierIndex(top) >= tierIndex(settings.proofTier);
 
-  if (autoApprove) {
+  // Auto-liaison (réutilisée aussi quand aucun salon de validation n'est configuré).
+  const autoLink = async () => {
     try {
       const result = await doSync(member, brawlhallaId, ctx, data);
       await logAudit(
@@ -350,24 +351,19 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
       return interaction.editReply({
         content: `<@${userId}> compte lié ! ${tierSummary(result.tiers)}.${note}`,
         components: [],
+        embeds: [],
         allowedMentions: { users: [userId] },
       });
     } catch (err) {
-      return interaction.editReply({ content: `Échec de la liaison : ${err.message}`, components: [] });
+      return interaction.editReply({ content: `Échec de la liaison : ${err.message}`, components: [], embeds: [] });
     }
-  }
+  };
 
-  // Validation staff requise.
-  const channel = await interaction.guild.channels.fetch(settings.reviewChannelId).catch(() => null);
-  if (!channel?.isTextBased?.()) {
-    return interaction.editReply({
-      content: "Salon de validation introuvable. Préviens un admin (/setup).",
-      components: [],
-    });
-  }
+  // Sous le seuil d'auto-validation : liaison directe.
+  if (!aboveAuto) return autoLink();
 
-  // Hauts rangs : on exige une preuve (capture du profil en jeu) dans un fil privé.
-  const needsProof = settings.requireProofScreenshot && tierIndex(top) >= tierIndex(settings.proofTier);
+  // Hauts rangs avec preuve requise : fil privé dans le salon de preuve. INDÉPENDANT du salon
+  // de validation classique (on ne doit pas exiger reviewChannelId pour ce chemin).
   if (needsProof) {
     const proofParent = await resolveProofParent(interaction, settings);
     const res = await openProofThread(interaction, proofParent, { userId, brawlhallaId, data, settings });
@@ -378,11 +374,24 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
           `📸 Tu as été ajouté à un **fil privé** : **[clique ici pour l'ouvrir](${res.url})**. ` +
           `Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`,
         components: [],
+        embeds: [],
         allowedMentions: { users: [userId] },
       });
     }
     // Échec de création du fil (permissions, membre non ajoutable…) : repli sur la review classique.
     await logAudit(interaction.guild, `⚠️ Fil de preuve impossible (${res.error}). Repli sur validation classique.`);
+  }
+
+  // Validation classique : embed + boutons dans le salon de validation.
+  // Pas de salon de validation configuré : on auto-valide (comportement historique).
+  if (!settings.reviewChannelId) return autoLink();
+  const channel = await interaction.guild.channels.fetch(settings.reviewChannelId).catch(() => null);
+  if (!channel?.isTextBased?.()) {
+    return interaction.editReply({
+      content: "Salon de validation introuvable. Préviens un admin (/setup).",
+      components: [],
+      embeds: [],
+    });
   }
 
   // Validation classique : embed + boutons dans le salon de validation.
