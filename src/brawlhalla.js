@@ -449,22 +449,26 @@ export async function getApiMetrics() {
  */
 export async function getPlayerProfile(brawlhallaId, { force = false, allowStale = true } = {}) {
   const entry = await getProfileEntry(brawlhallaId);
-  const fresh = entry && Date.now() - entry.ts < PROFILE_TTL_MS;
+  // Un profil "vide" (name "?", tout a zero) n'est PAS un vrai joueur : c'est le residu
+  // d'un fetch ou tous les appels ont renvoye 404/vide. On ne le considere jamais comme
+  // un cache valide -> on retente un fetch reel a la place (auto-guerison du cache pourri).
+  const usableEntry = entry && !isEmptyProfile(entry.data) ? entry : null;
+  const fresh = usableEntry && Date.now() - usableEntry.ts < PROFILE_TTL_MS;
 
   // Cache-first (stale-while-revalidate) : on sert le cache tout de suite,
   // et on rafraichit en arriere-plan s'il est perime.
-  if (!force && entry) {
+  if (!force && usableEntry) {
     if (!fresh) revalidate(brawlhallaId).catch(() => addPendingProfile(brawlhallaId));
-    return entry.data;
+    return usableEntry.data;
   }
 
-  // Pas de cache (ou refresh force) : on doit aller chercher en direct.
+  // Pas de cache exploitable (ou refresh force) : on doit aller chercher en direct.
   try {
     return await revalidate(brawlhallaId);
   } catch (err) {
     // Echec API : on programme une recuperation en arriere-plan pour que la prochaine fois marche.
     addPendingProfile(brawlhallaId);
-    if (allowStale && entry) return entry.data; // repli sur donnee perimee
+    if (allowStale && usableEntry) return usableEntry.data; // repli sur donnee perimee EXPLOITABLE
     // Dernier recours : profil minimal reconstruit depuis l'index local du leaderboard.
     // Permet a /lier d'attribuer au moins le role 1v1 meme quand l'API est totalement morte.
     if (allowStale) {
@@ -473,6 +477,17 @@ export async function getPlayerProfile(brawlhallaId, { force = false, allowStale
     }
     throw err;
   }
+}
+
+// Vrai si le profil ne contient AUCUNE donnee exploitable : pas de nom, aucun rating,
+// niveau 0 et aucune game. C'est le residu d'un fetch ou tous les endpoints ont renvoye
+// 404/vide. A ne jamais cacher ni afficher comme un vrai joueur.
+function isEmptyProfile(data) {
+  if (!data) return true;
+  const noName = !data.name || data.name === "?";
+  const noRanked = !(data.ratings?.["1v1"] > 0) && !(data.ratings?.["2v2"] > 0);
+  const noActivity = !(data.level > 0) && !(data.totalGames > 0);
+  return noName && noRanked && noActivity;
 }
 
 // Construit un profil minimal (forme identique a fetchPlayerProfile) a partir d'une
@@ -610,6 +625,21 @@ async function fetchPlayerProfile(brawlhallaId) {
   const teamsData = teamsR.status === "fulfilled" ? teamsR.value : null;
   const all = allR.status === "fulfilled" ? allR.value : null;
   const partial = teamsR.status === "rejected" || allR.status === "rejected";
+
+  // Aucune donnee nulle part : l'appel ranked ET l'appel "all" renvoient null (404/vide).
+  // Ce n'est pas un vrai profil -> on NE fabrique PAS une fiche vide "?" (qui serait mise
+  // en cache puis affichee comme un joueur reel, cf. bug "Profil — ?"). On leve une erreur
+  // pour declencher le repli (cache exploitable / index local) et la file de recuperation.
+  // NB : un joueur en PLACEMENTS a bien `all` != null -> ce cas ne se declenche pas pour lui.
+  if (rankedR.value == null && all == null) {
+    const e = new Error(
+      `Aucune donnée renvoyée par l'API pour l'ID ${brawlhallaId} ` +
+        `(joueur introuvable, ou API momentanément vide — réessaie dans ~30 s).`,
+    );
+    e.status = 404;
+    e.empty = true;
+    throw e;
+  }
 
   return buildPlayerProfile(brawlhallaId, { ranked: rankedR.value, teamsData, all, partial });
 }
