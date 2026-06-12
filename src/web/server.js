@@ -165,14 +165,10 @@ export function startWebServer(client) {
 
   // ---- Helpers ----
   async function isGuildAdmin(userId) {
-    try {
-      const guild = await client.guilds.fetch(config.guildId);
-      if (guild.ownerId === userId) return true;
-      const member = await guild.members.fetch(userId);
-      return member.permissions.has(PermissionFlagsBits.ManageGuild);
-    } catch {
-      return false;
-    }
+    const guild = await client.guilds.fetch(config.guildId);
+    if (guild.ownerId === userId) return true;
+    const member = await guild.members.fetch(userId);
+    return member.permissions.has(PermissionFlagsBits.ManageGuild);
   }
 
   // Re-vérification des droits admin à chaque requête, mais mise en cache courte (60 s)
@@ -180,13 +176,21 @@ export function startWebServer(client) {
   // attendre l'expiration (1 j) du JWT figé au login.
   const adminCache = new Map(); // userId -> { admin, exp }
   const ADMIN_TTL_MS = 60_000;
-  async function verifyAdmin(userId) {
+  async function verifyAdmin(userId, fallback) {
     const now = Date.now();
     const cached = adminCache.get(userId);
     if (cached && cached.exp > now) return cached.admin;
-    const admin = await isGuildAdmin(userId);
-    adminCache.set(userId, { admin, exp: now + ADMIN_TTL_MS });
-    return admin;
+    try {
+      const admin = await isGuildAdmin(userId);
+      adminCache.set(userId, { admin, exp: now + ADMIN_TTL_MS });
+      return admin;
+    } catch {
+      // Échec TRANSITOIRE de l'API Discord (hoquet réseau, rate-limit pendant un refresh) :
+      // on ne révoque PAS l'admin pour autant. On garde la dernière valeur connue, sinon on
+      // se fie au flag de session (JWT signé au login). On ne met rien en cache pour réessayer.
+      if (cached) return cached.admin;
+      return Boolean(fallback);
+    }
   }
 
   function signSession(payload) {
@@ -204,7 +208,8 @@ export function startWebServer(client) {
     if (!s || !s.isAdmin) return res.status(401).json({ error: "non authentifié" });
     req.session = s;
     // Revérification live (cache 60 s) : invalide la session si les droits ont été retirés.
-    verifyAdmin(s.id)
+    // En cas d'échec transitoire de l'API, on retombe sur le flag de session (pas de révocation abusive).
+    verifyAdmin(s.id, s.isAdmin)
       .then((ok) => {
         if (!ok) return res.status(403).json({ error: "accès révoqué" });
         next();
