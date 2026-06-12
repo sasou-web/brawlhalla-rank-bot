@@ -134,8 +134,19 @@ client.once(Events.ClientReady, async (c) => {
     console.warn("Impossible de preparer les roles de niveau :", err.message);
   }
 
-  // Premier refresh, puis a intervalle regulier.
-  await refreshAllMembers(guild);
+  // Démarre le dashboard web LE PLUS TÔT POSSIBLE (avant le refresh des membres qui peut
+  // durer plusieurs minutes quand l'API Brawlhalla est lente). Le panel n'a besoin que du
+  // client : les données sont récupérées à la demande. Évite l'attente au démarrage.
+  try {
+    startWebServer(client);
+  } catch (err) {
+    console.warn("Dashboard web non démarré :", err.message);
+  }
+
+  // Premier refresh EN ARRIÈRE-PLAN (non bloquant) : il peut durer plusieurs minutes si
+  // l'API est lente, mais ne doit pas retarder la mise en place des autres tâches. La garde
+  // anti-chevauchement (refreshing) empêche l'intervalle de se superposer au premier cycle.
+  refreshAllMembers(guild).catch(console.error);
   const intervalMs = Math.max(5, config.refreshIntervalMinutes) * 60 * 1000;
   every(() => refreshAllMembers(guild).catch(console.error), intervalMs);
 
@@ -205,13 +216,6 @@ client.once(Events.ClientReady, async (c) => {
       .catch(() => {});
   every(recapTick, 60 * 60 * 1000);
   recapTick();
-
-  // Démarre le dashboard web (si configuré).
-  try {
-    startWebServer(client);
-  } catch (err) {
-    console.warn("Dashboard web non démarré :", err.message);
-  }
 
   // Notifications TikTok : verifie les nouvelles videos a intervalle regulier.
   const pollTikTokGuild = async () => {
