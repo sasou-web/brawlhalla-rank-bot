@@ -688,15 +688,20 @@ function sectionSchema(id, cfg) {
     case "linkpanel":
       return {
         title: "🔗 Panneau de liaison",
-        sub: "Un embed + bouton « Lier mon compte » : au clic, un modal (ID / pseudo) lance la liaison. Plus besoin de taper /lier.",
+        sub: "Un joli cadre (Components V2) + bouton « Lier mon compte » : au clic, un modal (ID / pseudo) lance la liaison. Plus besoin de taper /lier.",
         cards: [
           { title: "Apparence", fields: [
             ["Titre", "", textInput(cfg, "title", "🔗 Lier ton compte Brawlhalla")],
             ["Texte du bouton", "", textInput(cfg, "buttonLabel", "Lier mon compte")],
-            ["Couleur (hex)", "Ex : #4ea1ff", textInput(cfg, "color", "#4ea1ff")],
-            ["Vignette (URL image)", "Optionnel.", textInput(cfg, "thumbnailUrl", "https://...")],
+            ["Couleur (hex)", "Bordure du cadre. Ex : #4ea1ff", textInput(cfg, "color", "#4ea1ff")],
+            ["Vignette (URL image)", "Petite image à droite du titre. Optionnel.", textInput(cfg, "thumbnailUrl", "https://...")],
+            ["Bannière (URL image)", "Grande image en haut du cadre. Optionnel.", textInput(cfg, "bannerUrl", "https://...")],
           ] },
-          { title: "Description", fields: [], extra: textareaInput(cfg, "description", "Explique comment lier son compte (markdown supporté).") },
+          { title: "Texte d'accroche", fields: [], extra: textareaInput(cfg, "description", "Phrase d'accroche (markdown supporté).") },
+          { title: "Avantages de la liaison", sub: "Titre + liste affichée dans le cadre (markdown, une ligne par avantage).", fields: [
+            ["Titre de la section", "", textInput(cfg, "benefitsTitle", "✨ Pourquoi lier ton compte ?")],
+          ], extra: textareaInput(cfg, "benefits", "🎖️ Rôles de rank automatiques\n🔄 Mise à jour auto...") },
+          { title: "Pied de cadre (conseil)", fields: [], extra: textareaInput(cfg, "footerText", "💡 Le plus fiable : ton Brawlhalla ID...") },
           { title: "Publication", sub: "Salon où publier le panneau (le bouton « Publier » l'envoie).", fields: [
             ["Salon du panneau", "", channelSelect(cfg, "channelId", "text")],
           ] },
