@@ -518,8 +518,52 @@ async function handleSetupSucces(interaction, ctx) {
   });
 }
 
+// ---------- Anti double-clic (debounce d'interactions) ----------
+// Empêche le même utilisateur de déclencher 2x le MÊME composant (même message + customId)
+// tant que le premier traitement n'est pas terminé, plus un court délai de grâce. Évite les
+// doubles validations, l'ouverture de plusieurs fils de liaison, etc. lors de clics en rafale.
+const interactionLocks = new Map(); // key -> expiry (ms epoch)
+const LOCK_MAX_MS = 15000; // garde-fou si le finally ne s'exécute pas
+const LOCK_GRACE_MS = 1500; // délai après traitement pour absorber les clics tardifs
+
+function lockKey(i) {
+  return `${i.user?.id}:${i.message?.id ?? "modal"}:${i.customId}`;
+}
+
+function acquireInteractionLock(i) {
+  const key = lockKey(i);
+  const now = Date.now();
+  const exp = interactionLocks.get(key);
+  if (exp && exp > now) return false; // déjà en cours / dans le délai de grâce
+  interactionLocks.set(key, now + LOCK_MAX_MS);
+  return true;
+}
+
+function releaseInteractionLock(i) {
+  const now = Date.now();
+  interactionLocks.set(lockKey(i), now + LOCK_GRACE_MS);
+  // Nettoyage opportuniste pour borner la taille de la Map.
+  if (interactionLocks.size > 1000) {
+    for (const [k, e] of interactionLocks) if (e <= now) interactionLocks.delete(k);
+  }
+}
+
+// Acquitte silencieusement un clic en double (aucun effet visible, pas d'« interaction échouée »).
+function ackDuplicate(interaction) {
+  if (interaction.deferred || interaction.replied) return Promise.resolve();
+  return interaction.deferUpdate().catch(() => {});
+}
+
 export async function handleSelect(interaction, ctx) {
-  if (interaction.customId === "cbp_open") return handleCombosOpen(interaction);
+  if (!acquireInteractionLock(interaction)) return ackDuplicate(interaction);
+  try {
+    return await routeSelect(interaction, ctx);
+  } finally {
+    releaseInteractionLock(interaction);
+  }
+}
+
+async function routeSelect(interaction, ctx) {
   if (interaction.customId === "cbp_weapon") return handleCombosWeapon(interaction);
   if (interaction.customId.startsWith("cbp_pick:")) return handleCombosPick(interaction);
   if (interaction.customId.startsWith("lvl_")) return handleLevelsPanelSelect(interaction, ctx);
@@ -554,6 +598,15 @@ export async function handleSelect(interaction, ctx) {
 // ---------- Routeur boutons ----------
 
 export async function handleButton(interaction, ctx) {
+  if (!acquireInteractionLock(interaction)) return ackDuplicate(interaction);
+  try {
+    return await routeButton(interaction, ctx);
+  } finally {
+    releaseInteractionLock(interaction);
+  }
+}
+
+async function routeButton(interaction, ctx) {
   const id = interaction.customId;
   if (id.startsWith("lvl_")) return handleLevelsPanelButton(interaction, ctx);
   if (id.startsWith("tt_")) return handleTikTokPanelButton(interaction, ctx);
