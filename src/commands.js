@@ -109,6 +109,9 @@ import { ACHIEVEMENTS, listUnlocked } from "./achievements.js";
 import {
   handleLier,
   handlePick,
+  handleLinkSelect,
+  handleLinkConfirm,
+  handleLinkCancel,
   handleApprove,
   handleReject,
   handleForcelink,
@@ -525,6 +528,7 @@ export async function handleSelect(interaction, ctx) {
   if (interaction.customId.startsWith("tck")) return handleTicketsSelect(interaction, ctx);
   if (interaction.customId.startsWith("gw")) return handleGiveawaySelect(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentSelect(interaction, ctx);
+  if (interaction.customId.startsWith("lnksel:")) return handleLinkSelect(interaction, ctx);
   switch (interaction.customId) {
     case "setup_channel":
       await setSetting("reviewChannelId", interaction.values[0]);
@@ -559,6 +563,8 @@ export async function handleButton(interaction, ctx) {
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);
+  if (id.startsWith("lnkok:")) return handleLinkConfirm(interaction, ctx);
+  if (id.startsWith("lnkno:")) return handleLinkCancel(interaction, ctx);
   if (id.startsWith("profpick:")) return handleProfilePick(interaction);
   if (id.startsWith("prof:")) return handleProfileNav(interaction);
   if (id.startsWith("ap:")) return handleApprove(interaction, ctx);

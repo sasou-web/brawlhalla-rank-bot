@@ -3,6 +3,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -13,7 +14,7 @@ import { searchPlayers, getPlayerProfile } from "../brawlhalla.js";
 import { removeLink, getLink, findUserByBrawlhallaId } from "../store.js";
 import { getSettings } from "../settings.js";
 import { managedRoleNames } from "../roles.js";
-import { highestTier, tierIndex, tierEmojiResolvable } from "../config.js";
+import { highestTier, tierIndex, tierEmojiResolvable, REGION_LABELS } from "../config.js";
 import { EPHEMERAL, logAudit, dmUser, tierEmoji, doSync } from "./shared.js";
 
 // Cooldown anti-spam de /lier (par utilisateur).
@@ -27,6 +28,53 @@ function tierSummary(tiers) {
   if (tiers?.["1v1"]) parts.push(`1v1 ${tierEmoji(tiers["1v1"])} **${tiers["1v1"]}**`);
   if (tiers?.["2v2"]) parts.push(`2v2 ${tierEmoji(tiers["2v2"])} **${tiers["2v2"]}**`);
   return parts.length ? parts.join(" · ") : "aucun rank classé";
+}
+
+const regionLabel = (r) => REGION_LABELS[r] || r || "?";
+
+// Menu déroulant de sélection de compte (remplace les anciens boutons) : la région est
+// affichée en clair dans le label et l'ID/tier/rating dans la description -> bien plus
+// lisible quand un joueur a plusieurs comptes (régions/plateformes différentes).
+function buildAccountSelect(ownerId, players) {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lnksel:${ownerId}`)
+    .setPlaceholder("Choisis TON compte Brawlhalla")
+    .addOptions(
+      players.slice(0, 25).map((p) => {
+        const opt = {
+          label: `${p.username} — ${regionLabel(p.region)}`.slice(0, 100),
+          value: String(p.id),
+          description: `${p.tier || "Non classé"} · ${p.rating ?? 0} · ID ${p.id}`.slice(0, 100),
+        };
+        const emoji = tierEmojiResolvable(p.tier ? String(p.tier).split(" ")[0] : null);
+        if (emoji) opt.emoji = emoji;
+        return opt;
+      }),
+    );
+  return new ActionRowBuilder().addComponents(select);
+}
+
+// Carte de confirmation : on montre le profil complet du compte choisi AVANT de lier,
+// pour que le joueur vérifie visuellement (région, niveau, ranks) que c'est bien le sien.
+function buildConfirmPayload(ownerId, brawlhallaId, data) {
+  const embed = new EmbedBuilder()
+    .setTitle("🔎 C'est bien ton compte ?")
+    .setColor(0x4ea1ff)
+    .setDescription("Vérifie que c'est **toi** avant de confirmer la liaison.")
+    .addFields(
+      { name: "Pseudo", value: `\`${data.name ?? "?"}\``, inline: true },
+      { name: "Région", value: regionLabel(data.region), inline: true },
+      { name: "Brawlhalla ID", value: `\`${brawlhallaId}\``, inline: true },
+      { name: "1v1", value: data.tiers?.["1v1"] ? `${tierEmoji(data.tiers["1v1"])} ${data.tiers["1v1"]} (${data.ratings?.["1v1"] ?? 0})` : "—", inline: true },
+      { name: "2v2", value: data.tiers?.["2v2"] ? `${tierEmoji(data.tiers["2v2"])} ${data.tiers["2v2"]} (${data.ratings?.["2v2"] ?? 0})` : "—", inline: true },
+      { name: "Niveau / Peak", value: `niv. ${data.level ?? 0} · peak ${data.peak1v1 ?? 0}`, inline: true },
+    )
+    .setFooter({ text: "Lie uniquement TON compte. En cas d'erreur, clique « Ce n'est pas le bon »." });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`lnkok:${ownerId}:${brawlhallaId}`).setLabel("C'est bien moi").setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`lnkno:${ownerId}`).setLabel("Ce n'est pas le bon").setEmoji("❌").setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row] };
 }
 
 async function isReviewer(interaction) {
@@ -81,7 +129,12 @@ export async function handleLier(interaction, ctx) {
         `<@${interaction.user.id}> aucun compte Brawlhalla trouvé pour l'ID \`${brawlhallaId}\`. Vérifie ton ID en jeu.`,
       );
     }
-    return linkChosenAccount(interaction, { brawlhallaId, member: interaction.member, ctx, data });
+    // Liaison par ID : on passe par la carte de confirmation (vérification visuelle).
+    return interaction.editReply({
+      content: `<@${interaction.user.id}> voici le compte de l'ID \`${brawlhallaId}\` :`,
+      ...buildConfirmPayload(interaction.user.id, brawlhallaId, data),
+      allowedMentions: { users: [interaction.user.id] },
+    });
   }
 
   let players;
@@ -97,20 +150,9 @@ export async function handleLier(interaction, ctx) {
     );
   }
 
-  const row = new ActionRowBuilder().addComponents(
-    players.map((p) => {
-      const btn = new ButtonBuilder()
-        .setCustomId(`pick:${interaction.user.id}:${p.id}`)
-        .setLabel(`${p.username} — ${p.tier ?? "?"} (${p.region}, ${p.rating})`.slice(0, 80))
-        .setStyle(ButtonStyle.Primary);
-      const emoji = tierEmojiResolvable(p.tier ? String(p.tier).split(" ")[0] : null);
-      if (emoji) btn.setEmoji(emoji);
-      return btn;
-    }),
-  );
   return interaction.editReply({
-    content: `<@${interaction.user.id}> sélectionne **ton** compte Brawlhalla :`,
-    components: [row],
+    content: `<@${interaction.user.id}> sélectionne **ton** compte Brawlhalla dans le menu ci-dessous :`,
+    components: [buildAccountSelect(interaction.user.id, players)],
     allowedMentions: { users: [interaction.user.id] },
   });
 }
@@ -130,6 +172,70 @@ export async function handlePick(interaction, ctx) {
   }
   await interaction.deferUpdate();
   return linkChosenAccount(interaction, { brawlhallaId, member: interaction.member, ctx });
+}
+
+// ---------- Sélection via menu déroulant (recherche par pseudo) ----------
+export async function handleLinkSelect(interaction, ctx) {
+  const ownerId = interaction.customId.split(":")[1];
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "Ce menu ne t'appartient pas. Lance ta propre commande `/lier`.", flags: EPHEMERAL });
+  }
+  const brawlhallaId = Number(interaction.values?.[0]);
+  await interaction.deferUpdate();
+
+  let data;
+  try {
+    data = await getPlayerProfile(brawlhallaId);
+  } catch (err) {
+    return interaction.editReply({ content: `<@${ownerId}> Erreur API : ${err.message}`, embeds: [], components: [] });
+  }
+
+  // Règle : à partir du tier configuré (défaut Diamond), la liaison par PSEUDO est refusée.
+  // La recherche par pseudo est peu fiable pour les hauts rangs -> on impose l'ID.
+  const settings = await getSettings();
+  const top = highestTier(data.tiers);
+  if (tierIndex(top) >= tierIndex(settings.idRequiredTier)) {
+    return interaction.editReply({
+      content:
+        `<@${ownerId}> ton compte est **${top}** : à ce niveau, la recherche par pseudo n'est pas fiable.\n` +
+        `🔐 Relie-toi avec ton **Brawlhalla ID** (100% fiable) : \`/lier id:${brawlhallaId}\`\n` +
+        `-# Ton ID est aussi visible sur corehalla.com et dans l'appli Brawlhalla.`,
+      embeds: [],
+      components: [],
+      allowedMentions: { users: [ownerId] },
+    });
+  }
+
+  return interaction.editReply({
+    content: `<@${ownerId}> vérifie ton compte avant de confirmer :`,
+    ...buildConfirmPayload(ownerId, brawlhallaId, data),
+    allowedMentions: { users: [ownerId] },
+  });
+}
+
+// ---------- Confirmation / annulation de la carte ----------
+export async function handleLinkConfirm(interaction, ctx) {
+  const [, ownerId, bhId] = interaction.customId.split(":");
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "Ce choix ne t'appartient pas. Lance ta propre commande `/lier`.", flags: EPHEMERAL });
+  }
+  await interaction.deferUpdate();
+  // On efface la carte de confirmation : linkChosenAccount réécrira le contenu sans embed.
+  await interaction.editReply({ embeds: [], components: [] }).catch(() => {});
+  return linkChosenAccount(interaction, { brawlhallaId: Number(bhId), member: interaction.member, ctx });
+}
+
+export async function handleLinkCancel(interaction) {
+  const ownerId = interaction.customId.split(":")[1];
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "Ce bouton ne t'appartient pas.", flags: EPHEMERAL });
+  }
+  return interaction.update({
+    content: `<@${ownerId}> liaison annulée. Relance \`/lier\` — pour un résultat sûr, utilise ton **ID** (\`/lier id:123456\`).`,
+    embeds: [],
+    components: [],
+    allowedMentions: { users: [ownerId] },
+  });
 }
 
 /**

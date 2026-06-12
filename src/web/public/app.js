@@ -568,6 +568,7 @@ function sectionSchema(id, cfg) {
             ["Salon d'alertes (santé du bot)", "Crash, déconnexion Discord, API down. Vide = salon d'audit.", channelSelect(cfg, "alertChannelId", "text")],
             ["Salon des succès", "Annonces des achievements débloqués (sans ping). Vide = désactivé.", channelSelect(cfg, "achievementsChannelId", "text")],
             ["Seuil d'auto-validation", "Tout ce qui est ≤ ce tier est validé automatiquement.", selectInput(cfg, "autoApproveTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
+            ["Rang exigeant l'ID (pas de pseudo)", "À partir de ce tier (inclus), la liaison par pseudo est refusée : le joueur doit utiliser son Brawlhalla ID (la recherche par pseudo est peu fiable pour les hauts rangs).", selectInput(cfg, "idRequiredTier", GUILD.tiers.map((t) => ({ value: t, label: t })))],
           ] },
           { title: "Validation par preuve (hauts rangs)", sub: "À partir du rang choisi, un fil privé est créé : le joueur y poste une capture de sa page de profil en jeu (ID + pseudo visibles), le staff valide depuis ce fil.", fields: [
             ["Preuve obligatoire", "Active la demande de capture d'écran pour les hauts rangs.", toggle(cfg, "requireProofScreenshot")],
