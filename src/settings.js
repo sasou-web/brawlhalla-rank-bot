@@ -37,9 +37,6 @@ export async function getSettings() {
     // un fil privé est créé où le joueur poste une capture de son profil en jeu (ID visible).
     requireProofScreenshot: s.requireProofScreenshot ?? true,
     proofTier: s.proofTier || "Diamond",
-    // À partir de ce tier (inclus), la liaison par PSEUDO est refusée : le joueur doit utiliser
-    // son Brawlhalla ID (la recherche par pseudo est peu fiable pour les hauts rangs).
-    idRequiredTier: s.idRequiredTier || "Diamond",
     // Salon hôte des fils de preuve. DOIT être visible par les membres (sinon Discord refuse
     // de les ajouter au fil privé). Vide = salon où /lier a été lancé.
     proofChannelId: s.proofChannelId || "",

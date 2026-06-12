@@ -151,7 +151,9 @@ export async function handleLier(interaction, ctx) {
   }
 
   return interaction.editReply({
-    content: `<@${interaction.user.id}> sélectionne **ton** compte Brawlhalla dans le menu ci-dessous :`,
+    content:
+      `<@${interaction.user.id}> sélectionne **ton** compte Brawlhalla dans le menu ci-dessous :\n` +
+      `-# 💡 La recherche par pseudo est capricieuse (API Brawlhalla). Pour un résultat **fiable**, utilise plutôt ton ID : \`/lier id:123456\` (visible sur corehalla.com ou dans l'appli).`,
     components: [buildAccountSelect(interaction.user.id, players)],
     allowedMentions: { users: [interaction.user.id] },
   });
@@ -188,22 +190,6 @@ export async function handleLinkSelect(interaction, ctx) {
     data = await getPlayerProfile(brawlhallaId);
   } catch (err) {
     return interaction.editReply({ content: `<@${ownerId}> Erreur API : ${err.message}`, embeds: [], components: [] });
-  }
-
-  // Règle : à partir du tier configuré (défaut Diamond), la liaison par PSEUDO est refusée.
-  // La recherche par pseudo est peu fiable pour les hauts rangs -> on impose l'ID.
-  const settings = await getSettings();
-  const top = highestTier(data.tiers);
-  if (tierIndex(top) >= tierIndex(settings.idRequiredTier)) {
-    return interaction.editReply({
-      content:
-        `<@${ownerId}> ton compte est **${top}** : à ce niveau, la recherche par pseudo n'est pas fiable.\n` +
-        `🔐 Relie-toi avec ton **Brawlhalla ID** (100% fiable) : \`/lier id:${brawlhallaId}\`\n` +
-        `-# Ton ID est aussi visible sur corehalla.com et dans l'appli Brawlhalla.`,
-      embeds: [],
-      components: [],
-      allowedMentions: { users: [ownerId] },
-    });
   }
 
   return interaction.editReply({
