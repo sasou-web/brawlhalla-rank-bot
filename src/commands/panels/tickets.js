@@ -11,10 +11,10 @@ import {
   TextInputStyle,
   ChannelType,
   PermissionFlagsBits,
-  AttachmentBuilder,
   TextDisplayBuilder,
   MessageFlags,
 } from "discord.js";
+import * as discordTranscripts from "discord-html-transcripts";
 import {
   getTicketConfig,
   setTicketConfig,
@@ -467,10 +467,7 @@ async function sendTranscriptNow(interaction) {
     return interaction.reply({ content: "Réservé à l'auteur du ticket ou au staff.", flags: EPHEMERAL });
   }
   await interaction.deferReply({ flags: EPHEMERAL });
-  const transcript = await buildTranscript(interaction.channel, t);
-  const file = new AttachmentBuilder(Buffer.from(transcript, "utf-8"), {
-    name: `ticket-${String(t.number).padStart(4, "0")}.txt`,
-  });
+  const file = await buildTranscript(interaction.channel, t);
   const logCh = cfg.logChannelId
     ? await interaction.guild.channels.fetch(cfg.logChannelId).catch(() => null)
     : null;
@@ -498,41 +495,16 @@ async function askCloseTicket(interaction) {
   return interaction.reply({ content: "⚠️ Fermer ce ticket ? Le salon sera supprimé.", components: [row], flags: EPHEMERAL });
 }
 
-// Génère un transcript texte simple des messages du salon.
+// Génère un transcript HTML du salon de ticket via discord-html-transcripts.
+// Retourne un AttachmentBuilder (fichier .html) prêt à être envoyé.
 async function buildTranscript(channel, ticket) {
-  const lines = [
-    `Transcript du ticket #${ticket.number}`,
-    `Salon : #${channel.name} (${channel.id})`,
-    `Ouvert par : ${ticket.ownerId}`,
-    `Motif : ${ticket.topic}`,
-    `Demande initiale : ${ticket.subject || ""}`,
-    "=".repeat(60),
-    "",
-  ];
-  try {
-    const collected = [];
-    let before;
-    // Récupère jusqu'à ~500 messages par pages de 100 (du plus récent au plus ancien).
-    for (let i = 0; i < 5; i++) {
-      const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
-      if (!batch.size) break;
-      collected.push(...batch.values());
-      before = batch.last()?.id;
-      if (batch.size < 100) break;
-    }
-    collected.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-    for (const m of collected) {
-      const ts = new Date(m.createdTimestamp).toISOString();
-      const author = `${m.author?.tag || m.author?.username || "?"}`;
-      let content = m.content || "";
-      if (m.embeds?.length) content += ` [${m.embeds.length} embed(s)]`;
-      if (m.attachments?.size) content += ` [${[...m.attachments.values()].map((a) => a.url).join(", ")}]`;
-      lines.push(`[${ts}] ${author}: ${content}`);
-    }
-  } catch {
-    lines.push("(transcript partiel : impossible de récupérer tous les messages)");
-  }
-  return lines.join("\n");
+  return discordTranscripts.createTranscript(channel, {
+    limit: -1, // récupère tous les messages du salon
+    filename: `ticket-${String(ticket.number).padStart(4, "0")}.html`,
+    saveImages: true, // intègre les images dans le fichier
+    poweredBy: false,
+    footerText: `Ticket #${ticket.number} • {number} message(s)`,
+  });
 }
 
 async function closeTicket(interaction) {
@@ -550,10 +522,7 @@ async function closeTicket(interaction) {
   // Transcript -> salon de logs (best-effort).
   if (cfg.logChannelId) {
     try {
-      const transcript = await buildTranscript(channel, t);
-      const file = new AttachmentBuilder(Buffer.from(transcript, "utf-8"), {
-        name: `ticket-${String(t.number).padStart(4, "0")}.txt`,
-      });
+      const file = await buildTranscript(channel, t);
       const logEmbed = new EmbedBuilder()
         .setTitle(`🎫 Ticket #${t.number} fermé`)
         .setColor(0xe74c3c)
