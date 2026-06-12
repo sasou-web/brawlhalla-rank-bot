@@ -10,6 +10,9 @@ set -e
 cd "$(dirname "$0")"
 
 echo "==> Recuperation du code (git pull)..."
+# package-lock.json est regenere par 'npm install' sur le serveur, ce qui bloque
+# le pull. On jette sa version locale avant de tirer le code (fichier genere, sans risque).
+git checkout -- package-lock.json 2>/dev/null || true
 git pull --ff-only
 
 echo "==> Installation des dependances..."
