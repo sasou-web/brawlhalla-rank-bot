@@ -34,6 +34,7 @@ import { tournamentTick } from "./tournamentAutomation.js";
 import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
 import { handleMessageXp, tickVoiceXp, VOICE_TICK_MS } from "./xpEvents.js";
 import { endDueGiveaways } from "./giveaway.js";
+import { tickReminders } from "./reminders.js";
 
 const client = new Client({
   intents: [
@@ -183,6 +184,10 @@ client.once(Events.ClientReady, async (c) => {
 
   // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
   every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
+
+  // Rappels automatiques (vocaux privés, règles...) postés dans un salon, chaque minute
+  // on vérifie si l'intervalle configuré est écoulé.
+  every(() => tickReminders(client, guild.id).catch(() => {}), 60 * 1000);
 
   // Clôture des giveaways arrivés à échéance (tirage des gagnants) chaque minute.
   every(

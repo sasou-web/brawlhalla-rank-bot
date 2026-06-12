@@ -13,6 +13,7 @@ import { getTikTokConfig, setTikTokConfig, postTest as tiktokPostTest } from "..
 import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
+import { getRemindersConfig, setRemindersConfig, sendReminderNow } from "../reminders.js";
 import { getTicketConfig, setTicketConfig, buildTicketPanelPayload } from "../tickets.js";
 import {
   getGiveawayConfig,
@@ -73,6 +74,7 @@ function buildSections(guildId) {
     clips: { get: () => getClipsConfig(guildId), set: (b) => setClipsConfig(guildId, b) },
     guessrank: { get: () => getGuessRankConfig(guildId), set: (b) => setGuessRankConfig(guildId, b) },
     tempvoice: { get: () => getTempConfig(guildId), set: (b) => setTempConfig(guildId, b) },
+    reminders: { get: () => getRemindersConfig(guildId), set: (b) => setRemindersConfig(guildId, b) },
     tickets: { get: () => getTicketConfig(guildId), set: (b) => setTicketConfig(guildId, b) },
     giveaway: { get: () => getGiveawayConfig(guildId), set: (b) => setGiveawayConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
@@ -419,6 +421,17 @@ export function startWebServer(client) {
   app.post("/api/tiktok/test", requireAdmin, async (req, res) => {
     try {
       const r = await tiktokPostTest(client, config.guildId);
+      if (!r.ok) return res.status(400).json({ error: r.reason || "Test impossible." });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Poste immediatement le prochain rappel dans le salon configure (bouton Test).
+  app.post("/api/reminders/test", requireAdmin, async (req, res) => {
+    try {
+      const r = await sendReminderNow(client, config.guildId);
       if (!r.ok) return res.status(400).json({ error: r.reason || "Test impossible." });
       res.json({ ok: true });
     } catch (err) {

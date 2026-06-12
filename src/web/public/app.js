@@ -199,6 +199,7 @@ const NAV_GROUPS = [
     { id: "metrics", label: "Fiabilité API", ico: "📡" },
     { id: "logs", label: "Logs en direct", ico: "📜" },
     { id: "announce", label: "Annonces", ico: "📢" },
+    { id: "reminders", label: "Rappels auto", ico: "🔔" },
     { id: "settings", label: "Réglages généraux", ico: "⚙️" },
   ] },
   { label: "Engagement", items: [
@@ -523,7 +524,35 @@ function hubsEditor(cfg) {
   return wrap;
 }
 
-// ----- Schémas de sections -----
+// Liste de messages de rappel : un textarea par message + ajout/suppression.
+function messagesEditor(cfg, key) {
+  cfg[key] = Array.isArray(cfg[key]) ? cfg[key] : [];
+  const wrap = el("div", { style: "width:100%" });
+  const list = el("div");
+  const redraw = () => {
+    list.innerHTML = "";
+    cfg[key].forEach((msg, i) => {
+      const t = el("textarea", { placeholder: "🎙️ Vocaux privés : rejoins le salon..." });
+      t.value = msg || "";
+      t.addEventListener("input", () => (cfg[key][i] = t.value));
+      const del = el("button", { class: "icon-btn", onclick: () => { cfg[key].splice(i, 1); redraw(); } }, "🗑");
+      list.append(
+        el("div", { class: "msg-row", style: "display:flex;gap:8px;align-items:flex-start;margin-bottom:8px" },
+          el("span", { class: "tag", style: "margin-top:6px" }, "#" + (i + 1)),
+          el("div", { style: "flex:1" }, t),
+          del),
+      );
+    });
+  };
+  const addBtn = el("button", { class: "btn-add", onclick: () => {
+    if (cfg[key].length >= 25) return toast("Maximum 25 messages.", "err");
+    cfg[key].push("");
+    redraw();
+  } }, "+ Ajouter un message");
+  redraw();
+  wrap.append(list, addBtn);
+  return wrap;
+}
 function sectionSchema(id, cfg) {
   switch (id) {
     case "settings":
@@ -641,6 +670,20 @@ function sectionSchema(id, cfg) {
           { title: "Hubs (rejoindre pour créer)", sub: "{user} = pseudo du membre.", fields: [], extra: hubsEditor(cfg) },
         ],
       };
+    case "reminders":
+      return {
+        title: "🔔 Rappels automatiques",
+        sub: "Le bot poste régulièrement un message d'une liste dans un salon (vocaux privés, règles, liens utiles...).",
+        cards: [
+          { title: "Général", fields: [
+            ["Activé", "", toggle(cfg, "enabled")],
+            ["Salon des rappels", "Où le bot publie les rappels.", channelSelect(cfg, "channelId", "text")],
+            ["Intervalle (minutes)", "Délai entre deux rappels (min. 1, max. 10080 = 7 jours).", numberInput(cfg, "intervalMinutes", 1, 10080)],
+            ["Ordre d'envoi", "Rotation = à la suite ; Aléatoire = au hasard.", selectInput(cfg, "mode", [{ value: "rotate", label: "Rotation" }, { value: "random", label: "Aléatoire" }])],
+          ] },
+          { title: "Messages", sub: "Un rappel par bloc. Les rappels sont postés sans mention (pas de ping en masse).", fields: [], extra: messagesEditor(cfg, "messages") },
+        ],
+      };
   }
 }
 
@@ -702,6 +745,23 @@ function renderSection(id) {
         setDirty(false);
         await api("/api/tiktok/test", "POST", {});
         toast("Test envoyé dans le salon ✅", "ok");
+      } catch (e) {
+        toast("Erreur : " + e.message, "err");
+      }
+      test.disabled = false;
+    });
+    barItems.push(test);
+  }
+  // Bouton de test pour les Rappels : enregistre puis poste immediatement le prochain rappel.
+  if (id === "reminders") {
+    const test = el("button", { class: "btn-save", style: "background:var(--surface-3);box-shadow:none" }, "🧪 Envoyer un rappel test");
+    test.addEventListener("click", async () => {
+      test.disabled = true;
+      try {
+        CONFIG[id] = await api(`/api/config/${id}`, "PUT", cfg);
+        setDirty(false);
+        await api("/api/reminders/test", "POST", {});
+        toast("Rappel envoyé dans le salon ✅", "ok");
       } catch (e) {
         toast("Erreur : " + e.message, "err");
       }
@@ -1201,6 +1261,7 @@ function renderOverview(content) {
       stat(onOff(c.guessrank?.enabled), "Devine ton rang"),
       stat(onOff(c.tempvoice?.enabled), "Vocaux temporaires"),
       stat(String(Object.keys(c.tempvoice?.hubs || {}).length), "Hubs vocaux"),
+      stat(onOff(c.reminders?.enabled), "Rappels auto"),
     ),
     el("div", { class: "card", style: "margin-top:18px" },
       el("h3", {}, "Bienvenue 👋"),
