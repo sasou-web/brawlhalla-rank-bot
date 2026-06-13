@@ -18,6 +18,20 @@ import { getRatingHistory } from "../ratingStore.js";
 import { renderProfileCard } from "../profileCard.js";
 import { tierEmojiResolvable } from "../config.js";
 import { EPHEMERAL, tierEmoji } from "./shared.js";
+import { getLinkPanelConfig } from "../linkpanel.js";
+
+// Message "pas de compte lié" : pointe vers le salon de liaison s'il est configuré
+// (mention cliquable), sinon vers la commande /lier. On propose toujours de préciser un pseudo.
+async function notLinkedMessage(guildId) {
+  let channelRef = "fais `/lier`";
+  try {
+    const cfg = await getLinkPanelConfig(guildId);
+    if (cfg?.channelId) channelRef = `va lier ton compte dans <#${cfg.channelId}>`;
+  } catch {
+    /* config indispo : on garde le repli /lier */
+  }
+  return `Tu n'as pas de compte lié. ${channelRef}, ou précise un pseudo.`;
+}
 import { enforceCooldown } from "./cooldowns.js";
 
 // ---- Helpers Components V2 (cartes texte stylées : bordure de couleur + lignes fines) ----
@@ -91,7 +105,7 @@ async function resolveTarget(interaction) {
     return {
       error: memberOpt
         ? `<@${targetUser.id}> n'a aucun compte lié.`
-        : "Tu n'as pas de compte lié. Fais /lier d'abord, ou précise un pseudo.",
+        : await notLinkedMessage(interaction.guildId),
     };
   }
   return { brawlhallaId: link.brawlhallaId, label: link.name };
