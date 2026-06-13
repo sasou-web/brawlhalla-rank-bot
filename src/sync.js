@@ -20,10 +20,11 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   // Profil PARTIEL (un appel secondaire a echoue cote API) : on ne doit pas retirer un role
   // ni ecraser une donnee juste parce qu'elle manque temporairement. On fusionne avec la
   // derniere donnee connue du membre (le 2v2/level precedents sont conserves).
-  let tiers = profile.tiers;
+  let tiers = { ...profile.tiers };
   let level = profile.level;
   let globalRank = profile.globalRank;
   let region = profile.region && profile.region !== "?" ? profile.region : null;
+  let rating2v2 = profile.ratings?.["2v2"] ?? 0;
   if (profile.partial && previous) {
     tiers = {
       "1v1": profile.tiers?.["1v1"] ?? previous.tiers?.["1v1"] ?? null,
@@ -32,6 +33,13 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     level = profile.level || previous.level || 0;
     globalRank = profile.globalRank || previous.globalRank || 0;
     region = region || previous.region || null;
+    rating2v2 = rating2v2 || previous.rating2v2 || 0;
+  } else if (profile.teamsUnavailable && previous) {
+    // L'endpoint /player/teams n'a rien renvoye (404/glitch momentane) alors que le reste du
+    // profil (1v1, niveau, region) est a jour. On NE retire PAS le role 2v2 : on conserve le
+    // dernier tier/rating 2v2 connu plutot que de supposer a tort que le joueur n'en a plus.
+    tiers["2v2"] = profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null;
+    rating2v2 = rating2v2 || previous.rating2v2 || 0;
   }
 
   const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
@@ -39,7 +47,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   await setLink(member.id, brawlhallaId, profile.name ?? member.user.username, {
     tiers,
     rating1v1: profile.ratings["1v1"],
-    rating2v2: profile.ratings["2v2"],
+    rating2v2,
     level,
     globalRank,
     region,
@@ -50,7 +58,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   if (!profile.partial) {
     recordRating(brawlhallaId, {
       rating1v1: profile.ratings["1v1"],
-      rating2v2: profile.ratings["2v2"],
+      rating2v2,
       level,
       globalRank,
     }).catch(() => {});

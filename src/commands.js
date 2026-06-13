@@ -426,15 +426,16 @@ async function handleSeasonResetConfirm(interaction, ctx) {
 
 // ---------- /refresh (admin) ----------
 
-async function handleRefresh(interaction, ctx) {
-  await interaction.deferReply({ flags: EPHEMERAL });
+// Resynchronise TOUS les membres lies : redistribue les roles de rank manquants (1v1 + 2v2),
+// corrige ceux retires par erreur, puis met a jour le role "n°1 du serveur". Renvoie un bilan.
+async function refreshAllMembers(guild, ctx) {
   const links = await getAllLinks();
   const entries = Object.entries(links);
   let ok = 0;
   let fail = 0;
   for (const [discordId, { brawlhallaId }] of entries) {
     try {
-      const member = await interaction.guild.members.fetch(discordId).catch(() => null);
+      const member = await guild.members.fetch(discordId).catch(() => null);
       if (!member) continue;
       await doSync(member, brawlhallaId, ctx);
       ok++;
@@ -445,12 +446,35 @@ async function handleRefresh(interaction, ctx) {
 
   // Met a jour le role "n°1 du serveur" apres avoir rafraichi tous les ratings.
   try {
-    await updateTopServerRole(interaction.guild);
+    await updateTopServerRole(guild);
   } catch {
     /* best-effort */
   }
 
-  return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${entries.length}.`);
+  return { ok, fail, total: entries.length };
+}
+
+async function handleRefresh(interaction, ctx) {
+  await interaction.deferReply({ flags: EPHEMERAL });
+  const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
+  return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${total}.`);
+}
+
+// Bouton "Actualiser les rôles" du panneau /setup : même logique que /refresh.
+async function handleAdminRefreshButton(interaction, ctx) {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    return interaction.reply({ content: "Réservé aux admins.", flags: EPHEMERAL });
+  }
+  await interaction.deferReply({ flags: EPHEMERAL });
+  const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
+  await logAudit(
+    interaction.guild,
+    `🔄 <@${interaction.user.id}> a actualisé les rôles : ${ok} ok, ${fail} échec(s) sur ${total} membre(s) lié(s).`,
+  );
+  return interaction.editReply(
+    `✅ Rôles actualisés : **${ok}** membre(s) synchronisé(s), **${fail}** échec(s) sur **${total}** lié(s).\n` +
+      "Les rôles de rank manquants (1v1 et 2v2) ont été redistribués.",
+  );
 }
 
 // ---------- /setup ----------
@@ -487,7 +511,7 @@ async function handleSetup(interaction, ctx) {
       ),
   );
 
-  return interaction.reply({
+  await interaction.reply({
     content:
       "**Configuration du bot**\n" +
       `• Salon de validation : ${channelTxt}\n` +
@@ -498,6 +522,25 @@ async function handleSetup(interaction, ctx) {
       `• Seuil d'auto-validation : **${s.autoApproveTier}** (au-dessus = validation manuelle)\n\n` +
       "Modifie via les menus ci-dessous (appliqué immédiatement). Pour le salon des succès : `/setup-succes`.",
     components: [channelRow, roleRow, auditRow, announceRow, thresholdRow],
+    flags: EPHEMERAL,
+  });
+
+  // Discord limite à 5 rangées par message (les 5 menus ci-dessus). Le bouton « Actualiser »
+  // est donc envoyé dans un message de suivi distinct.
+  const refreshRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_refresh_roles")
+      .setLabel("Actualiser les rôles de tous les membres")
+      .setEmoji("🔄")
+      .setStyle(ButtonStyle.Primary),
+  );
+  return interaction.followUp({
+    content:
+      "🔄 **Resynchroniser les rôles de rank**\n" +
+      "Redistribue à tous les membres liés leurs rôles 1v1 **et** 2v2, corrige ceux retirés par " +
+      "erreur, et met à jour le rôle « n°1 du serveur ». À lancer après un incident d'API ou pour " +
+      "rattraper les rôles manquants. Peut prendre un moment selon le nombre de membres.",
+    components: [refreshRow],
     flags: EPHEMERAL,
   });
 }
@@ -629,6 +672,7 @@ async function routeButton(interaction, ctx) {
   if (id.startsWith("rj:")) return handleReject(interaction, ctx);
   if (id.startsWith("fl:")) return handleForceLinkPick(interaction, ctx);
   if (id === "season_reset") return handleSeasonResetConfirm(interaction, ctx);
+  if (id === "admin_refresh_roles") return handleAdminRefreshButton(interaction, ctx);
   if (id === "levels_reset_all") return handleLevelsResetAllConfirm(interaction, ctx);
   if (id.startsWith("xplb:")) return handleLeaderboardXpPage(interaction, ctx);
 }

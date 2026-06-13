@@ -692,6 +692,10 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     legendsRanked: Array.isArray(ranked?.legends) ? ranked.legends : [], // pour la Glory (peak_rating)
     legendsAll: Array.isArray(all?.legends) ? all.legends : [], // pour /legendes (games/wins)
     partial, // true si teams/all ont echoue : a rafraichir en arriere-plan
+    // true si /player/teams n'a renvoye AUCUNE donnee (404/glitch momentane masque par
+    // apiGetOrNull, ou rejet reseau). Dans ce cas on ne peut PAS distinguer "pas d'equipe 2v2"
+    // d'une indisponibilite temporaire -> les appelants NE doivent pas retirer le role 2v2.
+    teamsUnavailable: teamsData == null,
   };
 }
 
