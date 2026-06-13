@@ -20,7 +20,7 @@ import {
 import { TIERS } from "./config.js";
 import { getAllLinks } from "./store.js";
 import { getSettings, setSetting } from "./settings.js";
-import { seasonalRoleNames, updateTopServerRole } from "./roles.js";
+import { seasonalRoleNames } from "./roles.js";
 import {
   handleTop,
   handleStats,
@@ -102,7 +102,8 @@ import {
 } from "./commands/tournament.js";
 import { setupRankVoiceChannels, rankVoiceSummary } from "./rankvoice.js";
 import { loadCombos, weaponsWithCombos, buildComboViewer } from "./combos.js";
-import { EPHEMERAL, EPHEMERAL_V2, logAudit, dmUser, doSync, requirePermission } from "./commands/shared.js";
+import { EPHEMERAL, EPHEMERAL_V2, logAudit, dmUser, requirePermission } from "./commands/shared.js";
+import { syncAllMembers } from "./sync.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
 import { awardSeasonRewards } from "./season.js";
 import { ACHIEVEMENTS, listUnlocked } from "./achievements.js";
@@ -429,35 +430,17 @@ async function handleSeasonResetConfirm(interaction, ctx) {
 // Resynchronise TOUS les membres lies : redistribue les roles de rank manquants (1v1 + 2v2),
 // corrige ceux retires par erreur, puis met a jour le role "n°1 du serveur". Renvoie un bilan.
 async function refreshAllMembers(guild, ctx) {
-  const links = await getAllLinks();
-  const entries = Object.entries(links);
-  let ok = 0;
-  let fail = 0;
-  for (const [discordId, { brawlhallaId }] of entries) {
-    try {
-      const member = await guild.members.fetch(discordId).catch(() => null);
-      if (!member) continue;
-      await doSync(member, brawlhallaId, ctx);
-      ok++;
-    } catch {
-      fail++;
-    }
-  }
-
-  // Met a jour le role "n°1 du serveur" apres avoir rafraichi tous les ratings.
-  try {
-    await updateTopServerRole(guild);
-  } catch {
-    /* best-effort */
-  }
-
-  return { ok, fail, total: entries.length };
+  return syncAllMembers(guild, ctx?.rolesByName ?? null);
 }
 
 async function handleRefresh(interaction, ctx) {
   await interaction.deferReply({ flags: EPHEMERAL });
-  const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
-  return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${total}.`);
+  try {
+    const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
+    return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${total}.`);
+  } catch (err) {
+    return interaction.editReply(`⏳ ${err.message}`);
+  }
 }
 
 // Bouton "Actualiser les rôles" du panneau /setup : même logique que /refresh, mais
@@ -465,17 +448,11 @@ async function handleRefresh(interaction, ctx) {
 // sur beaucoup de liaisons, dépasser la fenêtre de 15 min d'une interaction Discord — ce qui
 // laisserait le « thinking… » bloqué pour toujours. On répond donc tout de suite, on traite en
 // arrière-plan, et on poste le bilan dans le salon d'audit (et on tente d'éditer la réponse).
-let adminRefreshRunning = false;
-
 async function handleAdminRefreshButton(interaction, ctx) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     return interaction.reply({ content: "Réservé aux admins.", flags: EPHEMERAL });
   }
   await interaction.deferReply({ flags: EPHEMERAL });
-
-  if (adminRefreshRunning) {
-    return interaction.editReply("⏳ Une actualisation est **déjà en cours**. Patiente qu'elle se termine (bilan dans le salon d'audit).");
-  }
 
   const links = await getAllLinks();
   const total = Object.keys(links).length;
@@ -487,7 +464,6 @@ async function handleAdminRefreshButton(interaction, ctx) {
       "et ici aussi si l'interaction est encore valable.",
   );
 
-  adminRefreshRunning = true;
   // Traitement en arrière-plan : on n'attend PAS la fin pour répondre à Discord.
   (async () => {
     try {
@@ -498,10 +474,8 @@ async function handleAdminRefreshButton(interaction, ctx) {
       await logAudit(interaction.guild, `🔄 <@${interaction.user.id}> — ${summary}`);
       await interaction.editReply(summary).catch(() => {}); // best-effort si l'interaction a expiré
     } catch (err) {
-      await logAudit(interaction.guild, `⚠️ Actualisation des rôles interrompue : ${err.message}`).catch(() => {});
-      await interaction.editReply(`⚠️ L'actualisation a échoué : ${err.message}`).catch(() => {});
-    } finally {
-      adminRefreshRunning = false;
+      await logAudit(interaction.guild, `⚠️ Actualisation des rôles : ${err.message}`).catch(() => {});
+      await interaction.editReply(`⚠️ ${err.message}`).catch(() => {});
     }
   })();
 }

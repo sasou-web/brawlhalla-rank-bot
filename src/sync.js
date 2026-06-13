@@ -1,6 +1,6 @@
 import { getPlayerProfile, getLegends } from "./brawlhalla.js";
-import { applyMemberRoles, applyMainLegendRole } from "./roles.js";
-import { setLink, getLink } from "./store.js";
+import { applyMemberRoles, applyMainLegendRole, ensureRoles, updateTopServerRole } from "./roles.js";
+import { setLink, getLink, getAllLinks } from "./store.js";
 import { getSettings } from "./settings.js";
 import { tierIndex, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
 import { recordRating } from "./ratingStore.js";
@@ -91,6 +91,53 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   }
 
   return { profile, tiers, ratings: profile.ratings, level, globalRank, region, ...result };
+}
+
+// Garde anti-chevauchement partagée : un refresh complet est séquentiel (1 appel API forcé par
+// membre) et peut être long. On évite que deux refresh globaux tournent en même temps.
+let syncingAll = false;
+export function isSyncingAll() {
+  return syncingAll;
+}
+
+/**
+ * Resynchronise TOUS les membres liés du serveur : (re)crée les rôles gérés si besoin,
+ * applique à chacun ses rôles de rank (1v1 + 2v2, niveau, top, région) en corrigeant les
+ * manquants/erronés, puis met à jour le rôle « n°1 du serveur ». Best-effort par membre.
+ * `rolesByName` peut être fourni (contexte du bot) ; sinon il est calculé via ensureRoles.
+ * Renvoie { ok, fail, total }. Lève si un refresh est déjà en cours.
+ */
+export async function syncAllMembers(guild, rolesByName = null) {
+  if (syncingAll) throw new Error("Une actualisation est déjà en cours.");
+  syncingAll = true;
+  try {
+    const roles = rolesByName ?? (await ensureRoles(guild));
+    const links = await getAllLinks();
+    const entries = Object.entries(links);
+    let ok = 0;
+    let fail = 0;
+    for (const [discordId, { brawlhallaId }] of entries) {
+      try {
+        const member = await guild.members.fetch(discordId).catch(() => null);
+        if (!member) continue;
+        await syncMember(member, brawlhallaId, roles);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+
+    // Met à jour le rôle « n°1 du serveur » après avoir rafraîchi tous les ratings.
+    try {
+      await updateTopServerRole(guild);
+    } catch {
+      /* best-effort */
+    }
+
+    return { ok, fail, total: entries.length };
+  } finally {
+    syncingAll = false;
+  }
 }
 
 async function announcePromotions(member, oldTiers, newTiers) {

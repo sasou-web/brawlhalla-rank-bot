@@ -201,6 +201,7 @@ const NAV_GROUPS = [
     { id: "announce", label: "Annonces", ico: "📢" },
     { id: "reminders", label: "Rappels auto", ico: "🔔" },
     { id: "linkpanel", label: "Panneau de liaison", ico: "🔗" },
+    { id: "roles", label: "Rôles de rank", ico: "🔄" },
     { id: "settings", label: "Réglages généraux", ico: "⚙️" },
   ] },
   { label: "Engagement", items: [
@@ -724,6 +725,7 @@ function renderSection(id) {
   if (id === "announce") return renderAnnounce(content);
   if (id === "welcome") return renderWelcome(content);
   if (id === "vocrank") return renderVocRank(content);
+  if (id === "roles") return renderRoles(content);
   if (id === "tournament") return renderTournament(content);
   if (id === "combos") return renderCombos(content);
   if (id === "tickets") return renderTickets(content);
@@ -873,6 +875,48 @@ function renderVocRank(content) {
       });
       setDirty(false);
       toast(r.message || "Vocaux prêts ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    btn.disabled = false;
+  });
+  content.append(el("div", { class: "save-bar" }, btn));
+}
+
+
+// ----- Rôles de rank (actualisation globale) -----
+function renderRoles(content) {
+  setDirty(false);
+
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "🔄 Rôles de rank" }),
+      el("p", {}, "Resynchronise tous les membres liés avec l'API Brawlhalla."),
+    ),
+  );
+
+  const card = el("div", { class: "card" }, el("h3", {}, "Actualiser les rôles de tous les membres"));
+  card.append(
+    el("div", { class: "card-sub", style: "margin-top:8px" },
+      "Redistribue à chaque membre lié ses rôles de rank 1v1 et 2v2, corrige ceux qui auraient été " +
+        "retirés par erreur (ex. coupure de l'API), et met à jour le rôle « n°1 du serveur ». " +
+        "À lancer après un incident d'API ou pour rattraper des rôles manquants.",
+    ),
+  );
+  card.append(
+    el("div", { class: "card-sub", style: "margin-top:8px; opacity:.8" },
+      "Le traitement est séquentiel (un appel API par membre) et tourne en arrière-plan : il peut " +
+        "prendre quelques minutes. Le bilan détaillé est posté dans le salon d'audit.",
+    ),
+  );
+  content.append(card);
+
+  const btn = el("button", { class: "btn-save" }, "🔄 Actualiser les rôles");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const r = await api("/api/refresh-roles", "POST", {});
+      toast(r.message || "Actualisation lancée ✅", "ok");
     } catch (e) {
       toast("Erreur : " + e.message, "err");
     }

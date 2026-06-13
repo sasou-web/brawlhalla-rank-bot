@@ -52,6 +52,8 @@ import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
 import { getPlayerProfile, getApiMetrics } from "../brawlhalla.js";
 import { setupRankVoiceChannels } from "../rankvoice.js";
+import { syncAllMembers, isSyncingAll } from "../sync.js";
+import { logAudit } from "../commands/shared.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "public");
@@ -526,6 +528,47 @@ export function startWebServer(client) {
           `Vocaux prêts dans « ${r.categoryName} » : ${r.created.length} créé(s), ${r.updated.length} mis à jour` +
           (r.failed ? `, ${r.failed} en échec (le bot a-t-il « Gérer les salons » ?)` : "") +
           ".",
+      });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---- Actualiser les rôles de rank de tous les membres liés ----
+  // Resynchronise tout le monde (redistribue les rôles 1v1 + 2v2 manquants, corrige les
+  // retraits erronés, met à jour « n°1 du serveur »). Le travail est séquentiel et peut être
+  // long : on répond TOUT DE SUITE (202) et on traite en arrière-plan, bilan dans le salon d'audit.
+  app.post("/api/refresh-roles", requireAdmin, async (req, res) => {
+    try {
+      if (isSyncingAll()) {
+        return res.status(409).json({ error: "Une actualisation est déjà en cours." });
+      }
+      const guild = await client.guilds.fetch(config.guildId);
+      const links = await getAllLinks();
+      const total = Object.keys(links).length;
+      if (total === 0) return res.json({ ok: true, total: 0, message: "Aucun membre lié à actualiser." });
+
+      // Lancement en arrière-plan : on n'attend pas la fin de la boucle pour répondre.
+      (async () => {
+        try {
+          const { ok, fail } = await syncAllMembers(guild);
+          await logAudit(
+            guild,
+            `🔄 <@${req.session.id}> (dashboard) a actualisé les rôles : ${ok} ok, ${fail} échec(s) sur ${total} lié(s).`,
+          );
+        } catch (err) {
+          await logAudit(guild, `⚠️ Actualisation des rôles (dashboard) : ${err.message}`).catch(() => {});
+        }
+      })();
+
+      res.status(202).json({
+        ok: true,
+        started: true,
+        total,
+        message:
+          `Actualisation lancée pour ${total} membre(s) lié(s). ` +
+          "Ça tourne en arrière-plan (quelques minutes selon le nombre de membres) — " +
+          "le bilan est posté dans le salon d'audit.",
       });
     } catch (err) {
       res.status(400).json({ error: err.message });
