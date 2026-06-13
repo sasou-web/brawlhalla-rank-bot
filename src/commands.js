@@ -460,21 +460,50 @@ async function handleRefresh(interaction, ctx) {
   return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${total}.`);
 }
 
-// Bouton "Actualiser les rôles" du panneau /setup : même logique que /refresh.
+// Bouton "Actualiser les rôles" du panneau /setup : même logique que /refresh, mais
+// NON BLOQUANT. Un refresh complet est séquentiel (1 appel API forcé par membre) et peut,
+// sur beaucoup de liaisons, dépasser la fenêtre de 15 min d'une interaction Discord — ce qui
+// laisserait le « thinking… » bloqué pour toujours. On répond donc tout de suite, on traite en
+// arrière-plan, et on poste le bilan dans le salon d'audit (et on tente d'éditer la réponse).
+let adminRefreshRunning = false;
+
 async function handleAdminRefreshButton(interaction, ctx) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     return interaction.reply({ content: "Réservé aux admins.", flags: EPHEMERAL });
   }
   await interaction.deferReply({ flags: EPHEMERAL });
-  const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
-  await logAudit(
-    interaction.guild,
-    `🔄 <@${interaction.user.id}> a actualisé les rôles : ${ok} ok, ${fail} échec(s) sur ${total} membre(s) lié(s).`,
+
+  if (adminRefreshRunning) {
+    return interaction.editReply("⏳ Une actualisation est **déjà en cours**. Patiente qu'elle se termine (bilan dans le salon d'audit).");
+  }
+
+  const links = await getAllLinks();
+  const total = Object.keys(links).length;
+  if (total === 0) return interaction.editReply("Aucun membre lié à actualiser.");
+
+  await interaction.editReply(
+    `⏳ Actualisation lancée pour **${total}** membre(s) lié(s). ` +
+      "Ça tourne en arrière-plan (ça peut prendre quelques minutes) — le bilan sera posté dans le salon d'audit, " +
+      "et ici aussi si l'interaction est encore valable.",
   );
-  return interaction.editReply(
-    `✅ Rôles actualisés : **${ok}** membre(s) synchronisé(s), **${fail}** échec(s) sur **${total}** lié(s).\n` +
-      "Les rôles de rank manquants (1v1 et 2v2) ont été redistribués.",
-  );
+
+  adminRefreshRunning = true;
+  // Traitement en arrière-plan : on n'attend PAS la fin pour répondre à Discord.
+  (async () => {
+    try {
+      const { ok, fail } = await refreshAllMembers(interaction.guild, ctx);
+      const summary =
+        `✅ Actualisation des rôles terminée : **${ok}** synchronisé(s), **${fail}** échec(s) sur **${total}** lié(s). ` +
+        "Les rôles de rank manquants (1v1 et 2v2) ont été redistribués.";
+      await logAudit(interaction.guild, `🔄 <@${interaction.user.id}> — ${summary}`);
+      await interaction.editReply(summary).catch(() => {}); // best-effort si l'interaction a expiré
+    } catch (err) {
+      await logAudit(interaction.guild, `⚠️ Actualisation des rôles interrompue : ${err.message}`).catch(() => {});
+      await interaction.editReply(`⚠️ L'actualisation a échoué : ${err.message}`).catch(() => {});
+    } finally {
+      adminRefreshRunning = false;
+    }
+  })();
 }
 
 // ---------- /setup ----------
