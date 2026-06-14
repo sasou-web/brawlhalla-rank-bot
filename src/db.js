@@ -41,6 +41,10 @@ const JSON_MIGRATION = {
 mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(DB_PATH);
+// Attend (jusqu'a 5s) si la base est momentanement verrouillee au lieu d'echouer
+// immediatement ("database is locked"). Utile quand plusieurs process ouvrent la meme base
+// (ex: fichiers de test en parallele, ou un script ponctuel pendant que le bot tourne).
+db.pragma("busy_timeout = 5000");
 db.pragma("journal_mode = WAL"); // robustesse + lectures concurrentes
 db.pragma("synchronous = NORMAL");
 db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)");

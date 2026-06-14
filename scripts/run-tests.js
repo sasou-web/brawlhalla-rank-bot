@@ -24,7 +24,11 @@ for (const [k, v] of Object.entries(TEST_ENV_DEFAULTS)) {
   if (!env[k]) env[k] = v;
 }
 
-const res = spawnSync(process.execPath, ["--test"], {
+// --test-concurrency=1 : execute les fichiers de test UN PAR UN. Ils partagent la meme base
+// temporaire (BOT_DB_PATH) ; en parallele, plusieurs process ouvraient la base et lancaient
+// le PRAGMA WAL simultanement -> "database is locked" intermittent. La serialisation supprime
+// cette contention (les tests restent tres rapides). Le busy_timeout de db.js est un filet en plus.
+const res = spawnSync(process.execPath, ["--test", "--test-concurrency=1"], {
   stdio: "inherit",
   env,
 });
