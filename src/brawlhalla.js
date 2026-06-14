@@ -696,6 +696,11 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     // apiGetOrNull, ou rejet reseau). Dans ce cas on ne peut PAS distinguer "pas d'equipe 2v2"
     // d'une indisponibilite temporaire -> les appelants NE doivent pas retirer le role 2v2.
     teamsUnavailable: teamsData == null,
+    // true si l'appel ranked 1v1 A RENVOYE des donnees. S'il vaut false, c'est que l'endpoint
+    // /player/stats?ranked_1v1 a repondu 404/vide (glitch momentane) alors que le profil "all"
+    // existait : le tier 1v1 calcule est alors null PAR DEFAUT D'INFO, pas parce que le joueur
+    // est non classe. Les appelants NE doivent donc pas retirer le role 1v1 dans ce cas.
+    ranked1v1Available: ranked != null,
   };
 }
 

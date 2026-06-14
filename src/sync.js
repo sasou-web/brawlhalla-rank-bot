@@ -17,36 +17,41 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   // second appel API redondant. Sinon, fetch force pour avoir les donnees les plus fraiches.
   const profile = opts.profile ?? (await getPlayerProfile(brawlhallaId, { force: true }));
 
-  // Profil PARTIEL (un appel secondaire a echoue cote API) : on ne doit pas retirer un role
-  // ni ecraser une donnee juste parce qu'elle manque temporairement. On fusionne avec la
-  // derniere donnee connue du membre (le 2v2/level precedents sont conserves).
+  // Indisponibilité PONCTUELLE de l'API : on ne doit jamais retirer un rôle ni écraser une
+  // donnée juste parce qu'elle manque temporairement (404/glitch/rejet réseau). On fusionne
+  // alors avec la dernière donnée connue du membre, MODE PAR MODE (1v1 / 2v2 indépendants).
   let tiers = { ...profile.tiers };
   let level = profile.level;
   let globalRank = profile.globalRank;
   let region = profile.region && profile.region !== "?" ? profile.region : null;
+  let rating1v1 = profile.ratings?.["1v1"] ?? 0;
   let rating2v2 = profile.ratings?.["2v2"] ?? 0;
-  if (profile.partial && previous) {
-    tiers = {
-      "1v1": profile.tiers?.["1v1"] ?? previous.tiers?.["1v1"] ?? null,
-      "2v2": profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null,
-    };
-    level = profile.level || previous.level || 0;
-    globalRank = profile.globalRank || previous.globalRank || 0;
-    region = region || previous.region || null;
-    rating2v2 = rating2v2 || previous.rating2v2 || 0;
-  } else if (profile.teamsUnavailable && previous) {
-    // L'endpoint /player/teams n'a rien renvoye (404/glitch momentane) alors que le reste du
-    // profil (1v1, niveau, region) est a jour. On NE retire PAS le role 2v2 : on conserve le
-    // dernier tier/rating 2v2 connu plutot que de supposer a tort que le joueur n'en a plus.
-    tiers["2v2"] = profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null;
-    rating2v2 = rating2v2 || previous.rating2v2 || 0;
+
+  if (previous) {
+    // 1v1 indisponible (l'endpoint ranked_1v1 a répondu 404/vide) : le tier null vient d'un
+    // manque d'info, pas d'un déclassement. On conserve le dernier rank 1v1 connu.
+    if (!profile.ranked1v1Available) {
+      tiers["1v1"] = profile.tiers?.["1v1"] ?? previous.tiers?.["1v1"] ?? null;
+      rating1v1 = rating1v1 || previous.rating1v1 || 0;
+    }
+    // 2v2 indisponible (l'endpoint teams n'a rien renvoyé) : idem, on garde le rank 2v2 connu.
+    if (profile.teamsUnavailable) {
+      tiers["2v2"] = profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null;
+      rating2v2 = rating2v2 || previous.rating2v2 || 0;
+    }
+    // Profil globalement partiel (appel /all rejeté) : niveau/rang/région peuvent manquer.
+    if (profile.partial) {
+      level = profile.level || previous.level || 0;
+      globalRank = profile.globalRank || previous.globalRank || 0;
+      region = region || previous.region || null;
+    }
   }
 
   const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
 
   await setLink(member.id, brawlhallaId, profile.name ?? member.user.username, {
     tiers,
-    rating1v1: profile.ratings["1v1"],
+    rating1v1,
     rating2v2,
     level,
     globalRank,
@@ -57,7 +62,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   // On n'enregistre pas sur un profil partiel (donnees ratings non fiables).
   if (!profile.partial) {
     recordRating(brawlhallaId, {
-      rating1v1: profile.ratings["1v1"],
+      rating1v1,
       rating2v2,
       level,
       globalRank,
@@ -68,7 +73,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   await announcePromotions(member, previous?.tiers, tiers);
 
   // Detection de smurf : bond de rating 1v1 anormal entre deux synchros -> alerte staff.
-  if (!profile.partial) {
+  if (!profile.partial && profile.ranked1v1Available) {
     await detectSmurf(member, previous?.rating1v1, profile.ratings["1v1"]);
   }
 

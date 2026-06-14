@@ -143,3 +143,25 @@ test("buildPlayerProfile : nom replié sur /all si absent du ranked", () => {
   assert.equal(p.name, "FromAll");
   assert.equal(p.level, 10);
 });
+
+test("buildPlayerProfile : drapeaux de disponibilité (ranked1v1Available / teamsUnavailable)", () => {
+  // Cas nominal : les deux appels ont renvoyé des données.
+  const full = buildPlayerProfile(1, {
+    ranked: { name: "A", rating: 1700, tier: "Platinum 1", region: "EU" },
+    teamsData: { teams: { ranked_2v2: [] } },
+    all: { level: 10 },
+  });
+  assert.equal(full.ranked1v1Available, true);
+  assert.equal(full.teamsUnavailable, false);
+
+  // 1v1 indisponible (ranked null = 404/glitch) mais profil "all" présent : tier 1v1 null
+  // PAR MANQUE D'INFO, pas par déclassement -> le drapeau permet de NE PAS retirer le rôle.
+  const no1v1 = buildPlayerProfile(2, { ranked: null, teamsData: { teams: { ranked_2v2: [] } }, all: { level: 10 } });
+  assert.equal(no1v1.ranked1v1Available, false);
+  assert.equal(no1v1.tiers["1v1"], null);
+
+  // teams indisponible (null) : drapeau levé.
+  const noTeams = buildPlayerProfile(3, { ranked: { rating: 1700, tier: "Platinum 1" }, teamsData: null, all: { level: 10 } });
+  assert.equal(noTeams.teamsUnavailable, true);
+  assert.equal(noTeams.ranked1v1Available, true);
+});
