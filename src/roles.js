@@ -39,12 +39,13 @@ export function seasonalRoleNames() {
   return names;
 }
 
-export async function ensureRole(guild, name, color) {
+export async function ensureRole(guild, name, color, opts = {}) {
   let role = guild.roles.cache.find((r) => r.name === name);
   if (!role) {
     role = await guild.roles.create({
       name,
       colors: { primaryColor: color ?? 0x99aab5 },
+      hoist: opts.hoist ?? false,
       reason: "Role Brawlhalla cree automatiquement",
       mentionable: false,
     });
@@ -149,28 +150,43 @@ export async function updateTopServerRole(guild) {
 }
 
 /**
- * S'assure que les roles de NIVEAU DE SERVEUR existent (couleurs Brawlhalla).
- * Renvoie une Map level(number) -> roleId. Ne touche pas aux roles de rank.
- * Les roles sont positionnes du plus bas (Tin) au plus haut (Valhallan) pour que
- * la couleur affichee soit toujours celle du palier le plus eleve atteint.
+ * S'assure que les roles de NIVEAU DE SERVEUR existent (couleurs Brawlhalla), et qu'ils sont
+ * "affiches separement" (hoist). Renvoie une Map level(number) -> roleId. Ne touche pas aux
+ * roles de rank.
+ *
+ * Positionnement : Tin (bas) ... Valhallan (haut) pour la precedence de couleur quand le cumul
+ * de recompenses (stackRewards) est actif. MAIS on ne reordonne QUE si un role vient d'etre
+ * cree, ou si l'ordre RELATIF entre les roles de niveau est casse. Ainsi le bot ne deplace plus
+ * les roles a chaque demarrage et respecte l'emplacement choisi par l'admin dans la liste.
  */
 export async function ensureServerLevelRoles(guild) {
   await guild.roles.fetch();
   const byLevel = new Map();
+  let createdAny = false;
   for (const tier of SERVER_LEVEL_TIERS) {
-    const role = await ensureRole(guild, tier.name, tier.color);
+    const existed = guild.roles.cache.some((r) => r.name === tier.name);
+    const role = await ensureRole(guild, tier.name, tier.color, { hoist: true });
+    if (!existed) createdAny = true;
+    // Roles deja presents mais non "affiches separement" : on active le hoist (best-effort).
+    if (existed && !role.hoist) await role.setHoist(true, "Roles de niveau affiches separement").catch(() => {});
     byLevel.set(tier.level, role.id);
   }
 
-  // Ordonne la hierarchie : Tin en bas ... Valhallan en haut (sous le role du bot).
   try {
-    const me = guild.members.me;
-    const maxPos = me ? me.roles.highest.position : null;
     const ordered = SERVER_LEVEL_TIERS.map((t) => guild.roles.cache.get(byLevel.get(t.level))).filter(Boolean);
-    // position croissante = plus haut ; on attribue des positions successives sous le bot.
-    const updates = ordered.map((role, i) => ({ role, position: i + 1 }));
-    if (maxPos && updates.every((u) => u.position < maxPos)) {
-      await guild.roles.setPositions(updates).catch(() => {});
+    // Ordre relatif correct = positions strictement croissantes selon l'ordre des tiers.
+    const positions = ordered.map((r) => r.position);
+    const relativeOk = positions.every((p, i) => i === 0 || p > positions[i - 1]);
+
+    // On ne touche aux positions que si c'est necessaire (creation ou ordre casse), pour ne
+    // PAS combattre un deplacement manuel de l'admin a chaque redemarrage.
+    if (ordered.length && (createdAny || !relativeOk)) {
+      const me = guild.members.me;
+      const maxPos = me ? me.roles.highest.position : null;
+      const updates = ordered.map((role, i) => ({ role, position: i + 1 }));
+      if (maxPos && updates.every((u) => u.position < maxPos)) {
+        await guild.roles.setPositions(updates).catch(() => {});
+      }
     }
   } catch {
     /* le positionnement est best-effort : si ca echoue, les roles existent quand meme */
