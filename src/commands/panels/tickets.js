@@ -498,13 +498,53 @@ async function askCloseTicket(interaction) {
 // Génère un transcript HTML du salon de ticket via discord-html-transcripts.
 // Retourne un AttachmentBuilder (fichier .html) prêt à être envoyé.
 async function buildTranscript(channel, ticket) {
-  return discordTranscripts.createTranscript(channel, {
-    limit: -1, // récupère tous les messages du salon
+  const options = {
     filename: `ticket-${String(ticket.number).padStart(4, "0")}.html`,
     saveImages: true, // intègre les images dans le fichier
     poweredBy: false,
     footerText: `Ticket #${ticket.number} • {number} message(s)`,
-  });
+  };
+
+  // discord-html-transcripts 3.2.0 ne sait PAS rendre les Components V2 (conteneurs, text
+  // displays, séparateurs) : son renderer fait `row.components.map(...)` sur chaque composant
+  // de haut niveau et plante (« Cannot read properties of undefined (reading 'map') ») dès
+  // qu'un de ces composants n'a pas de `.components`. On récupère donc les messages nous-mêmes
+  // et on ne conserve que les action rows classiques avant de générer le transcript.
+  const messages = await fetchAllChannelMessages(channel);
+  for (const m of messages) sanitizeMessageComponents(m);
+  return discordTranscripts.generateFromMessages(messages, channel, options);
+}
+
+// Récupère TOUS les messages d'un salon (pagination 100 par 100), du plus ancien au plus récent.
+async function fetchAllChannelMessages(channel) {
+  const all = [];
+  let before;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const opts = before ? { limit: 100, before } : { limit: 100 };
+    const batch = await channel.messages.fetch(opts).catch(() => null);
+    if (!batch || batch.size === 0) break;
+    all.push(...batch.values());
+    before = batch.lastKey();
+    if (batch.size < 100) break;
+  }
+  return all.reverse(); // ordre chronologique attendu par le générateur
+}
+
+// Neutralise les Components V2 d'un message (incompatibles avec la lib de transcript) :
+// on ne garde que les action rows classiques (type 1) qui possèdent un tableau `.components`.
+function sanitizeMessageComponents(message) {
+  try {
+    if (!Array.isArray(message.components) || message.components.length === 0) return;
+    message.components = message.components.filter((c) => c && c.type === 1 && Array.isArray(c.components));
+  } catch {
+    // Dernier recours : on retire tous les composants pour ne jamais bloquer le transcript.
+    try {
+      message.components = [];
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function closeTicket(interaction) {
