@@ -222,6 +222,7 @@ const NAV_GROUPS = [
   ] },
   { label: "Compétition", items: [
     { id: "tournament", label: "Tournoi", ico: "🏆" },
+    { id: "startgg", label: "Seeding start.gg", ico: "🌱" },
   ] },
 ];
 const NAV = NAV_GROUPS.flatMap((g) => g.items);
@@ -727,6 +728,7 @@ function renderSection(id) {
   if (id === "vocrank") return renderVocRank(content);
   if (id === "roles") return renderRoles(content);
   if (id === "tournament") return renderTournament(content);
+  if (id === "startgg") return renderStartggSeed(content);
   if (id === "combos") return renderCombos(content);
   if (id === "tickets") return renderTickets(content);
   if (id === "giveaway") return renderGiveaway(content);
@@ -923,6 +925,99 @@ function renderRoles(content) {
     btn.disabled = false;
   });
   content.append(el("div", { class: "save-bar" }, btn));
+}
+
+// ----- Seeding start.gg (tournoi géré sur start.gg) -----
+function renderStartggSeed(content) {
+  setDirty(false);
+  const state = { url: "", token: "", phaseId: "", phaseName: "", eventName: "", rows: [], phases: [] };
+
+  content.append(
+    el("div", { class: "page-head" },
+      el("h2", { html: "🌱 Seeding start.gg" }),
+      el("p", {}, "Seede un tournoi géré sur start.gg d'après le niveau Brawlhalla (rating 1v1), puis réécris le seeding directement sur start.gg."),
+    ),
+  );
+
+  const conn = el("div", { class: "card" }, el("h3", {}, "Événement start.gg"));
+  const urlIn = textInput(state, "url", "https://www.start.gg/tournament/<nom>/event/<event>");
+  const tokenIn = el("input", { type: "password", placeholder: "Personal Access Token start.gg (mémorisé après la 1ère fois)" });
+  tokenIn.addEventListener("input", () => (state.token = tokenIn.value.trim()));
+  conn.append(fieldRow("Lien de l'événement", "Le lien doit pointer vers un événement (.../event/...).", urlIn));
+  conn.append(fieldRow("Token start.gg", "Settings → Developer → Personal Access Tokens. Doit être ADMIN du tournoi pour réécrire le seeding.", tokenIn));
+  content.append(conn);
+
+  const resultCard = el("div", { class: "card" }, el("h3", {}, "Seeding proposé"));
+  const info = el("div", { class: "card-sub" }, "Charge les inscrits pour calculer le seeding (rating 1v1 décroissant).");
+  const phaseRow = el("div", { style: "margin:10px 0" });
+  const tableWrap = el("div", {});
+  resultCard.append(info, phaseRow, tableWrap);
+
+  function renderTable() {
+    tableWrap.innerHTML = "";
+    if (!state.rows.length) return;
+    tableWrap.append(el("div", { class: "sg-row sg-head" },
+      el("span", {}, "Seed"), el("span", {}, "Joueur"), el("span", {}, "Rating 1v1"), el("span", {}, "Source"), el("span", {}, "Actuel")));
+    for (const r of state.rows) {
+      tableWrap.append(el("div", { class: "sg-row" },
+        el("span", { class: "sg-seed" }, "#" + r.proposedSeed),
+        el("span", {}, r.name),
+        el("span", {}, r.rating ? String(r.rating) : "—"),
+        el("span", { class: "sg-src" }, r.source),
+        el("span", { class: "sg-cur" }, "#" + r.currentSeed)));
+    }
+  }
+
+  function drawPhasePicker() {
+    phaseRow.innerHTML = "";
+    if (state.phases.length <= 1) return;
+    const sel = el("select");
+    for (const p of state.phases) {
+      const opt = el("option", { value: p.id }, p.name);
+      if (p.id === state.phaseId) opt.selected = true;
+      sel.append(opt);
+    }
+    sel.addEventListener("change", () => { state.phaseId = sel.value; loadPreview(); });
+    phaseRow.append(el("span", { class: "tb-label", style: "margin-right:8px" }, "Phase à seeder :"), sel);
+  }
+
+  async function loadPreview() {
+    if (!state.url) return toast("Colle le lien de l'événement start.gg.", "err");
+    info.textContent = "⏳ Récupération des inscrits et calcul du seeding…";
+    try {
+      const r = await api("/api/startgg/preview", "POST", { url: state.url, token: state.token || undefined, phaseId: state.phaseId || undefined });
+      state.eventName = r.eventName; state.phaseId = r.phaseId; state.phaseName = r.phaseName;
+      state.phases = r.phases || []; state.rows = r.rows || [];
+      const matched = state.rows.filter((x) => x.source !== "inconnu").length;
+      info.textContent = `${r.eventName} — phase « ${r.phaseName} » : ${state.rows.length} inscrit(s), ${matched} avec rating connu.`;
+      drawPhasePicker();
+      renderTable();
+    } catch (e) {
+      info.textContent = "";
+      toast("Erreur : " + e.message, "err");
+    }
+  }
+
+  const loadBtn = el("button", { class: "btn-save" }, "📥 Charger & calculer le seeding");
+  loadBtn.addEventListener("click", async () => { loadBtn.disabled = true; await loadPreview(); loadBtn.disabled = false; });
+
+  const applyBtn = el("button", { class: "btn-save", style: "background:#2ecc71" }, "🚀 Appliquer sur start.gg");
+  applyBtn.addEventListener("click", async () => {
+    if (!state.rows.length) return toast("Charge d'abord le seeding.", "err");
+    if (!(await confirmModal(`Réécrire le seeding de la phase « ${state.phaseName} » sur start.gg (${state.rows.length} joueurs) ?`, { title: "Appliquer le seeding", okLabel: "Appliquer" }))) return;
+    applyBtn.disabled = true;
+    try {
+      const mapping = state.rows.map((r) => ({ seedId: r.seedId, seedNum: r.proposedSeed }));
+      const r = await api("/api/startgg/apply", "POST", { token: state.token || undefined, phaseId: state.phaseId, mapping });
+      toast(r.message || "Seeding appliqué ✅", "ok");
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    applyBtn.disabled = false;
+  });
+
+  content.append(resultCard);
+  content.append(el("div", { class: "save-bar" }, loadBtn, applyBtn));
 }
 
 // ----- Page Combos (admin) -----

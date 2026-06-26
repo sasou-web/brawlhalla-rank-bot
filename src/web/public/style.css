@@ -679,3 +679,11 @@ body.catgirl .login-features .fi { background: var(--accent-grad); }
 .login-neko { width: 110px; height: 110px; object-fit: cover; border-radius: 24px; border: 3px solid var(--accent); box-shadow: var(--shadow); margin: 0 auto 18px; display: none; }
 body.catgirl .login-neko { display: block; }
 body.catgirl .login-card .logo { display: none; }
+
+
+/* --- Seeding start.gg : tableau du seeding proposé --- */
+.sg-row { display: grid; grid-template-columns: 64px 1fr 110px 130px 70px; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.sg-row.sg-head { font-weight: 600; opacity: 0.7; text-transform: uppercase; font-size: 12px; letter-spacing: 0.03em; border-bottom: 1px solid rgba(255,255,255,0.18); }
+.sg-row .sg-seed { font-weight: 700; color: var(--accent); }
+.sg-row .sg-src { opacity: 0.75; font-size: 13px; }
+.sg-row .sg-cur { opacity: 0.6; font-size: 13px; text-align: right; }

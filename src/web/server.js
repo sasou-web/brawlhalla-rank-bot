@@ -54,7 +54,15 @@ import { getPlayerProfile, getApiMetrics } from "../brawlhalla.js";
 import { setupRankVoiceChannels } from "../rankvoice.js";
 import { syncAllMembers, isSyncingAll } from "../sync.js";
 import { logAudit } from "../commands/shared.js";
-import { parseStartggEventSlug, fetchStartggSeeding, normalizeName } from "../startgg.js";
+import {
+  parseStartggEventSlug,
+  fetchStartggSeeding,
+  normalizeName,
+  fetchEventPhases,
+  fetchPhaseSeeds,
+  updatePhaseSeeding,
+} from "../startgg.js";
+import { searchLocalPlayers } from "../leaderboardStore.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "public");
@@ -776,6 +784,129 @@ export function startWebServer(client) {
             ? " Les non-trouvés (noms différents de start.gg) sont placés à la fin."
             : ""),
       });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ============================================================
+  //  Page dédiée « Seeding start.gg » : seede un tournoi qui vit ENTIÈREMENT sur start.gg,
+  //  d'après le niveau Brawlhalla (rating 1v1), puis réécrit le seeding sur start.gg.
+  // ============================================================
+
+  // Résout un token start.gg : celui fourni (et mémorisé), sinon celui des réglages.
+  async function resolveStartggToken(bodyToken) {
+    let token = (bodyToken || "").trim();
+    if (token) {
+      await setSetting("startggToken", token);
+      return token;
+    }
+    const settings = await getSettings();
+    return settings.startggToken || "";
+  }
+
+  // Construit l'index normalisé pseudo -> meilleur rating 1v1 à partir des comptes liés.
+  async function buildLinkedRatingIndex() {
+    const links = await getAllLinks();
+    const idx = new Map();
+    for (const l of Object.values(links)) {
+      const r = Number(l.rating1v1) || 0;
+      for (const key of [l.name].map(normalizeName).filter(Boolean)) {
+        if (!idx.has(key) || r > idx.get(key)) idx.set(key, r);
+      }
+    }
+    return idx;
+  }
+
+  // Résout le rating 1v1 d'un entrant (par gamerTag / nom) : compte lié d'abord, sinon
+  // index local du leaderboard (joueurs classés déjà connus du bot). Renvoie { rating, source }.
+  async function resolveEntrantRating(candidates, linkedIdx) {
+    const norms = [...new Set(candidates.map(normalizeName).filter(Boolean))];
+    // 1) Comptes liés (rating exact, fiable).
+    for (const n of norms) {
+      if (linkedIdx.has(n)) return { rating: linkedIdx.get(n), source: "membre lié" };
+    }
+    // 2) Index local du leaderboard (correspondance exacte de pseudo).
+    for (const raw of candidates) {
+      if (!raw) continue;
+      try {
+        const found = await searchLocalPlayers(raw, 5);
+        const exact = found.find((p) => normalizeName(p.username) === normalizeName(raw));
+        if (exact) return { rating: Number(exact.rating) || 0, source: "leaderboard" };
+      } catch {
+        /* index indisponible : on continue */
+      }
+    }
+    return { rating: 0, source: "inconnu" };
+  }
+
+  // Liste les phases d'un événement (pour le choix de la phase à seeder).
+  app.post("/api/startgg/phases", requireAdmin, async (req, res) => {
+    try {
+      const slug = parseStartggEventSlug((req.body?.url || "").trim());
+      const token = await resolveStartggToken(req.body?.token);
+      if (!token) return res.status(400).json({ error: "Token start.gg requis (Personal Access Token)." });
+      const { eventName, phases } = await fetchEventPhases(slug, token);
+      res.json({ eventName, phases });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Calcule un seeding proposé pour une phase : entrants triés par rating 1v1 décroissant.
+  // body : { url, token?, phaseId? }. Renvoie la liste avec rating/source + le seed proposé.
+  app.post("/api/startgg/preview", requireAdmin, async (req, res) => {
+    try {
+      const slug = parseStartggEventSlug((req.body?.url || "").trim());
+      const token = await resolveStartggToken(req.body?.token);
+      if (!token) return res.status(400).json({ error: "Token start.gg requis (Personal Access Token)." });
+
+      const { eventName, phases } = await fetchEventPhases(slug, token);
+      const phaseId = (req.body?.phaseId && phases.find((p) => p.id === String(req.body.phaseId))?.id) || phases[0].id;
+      const phaseName = phases.find((p) => p.id === phaseId)?.name || "";
+
+      const seeds = await fetchPhaseSeeds(phaseId, token);
+      const linkedIdx = await buildLinkedRatingIndex();
+
+      const rows = [];
+      for (const s of seeds) {
+        const candidates = [s.entrantName, ...s.gamerTags];
+        const { rating, source } = await resolveEntrantRating(candidates, linkedIdx);
+        rows.push({
+          seedId: s.seedId,
+          currentSeed: s.seedNum,
+          name: s.entrantName || s.gamerTags[0] || "?",
+          rating,
+          source,
+        });
+      }
+
+      // Tri par rating décroissant ; à rating égal, on garde l'ordre de seed actuel (stable).
+      rows.sort((a, b) => b.rating - a.rating || a.currentSeed - b.currentSeed);
+      rows.forEach((r, i) => (r.proposedSeed = i + 1));
+
+      res.json({ eventName, phaseId, phaseName, phases, rows });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Applique un seeding sur start.gg. body : { token?, phaseId, mapping:[{seedId,seedNum}] }.
+  app.post("/api/startgg/apply", requireAdmin, async (req, res) => {
+    try {
+      const token = await resolveStartggToken(req.body?.token);
+      if (!token) return res.status(400).json({ error: "Token start.gg requis (Personal Access Token)." });
+      const phaseId = String(req.body?.phaseId || "");
+      const mapping = Array.isArray(req.body?.mapping) ? req.body.mapping : [];
+      if (!phaseId) return res.status(400).json({ error: "phaseId manquant." });
+      if (!mapping.length) return res.status(400).json({ error: "Aucun seed à appliquer." });
+
+      const { updated } = await updatePhaseSeeding(phaseId, mapping, token);
+      await logAudit(
+        await client.guilds.fetch(config.guildId),
+        `🌱 <@${req.session.id}> a appliqué un seeding start.gg (${updated} joueur(s)) via le dashboard.`,
+      ).catch(() => {});
+      res.json({ ok: true, updated, message: `Seeding appliqué sur start.gg pour ${updated} joueur(s). ✅` });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
