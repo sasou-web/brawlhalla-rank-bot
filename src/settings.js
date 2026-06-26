@@ -40,6 +40,8 @@ export async function getSettings() {
     // Salon hôte des fils de preuve. DOIT être visible par les membres (sinon Discord refuse
     // de les ajouter au fil privé). Vide = salon où /lier a été lancé.
     proofChannelId: s.proofChannelId || "",
+    // Token développeur start.gg (Personal Access Token) pour le seeding automatique des tournois.
+    startggToken: s.startggToken || "",
   };
 }
 

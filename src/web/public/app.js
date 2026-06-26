@@ -2101,6 +2101,33 @@ async function renderTournament(content) {
     }
     card.append(el("div", { class: "tb-label" }, "Déroulé"), flow);
 
+    // Seeding automatique via un lien d'événement start.gg.
+    if (t.status === "registration" || t.status === "checkin") {
+      const sg = { url: "", token: "" };
+      const urlIn = textInput(sg, "url", "https://www.start.gg/tournament/<nom>/event/<event>");
+      const tokenIn = el("input", { type: "password", placeholder: "Token start.gg (Personal Access Token — mémorisé après la 1ère fois)" });
+      tokenIn.addEventListener("input", () => (sg.token = tokenIn.value.trim()));
+      const sgBtn = el("button", { class: "tbtn" }, "🌐 Seeding via start.gg");
+      sgBtn.addEventListener("click", async () => {
+        if (!sg.url) return toast("Colle le lien de l'événement start.gg.", "err");
+        sgBtn.disabled = true;
+        try {
+          const r = await api("/api/tournament/seed-startgg", "POST", { url: sg.url, token: sg.token || undefined });
+          toast(r.message || "Seeding start.gg appliqué ✅", "ok");
+          renderTournament(content);
+        } catch (e) {
+          toast("Erreur : " + e.message, "err");
+          sgBtn.disabled = false;
+        }
+      });
+      const sgBox = el("div", { class: "toolbar", style: "flex-direction:column; align-items:stretch; gap:8px; max-width:560px" }, urlIn, tokenIn, sgBtn);
+      card.append(
+        el("div", { class: "tb-label", style: "margin-top:18px" }, "Seeding start.gg"),
+        el("div", { class: "card-sub", style: "margin-bottom:8px" }, "Colle le lien de l'ÉVÉNEMENT start.gg : les seeds y sont récupérés et appliqués (association par pseudo / compte lié). Les joueurs non trouvés sont placés à la fin."),
+        sgBox,
+      );
+    }
+
     const danger = el("div", { class: "toolbar", style: "margin-top:18px" });
     danger.append(action("📚 Archiver dans la librairie", async () => {
       if (await confirmModal("Archiver ce tournoi dans la librairie ? Il sera retiré de l'écran actif et conservé dans l'historique consultable.", { title: "Archiver", okLabel: "Archiver" })) await api("/api/tournament/archive", "POST", {});

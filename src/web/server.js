@@ -54,6 +54,7 @@ import { getPlayerProfile, getApiMetrics } from "../brawlhalla.js";
 import { setupRankVoiceChannels } from "../rankvoice.js";
 import { syncAllMembers, isSyncingAll } from "../sync.js";
 import { logAudit } from "../commands/shared.js";
+import { parseStartggEventSlug, fetchStartggSeeding, normalizeName } from "../startgg.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "public");
@@ -699,6 +700,82 @@ export function startWebServer(client) {
       scored.sort((a, b) => b.rating - a.rating);
       await setParticipantOrder(G, scored.map((s) => s.id));
       res.json(await getTournament(G));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Seeding automatique depuis un lien d'événement start.gg. body : { url, token? }.
+  // Le token (Personal Access Token start.gg) est mémorisé dans les réglages s'il est fourni.
+  app.post("/api/tournament/seed-startgg", requireAdmin, async (req, res) => {
+    try {
+      const t = await getTournament(G);
+      if (!t) return res.status(400).json({ error: "Aucun tournoi." });
+      if (!t.participants.length) return res.status(400).json({ error: "Aucun participant à seeder." });
+
+      const url = (req.body?.url || "").trim();
+      const slug = parseStartggEventSlug(url); // lève si le lien est invalide
+
+      // Token : celui fourni dans la requête (et mémorisé), sinon celui des réglages.
+      let token = (req.body?.token || "").trim();
+      const settings = await getSettings();
+      if (token) {
+        await setSetting("startggToken", token);
+      } else {
+        token = settings.startggToken || "";
+      }
+      if (!token) {
+        return res.status(400).json({ error: "Token start.gg requis (Personal Access Token). Renseigne-le une fois, il sera mémorisé." });
+      }
+
+      const { eventName, entrants } = await fetchStartggSeeding(slug, token);
+      if (!entrants.length) return res.status(400).json({ error: "Aucun entrant trouvé sur cet événement start.gg." });
+
+      // Index normalisé : nom/gamerTag start.gg -> seed (on garde le plus petit seed par clé).
+      const seedByName = new Map();
+      for (const e of entrants) {
+        for (const key of [e.name, ...e.gamerTags].map(normalizeName).filter(Boolean)) {
+          if (!seedByName.has(key) || e.seed < seedByName.get(key)) seedByName.set(key, e.seed);
+        }
+      }
+
+      // Pour chaque participant du bot, on cherche un seed via son nom d'inscription ET le nom
+      // Brawlhalla du compte lié (meilleure correspondance).
+      const scored = [];
+      let matched = 0;
+      for (const p of t.participants) {
+        const candidates = [p.name];
+        try {
+          const link = await getLink(p.members?.[0]);
+          if (link?.name) candidates.push(link.name);
+        } catch {
+          /* pas de compte lié : on s'en tient au nom d'inscription */
+        }
+        let seed = Number.MAX_SAFE_INTEGER;
+        for (const c of candidates.map(normalizeName).filter(Boolean)) {
+          if (seedByName.has(c)) {
+            seed = Math.min(seed, seedByName.get(c));
+          }
+        }
+        if (seed !== Number.MAX_SAFE_INTEGER) matched++;
+        scored.push({ id: p.id, seed });
+      }
+
+      // Tri stable par seed croissant ; les non-trouvés (seed max) restent à la fin dans l'ordre.
+      scored.sort((a, b) => a.seed - b.seed);
+      await setParticipantOrder(G, scored.map((s) => s.id));
+
+      res.json({
+        tournament: await getTournament(G),
+        matched,
+        total: t.participants.length,
+        eventName,
+        message:
+          `Seeding start.gg appliqué (${eventName}) : ${matched}/${t.participants.length} participant(s) associé(s).` +
+          (matched < t.participants.length
+            ? " Les non-trouvés (noms différents de start.gg) sont placés à la fin."
+            : ""),
+      });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
