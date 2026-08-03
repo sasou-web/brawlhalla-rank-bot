@@ -105,7 +105,26 @@
     </div>
 
     <div id="toast" role="status" aria-live="polite"></div>
-    <script src="/app.js"></script>
+
+    <!--
+      Scripts classiques (PAS des modules ES) : catgirl.js se greffe sur des
+      fonctions globales du dashboard (toast, renderApp, renderOverview, showLogin).
+
+      L'ORDRE CI-DESSOUS EST SIGNIFICATIF : un fichier ne peut lire les `const`
+      que des fichiers chargés avant lui. Socle → composants → coquille →
+      sections → pages → amorçage. `dash-boot.js` doit rester le dernier du
+      dashboard, et catgirl.js se charge après (il gère son propre branchement).
+    -->
+    <script src="/dash-core.js"></script>
+    <script src="/dash-fields.js"></script>
+    <script src="/dash-shell.js"></script>
+    <script src="/dash-sections.js"></script>
+    <script src="/dash-pages-monitor.js"></script>
+    <script src="/dash-pages-tools.js"></script>
+    <script src="/dash-pages-support.js"></script>
+    <script src="/dash-pages-messages.js"></script>
+    <script src="/dash-pages-tournament.js"></script>
+    <script src="/dash-boot.js"></script>
     <script src="/catgirl.js"></script>
   </body>
 </html>

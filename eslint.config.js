@@ -1,4 +1,34 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import globals from "globals";
+
+const DASH_DIR = join(dirname(fileURLToPath(import.meta.url)), "src", "web", "public");
+
+/**
+ * Surface partagée du dashboard.
+ *
+ * Les fichiers de src/web/public sont des scripts CLASSIQUES (pas des modules ES,
+ * voir plus bas) : ils partagent donc un seul et même scope global. Découper app.js
+ * en plusieurs fichiers rend ce partage invisible pour ESLint, qui signalerait
+ * ~1200 faux `no-undef`.
+ *
+ * On dérive la liste de leurs déclarations de premier niveau au lieu de l'écrire à
+ * la main : une liste figée de 100 noms dériverait à la première fonction ajoutée.
+ * `no-undef` reste donc actif — un appel vers un nom qui n'existe nulle part est
+ * toujours signalé, ce qui est le but (fautes de frappe).
+ */
+function dashboardSharedGlobals() {
+  const out = {};
+  for (const file of readdirSync(DASH_DIR).filter((n) => n.endsWith(".js"))) {
+    for (const line of readFileSync(join(DASH_DIR, file), "utf8").split(/\r?\n/)) {
+      // Premier niveau uniquement : la ligne commence sans indentation.
+      const m = /^(?:async\s+)?(function|const|let)\s+([A-Za-z_$][\w$]*)/.exec(line);
+      if (m) out[m[2]] = m[1] === "let" ? "writable" : "readonly";
+    }
+  }
+  return out;
+}
 
 /**
  * Configuration ESLint (flat config).
@@ -99,16 +129,30 @@ export default [
   },
 
   // ---- Dashboard : navigateur, scripts classiques (pas de modules ES) ----
-  // app.js expose volontairement des fonctions globales (toast, renderApp,
-  // renderOverview, showLogin) sur lesquelles catgirl.js se greffe.
+  // Pourquoi pas de modules : catgirl.js remplace des fonctions globales du
+  // dashboard (toast, renderApp, renderOverview, showLogin) pour s'y greffer. En
+  // modules ES, les appels internes resolveraient la liaison du module et non la
+  // globale : la surcouche ne serait plus jamais appelee.
+  // Consequence assumee : les fichiers dash-*.js partagent un scope global, dont
+  // la surface est derivee du code (voir dashboardSharedGlobals ci-dessus).
   {
     files: ["src/web/public/**/*.js"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "script",
-      globals: { ...globals.browser },
+      globals: { ...globals.browser, ...dashboardSharedGlobals() },
     },
-    rules: bugRules,
+    rules: {
+      ...bugRules,
+      // `vars: "local"` : en script classique, les declarations de premier niveau
+      // SONT des globales. Sans ca, chaque fonction partagee serait signalee comme
+      // inutilisee, ESLint ne voyant pas les appels venant des autres fichiers.
+      // Les variables locales et les parametres restent verifies.
+      "no-unused-vars": [
+        "warn",
+        { vars: "local", args: "after-used", argsIgnorePattern: "^_|^ctx$", caughtErrors: "none", ignoreRestSiblings: true },
+      ],
+    },
   },
 
   // ---- Config pm2 : CommonJS ----
