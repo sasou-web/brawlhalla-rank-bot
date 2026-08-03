@@ -17,4 +17,8 @@ data/*
 backups/
 data_backup_*/
 
+# Notes locales : coordonnees du serveur (IP, utilisateur SSH...). Le depot est
+# public, ces informations ne doivent pas y figurer. Ex: .kiro/steering/serveur.local.md
+*.local.md
+
 *.log

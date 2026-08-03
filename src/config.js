@@ -31,7 +31,7 @@ export const config = {
 export const webConfig = {
   port: Number(process.env.WEB_PORT || 3000),
   clientSecret: process.env.CLIENT_SECRET || "",
-  // URL publique du dashboard (ex: http://91.98.17.48:3000). Sert a construire le redirect OAuth.
+  // URL publique du dashboard (ex: https://dash.mondomaine.com). Sert a construire le redirect OAuth.
   publicUrl: (process.env.PUBLIC_URL || "").replace(/\/+$/, ""),
   // Secret pour signer les cookies de session (mets une longue chaine aleatoire).
   sessionSecret: process.env.SESSION_SECRET || "",

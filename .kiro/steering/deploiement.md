@@ -21,8 +21,12 @@ git push origin main
 Se connecter puis lancer `update.sh` (git pull → npm install → lint+tests → npm run deploy → pm2 restart) :
 
 ```bash
-ssh kaya@91.98.17.48
+ssh $SSH_CIBLE
 ```
+
+> **`$SSH_CIBLE`** (utilisateur + IP réels) est dans **`.kiro/steering/serveur.local.md`**,
+> non versionné : ce dépôt est public, on n'y publie pas les coordonnées du serveur.
+> Ce fichier est chargé comme les autres steering, donc l'assistant y a accès en local.
 
 ```bash
 sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
@@ -43,7 +47,7 @@ Pour le dashboard web : recharger le navigateur en **Ctrl+F5** (nouveau `app.js`
 
 ## Faits serveur (à ne pas oublier)
 
-- SSH : `ssh kaya@91.98.17.48` — utilisateur **kaya**, jamais root en direct.
+- SSH : `ssh $SSH_CIBLE` (voir `serveur.local.md`) — jamais root en direct.
 - Dossier de prod (clone git) : **`/root/brawlhalla-rank-bot`**.
 - Process pm2 : **`brawl-bot`** (lancé via `sudo`, donc utiliser `sudo pm2 ...`).
 - `update.sh` stoppe si lint/tests échouent (filet de sécurité), donc pas de restart sur du code cassé.

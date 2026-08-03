@@ -11,7 +11,7 @@ Le dossier de production est **`/root/brawlhalla-rank-bot`** et le process pm2 s
 ## Étape 1 — Se connecter au serveur
 
 ```bash
-ssh kaya@<ip-du-serveur>
+ssh <utilisateur>@<ip-du-serveur>
 ```
 
 ## Étape 2 — Cloner le projet
