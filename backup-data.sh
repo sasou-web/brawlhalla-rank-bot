@@ -26,18 +26,22 @@
 #    0 4 * * * cd /root/brawlhalla-rank-bot && bash backup-data.sh >> backup.log 2>&1
 #
 # ---------------------------------------------------------------------------
-#  RESTAURATION
+#  RESTAURATION  (chemins ABSOLUS : `cd /root/...` echoue pour l'utilisateur kaya)
 # ---------------------------------------------------------------------------
+#   D=/root/brawlhalla-rank-bot
 #   sudo pm2 stop brawl-bot
-#   cd /root/brawlhalla-rank-bot
-#   sudo mv data/bot.db data/bot.db.avant-restauration
-#   sudo rm -f data/bot.db-wal data/bot.db-shm      # <-- INDISPENSABLE
-#   sudo sh -c 'gunzip -c backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > data/bot.db'
+#   sudo mv $D/data/bot.db $D/data/bot.db.avant-restauration
+#   sudo rm -f $D/data/bot.db-wal $D/data/bot.db-shm       # <-- INDISPENSABLE
+#   sudo bash -c "gunzip -c $D/backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > $D/data/bot.db"
 #   sudo pm2 start brawl-bot
 #
 #   Le retrait de bot.db-wal / bot.db-shm est critique : laisses en place, ils
 #   seraient rejoues par SQLite par-dessus la base restauree.
 #   Les caches (leaderboard, profils, recherches) se reconstruisent seuls.
+#
+#   Verifier une archive sans restaurer (voir DEPLOY.md) : attention, sqlite3
+#   CREE la base si le fichier est absent -> un integrity_check "ok" sur une
+#   base vide ne prouve rien. Controle toujours les compteurs de lignes.
 #
 # ---------------------------------------------------------------------------
 #  Export externe (offsite)

@@ -98,27 +98,42 @@ ne passe plus inaperçu).
 `.env` n'est **jamais** sauvegardé (il contient le token du bot) — garde-le dans un
 gestionnaire de mots de passe.
 
+### Vérifier une archive (sans rien restaurer)
+
+À faire au moins une fois : une sauvegarde jamais vérifiée est une hypothèse, pas une garantie.
+
+```bash
+sudo bash -c 'A=$(ls -1t /root/brawlhalla-rank-bot/backups/bot_*.db.gz | head -1); echo "Archive : $A"; gunzip -c "$A" > /tmp/verif.db'
+sudo sqlite3 /tmp/verif.db "PRAGMA integrity_check;"
+sudo sqlite3 -header -column /tmp/verif.db "SELECT (SELECT COUNT(*) FROM kv) AS kv, (SELECT COUNT(*) FROM xp) AS xp, (SELECT COUNT(*) FROM rating_history) AS ratings, (SELECT COUNT(*) FROM leaderboard) AS leaderboard;"
+sudo rm -f /tmp/verif.db
+```
+
+Attendu : `ok`, des compteurs non nuls pour `kv` / `xp` / `ratings`, et `leaderboard` **à 0**
+(preuve que la purge a bien eu lieu).
+
+⚠️ **Toujours des chemins absolus.** L'utilisateur `kaya` ne peut pas faire `cd /root/...`
+(permission refusée) : la commande échouerait, et `sqlite3` créerait alors une base **vide**
+sur laquelle `integrity_check` répond `ok`. Un `ok` sur une base inexistante ne prouve rien —
+vérifie toujours que les compteurs de lignes sont cohérents.
+
 ### Restaurer une sauvegarde
 
 ```bash
 sudo pm2 stop brawl-bot
-cd /root/brawlhalla-rank-bot
-sudo mv data/bot.db data/bot.db.avant-restauration
-sudo rm -f data/bot.db-wal data/bot.db-shm
-sudo sh -c 'gunzip -c backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > data/bot.db'
+sudo mv /root/brawlhalla-rank-bot/data/bot.db /root/brawlhalla-rank-bot/data/bot.db.avant-restauration
+sudo rm -f /root/brawlhalla-rank-bot/data/bot.db-wal /root/brawlhalla-rank-bot/data/bot.db-shm
+sudo bash -c 'gunzip -c /root/brawlhalla-rank-bot/backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > /root/brawlhalla-rank-bot/data/bot.db'
 sudo pm2 start brawl-bot
+sudo pm2 logs brawl-bot --lines 20
 ```
 
 ⚠️ Le `rm` des fichiers `-wal` / `-shm` est **indispensable** : laissés en place, SQLite
 rejouerait l'ancien journal par-dessus la base restaurée. Les caches (classement, profils,
 recherches) se reconstruisent tout seuls dans les minutes qui suivent.
 
-Pour vérifier une archive **sans rien restaurer** :
-```bash
-gunzip -c backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > /tmp/verif.db
-sqlite3 /tmp/verif.db "PRAGMA integrity_check; SELECT COUNT(*) FROM kv;"
-rm /tmp/verif.db
-```
+L'ancienne base est conservée sous `bot.db.avant-restauration` : en cas de mauvaise surprise,
+tu peux revenir en arrière en refaisant l'opération dans l'autre sens.
 
 ## Rappel important
 
