@@ -8,8 +8,9 @@
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
     "check": "node scripts/check.js",
+    "lint": "eslint .",
     "test": "node scripts/run-tests.js",
-    "ci": "npm run check && npm test"
+    "ci": "npm run check && npm run lint && npm test"
   },
   "engines": {
     "node": ">=18"
@@ -26,5 +27,9 @@
   },
   "overrides": {
     "undici": "^6.28.0"
+  },
+  "devDependencies": {
+    "eslint": "9.39.0",
+    "globals": "16.5.0"
   }
 }

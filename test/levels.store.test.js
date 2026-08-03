@@ -86,7 +86,8 @@ test("addVoiceXp accorde l'XP sans cooldown", async () => {
   const G = "g_voice";
   await fixedConfig(G);
   await resetLevels(G, null);
-  const r1 = await addVoiceXp(G, "u1", 10, 1);
+  // Deux gains consecutifs : sans cooldown en vocal, on verifie le cumul final.
+  await addVoiceXp(G, "u1", 10, 1);
   const r2 = await addVoiceXp(G, "u1", 10, 1);
   assert.equal(r2.xp, 20);
 });

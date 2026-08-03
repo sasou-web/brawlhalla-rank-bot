@@ -519,7 +519,6 @@ async function buildTranscript(channel, ticket) {
 async function fetchAllChannelMessages(channel) {
   const all = [];
   let before;
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const opts = before ? { limit: 100, before } : { limit: 100 };
     const batch = await channel.messages.fetch(opts).catch(() => null);

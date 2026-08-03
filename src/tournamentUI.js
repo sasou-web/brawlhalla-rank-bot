@@ -341,7 +341,6 @@ export async function refreshMatchMessage(client, guildId, matchId) {
 // Embed "Hall of Fame" : podium + MVP, pour l'archivage d'un tournoi.
 export function buildHallOfFamePayload(t) {
   const podium = tournamentPodium(t) || {};
-  const medal = (p, emoji) => (p ? `${emoji} **${p.name}**` : null);
 
   const lines = [];
   if (podium.first) lines.push(`🥇 **${podium.first.name}** — Champion !`);

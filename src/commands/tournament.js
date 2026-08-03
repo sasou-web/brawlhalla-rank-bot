@@ -1,7 +1,5 @@
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -225,7 +223,8 @@ export async function handleTournamentButton(interaction, ctx) {
       });
     }
     try {
-      const t = await resolveMatch(guildId, matchId, entrantId);
+      // La valeur de retour n'est pas utilisee ici : seul l'effet de bord compte.
+      await resolveMatch(guildId, matchId, entrantId);
       await refreshSignupPanel(interaction.client, guildId);
       await refreshMatchMessage(interaction.client, guildId, matchId);
       await tournamentAnnounce(interaction.client, guildId, `🛠️ Décision staff — **${name}** est déclaré vainqueur du match.`);

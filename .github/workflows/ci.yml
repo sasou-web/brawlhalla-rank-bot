@@ -24,5 +24,11 @@ jobs:
       - name: Lint syntaxique (node --check)
         run: npm run check
 
+      # ESLint est une devDependency : dispo ici (npm ci) mais PAS sur le serveur
+      # de prod, qui installe avec --omit=dev. C'est pourquoi update.sh se limite
+      # a `npm run check` et ne lance pas `npm run lint`.
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Tests (node --test)
         run: npm test
