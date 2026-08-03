@@ -51,6 +51,7 @@ import { getAllLinks } from "../store.js";
 import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos } from "../combos.js";
 import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
+import { healthSnapshot } from "../health.js";
 import { getPlayerProfile, getApiMetrics } from "../brawlhalla.js";
 import { setupRankVoiceChannels } from "../rankvoice.js";
 import { syncAllMembers, isSyncingAll } from "../sync.js";
@@ -308,6 +309,34 @@ export function startWebServer(client) {
   app.get("/logout", (req, res) => {
     res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax", secure: wantHttps, path: "/" });
     res.redirect("/");
+  });
+
+  // ---- Healthcheck PUBLIC (surveillance externe) ----
+  // Volontairement SANS authentification : un service de monitoring (UptimeRobot,
+  // Better Stack, healthchecks.io...) doit pouvoir l'interroger pour t'alerter quand
+  // le process est mort -- ce que health.js ne peut pas faire, puisqu'il previent via
+  // Discord... avec le bot lui-meme.
+  //
+  // Ne divulgue donc RIEN de sensible : pas de nom de serveur, pas de compteur de
+  // membres, pas de config, aucune donnee de membre. Uniquement l'etat technique.
+  //
+  // Codes de reponse (c'est eux que surveille le moniteur) :
+  //   200 "ok"        -> bot connecte a Discord, API Brawlhalla joignable
+  //   200 "degraded"  -> bot connecte mais API Brawlhalla injoignable. Volontairement
+  //                      un 200 : le bot fonctionne, la panne est chez Brawlhalla, ca
+  //                      ne doit pas declencher d'alerte d'indisponibilite.
+  //   503 "down"      -> bot non connecte a Discord (crash, crash-loop, gateway perdue)
+  app.use("/health", rateLimiter({ windowMs: 60_000, max: 60 }));
+  app.get("/health", (req, res) => {
+    const h = healthSnapshot();
+    const up = h.discordConnected;
+    res.setHeader("Cache-Control", "no-store");
+    res.status(up ? 200 : 503).json({
+      status: up ? (h.apiDown ? "degraded" : "ok") : "down",
+      uptimeSec: Math.floor(process.uptime()),
+      discord: { connected: h.discordConnected, pingMs: h.wsPingMs },
+      brawlhallaApi: { reachable: !h.apiDown, lastCheckTs: h.lastApiCheckTs },
+    });
   });
 
   // ---- API ----

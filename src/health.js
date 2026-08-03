@@ -10,7 +10,26 @@ import { pingApi } from "./brawlhalla.js";
 let clientRef = null;
 let apiDown = false;
 let healthTimer = null;
+let lastApiCheckTs = 0;
 const API_CHECK_MS = 10 * 60 * 1000; // 10 min
+
+/**
+ * Instantané de santé, consommé par l'endpoint public /health du dashboard.
+ * Ne renvoie QUE des informations non sensibles (pas de nom de serveur, pas de
+ * compteur de membres, aucune donnée de membre) : l'endpoint est sans authentification.
+ */
+export function healthSnapshot() {
+  const client = clientRef;
+  const connected = Boolean(client?.isReady?.());
+  const ping = connected ? client.ws.ping : -1;
+  return {
+    discordConnected: connected,
+    // discord.js renvoie -1 tant que le heartbeat n'a pas eu lieu.
+    wsPingMs: Number.isFinite(ping) && ping >= 0 ? Math.round(ping) : null,
+    apiDown,
+    lastApiCheckTs: lastApiCheckTs || null,
+  };
+}
 
 /** Envoie un message au salon d'alerte (best-effort, ne lève jamais). */
 export async function notifyAdmin(content) {
@@ -29,6 +48,7 @@ export async function notifyAdmin(content) {
 async function checkApi() {
   try {
     const r = await pingApi();
+    lastApiCheckTs = Date.now();
     const ok = r.leaderboard.ok || r.player.ok;
     if (!ok && !apiDown) {
       apiDown = true;

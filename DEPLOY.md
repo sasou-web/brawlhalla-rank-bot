@@ -196,6 +196,61 @@ sudo ufw deny 3000
 ```
 (Le proxy parle au bot via `127.0.0.1:3000`, donc ça reste fonctionnel.)
 
+## Être alerté si le bot tombe (surveillance externe)
+
+Le bot sait déjà prévenir en cas de déconnexion Discord ou d'API Brawlhalla injoignable
+(`src/health.js`) — mais il envoie ces alertes **dans un salon Discord, via lui-même**.
+Si le process est mort, personne n'est prévenu. pm2 relance, mais un crash-loop passerait
+inaperçu jusqu'à ce qu'un membre s'en plaigne.
+
+D'où l'endpoint **`/health`**, à surveiller depuis l'extérieur.
+
+```bash
+curl -s https://dash.tondomaine.com/health
+```
+
+```json
+{
+  "status": "ok",
+  "uptimeSec": 3421,
+  "discord": { "connected": true, "pingMs": 42 },
+  "brawlhallaApi": { "reachable": true, "lastCheckTs": 1767303600000 }
+}
+```
+
+Les codes de réponse sont ce que surveille le moniteur :
+
+| Code | `status` | Signification |
+|---|---|---|
+| `200` | `ok` | Bot connecté, API Brawlhalla joignable |
+| `200` | `degraded` | Bot connecté, API Brawlhalla injoignable |
+| `503` | `down` | Bot non connecté à Discord (crash, crash-loop, gateway perdue) |
+
+Le cas `degraded` renvoie volontairement **200** : le bot fonctionne, la panne est chez
+Brawlhalla. Ça ne doit pas déclencher une alerte d'indisponibilité (`health.js` prévient
+déjà sur Discord pour ce cas précis).
+
+### Mettre en place le moniteur
+
+N'importe quel service de ping HTTP gratuit convient (UptimeRobot, Better Stack,
+healthchecks.io…). Configuration :
+
+- **URL** : `https://dash.tondomaine.com/health`
+- **Intervalle** : 5 minutes
+- **Alerte si** : code différent de 200
+- **Notification** : e-mail, ou webhook vers un salon Discord privé
+
+⚠️ **Utilise bien le domaine, pas `http://IP:3000`.** Si tu as fermé le port 3000 au public
+(section précédente), l'IP directe n'est plus joignable de l'extérieur — le moniteur
+t'alerterait en permanence.
+
+### Ce que l'endpoint expose (et n'expose pas)
+
+`/health` est **volontairement public, sans authentification** : un moniteur externe doit
+pouvoir l'interroger. Il ne renvoie donc que de l'état technique — **aucun nom de serveur,
+aucun compteur de membres, aucune configuration, aucune donnée de membre**. Il est
+rate-limité à 60 requêtes par minute, et sa réponse n'est pas mise en cache.
+
 ## CI + déploiement par git (remplace le scp manuel)
 
 ### Intégration continue (GitHub Actions)
