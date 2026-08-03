@@ -26,6 +26,22 @@ async function buildTikTokPanel(guildId) {
   const chanTxt = cfg.channelId ? `<#${cfg.channelId}>` : "*(non défini)*";
   const roleTxt = cfg.roleId ? `<@&${cfg.roleId}>` : "*(aucun ping)*";
 
+  // Diagnostic : un flux cassé ou figé rendait le bot muet sans aucun signe.
+  const stamp = (iso) => {
+    const t = Date.parse(iso || "");
+    return Number.isNaN(t) ? "" : `<t:${Math.floor(t / 1000)}:R>`;
+  };
+  const checkTxt = cfg.lastCheckError
+    ? `❌ ${cfg.lastCheckError} ${stamp(cfg.lastCheckAt)}`
+    : cfg.lastCheckAt
+      ? `✅ OK ${stamp(cfg.lastCheckAt)}`
+      : "*(pas encore vérifié)*";
+  const videoAge = Date.parse(cfg.lastVideoAt || "");
+  const staleDays = 10;
+  const videoTxt = Number.isNaN(videoAge)
+    ? "*(inconnue)*"
+    : `${stamp(cfg.lastVideoAt)}${Date.now() - videoAge > staleDays * 864e5 ? " ⚠️ flux figé ?" : ""}`;
+
   const embed = new EmbedBuilder()
     .setTitle("📱 Notifications TikTok")
     .setColor(cfg.enabled ? 0x69c9d0 : 0x747f8d)
@@ -41,6 +57,8 @@ async function buildTikTokPanel(guildId) {
       { name: "Pseudo affiché", value: userTxt, inline: true },
       { name: "Salon", value: chanTxt, inline: true },
       { name: "Rôle pingé", value: roleTxt, inline: true },
+      { name: "Dernière lecture du flux", value: checkTxt, inline: true },
+      { name: "Dernière vidéo du flux", value: videoTxt, inline: true },
     )
     .setFooter({ text: "Le bouton Tester poste la dernière publication du flux dans le salon." });
 

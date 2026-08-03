@@ -35,6 +35,11 @@ const DEFAULT_CONFIG = {
   roleId: "", // role a ping (vide = pas de ping)
   pollIntervalMin: 10,
   lastItemId: "", // dernier item deja poste
+  // Diagnostic (rempli automatiquement a chaque verification) : sans ca, un flux
+  // casse ou fige passait totalement inapercu, le bot restant silencieux.
+  lastCheckAt: "", // ISO de la derniere verification
+  lastCheckError: "", // message d'erreur de la derniere verification (vide = OK)
+  lastVideoAt: "", // ISO de la video la plus recente vue dans le flux
 };
 
 // Phrase d'annonce par defaut. {pseudo} est remplace par le nom affiche, {url} par le lien.
@@ -233,6 +238,19 @@ export function stableVideoId(item) {
   return base || item?.id || "";
 }
 
+// Anti-spam des logs : on ne repete pas le meme avertissement plus d'une fois par heure.
+const warnedAt = new Map();
+function warnThrottled(key, message) {
+  const now = Date.now();
+  if (now - (warnedAt.get(key) || 0) < 60 * 60 * 1000) return;
+  warnedAt.set(key, now);
+  console.warn(`TikTok : ${message}`);
+}
+
+// Nombre de jours sans nouvelle video au-dela duquel on considere le flux fige
+// (generateur casse cote source, plutot qu'un createur qui ne poste plus).
+const STALE_DAYS = 10;
+
 export async function pollGuild(client, guildId) {
   const cfg = await getGuild(guildId);
   if (!cfg.enabled || !cfg.feedUrl || !cfg.channelId) return { posted: 0 };
@@ -240,10 +258,29 @@ export async function pollGuild(client, guildId) {
   let items;
   try {
     items = await fetchFeedItems(cfg.feedUrl);
-  } catch {
-    return { posted: 0 }; // best-effort
+  } catch (err) {
+    await setTikTokConfig(guildId, { lastCheckAt: new Date().toISOString(), lastCheckError: err.message });
+    warnThrottled(`${guildId}:fetch`, `flux illisible (${err.message}) — ${cfg.feedUrl}`);
+    return { posted: 0 }; // best-effort : on retentera au prochain tick
   }
-  if (!items.length) return { posted: 0 };
+  if (!items.length) {
+    await setTikTokConfig(guildId, { lastCheckAt: new Date().toISOString(), lastCheckError: "flux vide" });
+    warnThrottled(`${guildId}:empty`, "le flux ne contient aucune publication.");
+    return { posted: 0 };
+  }
+
+  const newestTs = items[0].ts || 0;
+  await setTikTokConfig(guildId, {
+    lastCheckAt: new Date().toISOString(),
+    lastCheckError: "",
+    lastVideoAt: newestTs ? new Date(newestTs).toISOString() : "",
+  });
+  if (newestTs && Date.now() - newestTs > STALE_DAYS * 24 * 60 * 60 * 1000) {
+    warnThrottled(
+      `${guildId}:stale`,
+      `aucune nouvelle video depuis plus de ${STALE_DAYS} jours — le generateur du flux est peut-etre casse.`,
+    );
+  }
 
   // Premier passage : memorise le plus recent sans spammer l'historique.
   if (!cfg.lastItemId) {
