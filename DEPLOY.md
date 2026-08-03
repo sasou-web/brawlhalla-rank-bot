@@ -2,45 +2,48 @@
 
 Le bot ne nécessite **aucun port entrant** (connexion sortante vers Discord). Garde le firewall fermé en entrée sauf SSH.
 
-## Étape 1 — Envoyer le projet sur le serveur
+> **Déjà installé ?** Va directement à [Mettre à jour le bot](#mettre-à-jour-le-bot-plus-tard).
+> Les étapes ci-dessous ne servent qu'à la **première installation** d'un serveur vierge.
 
-Depuis **PowerShell sur ton PC Windows**, dans le dossier parent du projet.
+Le dossier de production est **`/root/brawlhalla-rank-bot`** et le process pm2 s'appelle
+**`brawl-bot`**. Comme tout vit sous `/root`, les commandes serveur passent par `sudo`.
 
-> ⚠️ Supprime d'abord `node_modules` du dossier local (lourd, réinstallé sur le serveur).
-
-```powershell
-scp -r "c:\Users\ogsas\Downloads\a\brawlhalla-rank-bot" kaya@91.98.17.48:/home/kaya/
-```
-
-(ou, si ton code est sur GitHub : connecte-toi en SSH puis `git clone <url>`)
-
-## Étape 2 — Se connecter au serveur
-
-```powershell
-ssh kaya@91.98.17.48
-```
-
-## Étape 3 — Préparer le .env (si pas déjà fait)
+## Étape 1 — Se connecter au serveur
 
 ```bash
-cd /home/kaya/brawlhalla-rank-bot
-cp .env.example .env
-nano .env      # renseigne DISCORD_TOKEN, CLIENT_ID, GUILD_ID
+ssh kaya@<ip-du-serveur>
+```
+
+## Étape 2 — Cloner le projet
+
+```bash
+sudo git clone https://github.com/<toi>/brawlhalla-rank-bot.git /root/brawlhalla-rank-bot
+```
+
+## Étape 3 — Préparer le .env
+
+```bash
+sudo cp /root/brawlhalla-rank-bot/.env.example /root/brawlhalla-rank-bot/.env
+sudo nano /root/brawlhalla-rank-bot/.env   # DISCORD_TOKEN, CLIENT_ID, GUILD_ID
 ```
 
 ## Étape 4 — Tout installer et démarrer (une seule commande)
 
 ```bash
-bash deploy.sh
+sudo bash -c "cd /root/brawlhalla-rank-bot && bash install-server.sh"
 ```
 
-Ce script installe Node, pm2, les dépendances, enregistre les slash commands, démarre le bot 24/7 et configure le redémarrage au boot.
+`install-server.sh` installe Node et pm2, installe les dépendances, enregistre les slash
+commands, démarre le bot 24/7 et configure le redémarrage au boot.
+
+> À ne pas confondre avec `update.sh` : `install-server.sh` ne sert qu'**une fois**, pour
+> préparer un serveur neuf. Les mises à jour suivantes passent toutes par `update.sh`.
 
 ## Vérifier
 
 ```bash
-pm2 status
-pm2 logs brawl-bot      # tu dois voir "Connecte en tant que ..."
+sudo pm2 status
+sudo pm2 logs brawl-bot      # tu dois voir "Connecte en tant que ..."
 ```
 
 ## Mettre à jour le bot plus tard
@@ -251,47 +254,38 @@ pouvoir l'interroger. Il ne renvoie donc que de l'état technique — **aucun no
 aucun compteur de membres, aucune configuration, aucune donnée de membre**. Il est
 rate-limité à 60 requêtes par minute, et sa réponse n'est pas mise en cache.
 
-## CI + déploiement par git (remplace le scp manuel)
-
-### Intégration continue (GitHub Actions)
+## Intégration continue (GitHub Actions)
 
 Le dépôt contient `.github/workflows/ci.yml` : à chaque push / pull request, GitHub lance
-**lint syntaxique (`npm run check`) + tests (`npm test`)** sur Node 20. Tu vois une coche
-verte ✅ ou une croix rouge ❌ avant de déployer. En local, avant de pousser :
+**`npm run check`** (syntaxe), **`npm run lint`** (ESLint) et **`npm test`** sur Node 20.
+Coche verte ✅ ou croix rouge ❌ avant de déployer.
+
+En local, avant de pousser :
 ```powershell
-npm run ci   # = npm run check && npm test
+npm run ci   # check + lint + test
 ```
 
-### Passer le serveur en clone git (une seule fois)
+> `npm run lint` n'existe que grâce à une **devDependency** (ESLint), donc absente du
+> serveur qui installe avec `--omit=dev`. C'est pourquoi `update.sh` se limite à
+> `npm run check` : y ajouter `npm run lint` casserait le déploiement.
 
-> Les données (`data/`, `.env`, `backup.env`, `bot.db`) sont gitignorées : le pull n'y touche jamais.
+## Cycle de travail
 
-1. **Crée un dépôt GitHub privé** (ex: `brawlhalla-rank-bot`).
-2. **Depuis ton PC**, dans le dossier du projet, pousse le code :
-   ```powershell
-   cd "c:\Users\ogsas\Downloads\a\brawlhalla-rank-bot"
-   git init
-   git add .
-   git commit -m "Initial"
-   git branch -M main
-   git remote add origin https://github.com/<toi>/brawlhalla-rank-bot.git
-   git push -u origin main
-   ```
-3. **Sur le serveur**, transforme l'install existante en clone git (sans perdre les données) :
-   ```bash
-   cd /root/brawlhalla-rank-bot
-   sudo git init
-   sudo git remote add origin https://github.com/<toi>/brawlhalla-rank-bot.git
-   sudo git fetch origin
-   sudo git reset --hard origin/main   # aligne le CODE sur le dépôt ; data/ .env intacts (gitignorés)
-   ```
+```
+modifier en local  →  npm run ci  →  git push  (la CI vérifie)  →  update.sh sur le serveur
+```
 
-### Mettre à jour le bot (désormais)
+Le dossier de prod étant un clone git, une seule commande suffit pour déployer :
 
-À la place du scp + cp, une seule commande sur le serveur :
 ```bash
-cd /root/brawlhalla-rank-bot && sudo bash update.sh
+sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
 ```
-`update.sh` fait : `git pull` → `npm install` → lint + tests (stoppe si rouge) → `npm run deploy` → `pm2 restart`.
 
-Cycle de travail : tu modifies en local → `npm run ci` → `git push` (CI vérifie) → sur le serveur `sudo bash update.sh`.
+`update.sh` enchaîne : `git pull` → `npm install --omit=dev` → `npm run check` + `npm test`
+(**s'arrête si c'est rouge**, donc pas de redémarrage sur du code cassé) → `npm run deploy`
+→ `sudo pm2 restart brawl-bot`.
+
+> Les données (`data/`, `.env`, `backup.env`) sont gitignorées : le pull n'y touche jamais.
+
+Après un déploiement qui modifie le dashboard, recharge le navigateur en **Ctrl+F5**
+(sinon `app.js` et `style.css` restent en cache).

@@ -51,8 +51,17 @@ Pour le dashboard web : recharger le navigateur en **Ctrl+F5** (nouveau `app.js`
 
 ## CI (avant de pousser)
 
-- En local : `npm run ci` (= `npm run check` + `npm test`).
+- En local : `npm run ci` (= `npm run check` + `npm run lint` + `npm test`).
 - GitHub Actions (`.github/workflows/ci.yml`) relance ça à chaque push/PR (coche verte avant de déployer).
+- `npm run lint` (ESLint) est une **devDependency** : absente du serveur (`npm install --omit=dev`).
+  C'est pourquoi `update.sh` se limite à `npm run check` — ne JAMAIS y ajouter `npm run lint`.
+
+## Documentation complète
+
+Ce fichier est le **mémo opérationnel** (les commandes à donner, rien de plus).
+La doc détaillée vit dans **`DEPLOY.md`** à la racine du dépôt : première installation,
+reverse proxy HTTPS, sauvegardes et restauration, surveillance externe `/health`.
+En cas de divergence entre les deux, `DEPLOY.md` fait référence.
 
 ## Si le chemin de prod semble introuvable
 
@@ -63,19 +72,20 @@ sudo pm2 info brawl-bot | grep -i "cwd\|script path"
 find / -type d -name "brawlhalla-rank-bot" 2>/dev/null
 ```
 
-## Méthode scp (LEGACY — uniquement si le clone git est cassé/absent)
+## Si le clone git est cassé
 
-Ne donner que si le git ne marche plus. Tampon : `/home/kaya/src/`.
-```powershell
-scp -r "c:\Users\ogsas\Downloads\a\brawlhalla-rank-bot\src" kaya@91.98.17.48:/home/kaya/
-```
+Le réparer sur place plutôt que de recopier des fichiers à la main :
 ```bash
-sudo cp -r /home/kaya/src/* /root/brawlhalla-rank-bot/src/
-sudo bash -c "cd /root/brawlhalla-rank-bot && npm run deploy"
-sudo pm2 restart brawl-bot
+sudo bash -c "cd /root/brawlhalla-rank-bot && git fetch origin && git reset --hard origin/main"
 ```
+> `git reset --hard` n'écrase QUE les fichiers suivis. `data/`, `.env` et `backup.env`
+> sont gitignorés : ils ne sont jamais touchés. Demander confirmation avant de la donner,
+> car elle jette les modifications locales non commitées du serveur.
 
 ## Ne JAMAIS faire
 
 - Ne pas écraser/copier `data/` ni `.env` en prod (détruit XP, liaisons, config).
 - Ne pas donner `/home/kaya/brawlhalla-rank-bot` comme dossier de prod (n'existe pas).
+- Ne pas proposer de `scp` : le dossier de prod est un clone git, `update.sh` suffit.
+- Ne pas confondre `install-server.sh` (première installation d'un serveur vierge,
+  une seule fois) et `update.sh` (toutes les mises à jour).

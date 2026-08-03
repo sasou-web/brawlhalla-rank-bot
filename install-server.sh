@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================
-#  Installation tout-en-un du bot sur un serveur (Hetzner, Ubuntu/Debian)
+#  PREMIERE installation du bot sur un serveur vierge (Ubuntu/Debian)
 # ============================================================
-#  A lancer DANS le dossier du projet, sur le serveur :
-#     bash deploy.sh
+#  A ne lancer QU'UNE FOIS, pour preparer un serveur neuf :
+#     sudo bash -c "cd /root/brawlhalla-rank-bot && bash install-server.sh"
+#
+#  Pour les mises a jour du quotidien, utiliser update.sh (git pull + lint +
+#  tests + deploy des commandes + restart). Ne PAS utiliser ce script-ci.
 #
 #  Le script :
 #   1. installe Node.js 20 + git (si absents)
