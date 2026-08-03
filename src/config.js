@@ -27,6 +27,40 @@ export const config = {
   reviewerRoleId: process.env.REVIEWER_ROLE_ID || "",
 };
 
+/**
+ * Normalise PUBLIC_URL. Ce doit etre la RACINE du dashboard (ex: https://dash.exemple.fr),
+ * PAS l'URL de callback : le serveur y ajoute lui-meme "/callback".
+ *
+ * L'erreur classique est d'y coller l'URL de redirection declaree dans le Developer
+ * Portal Discord. Resultat : un redirect_uri en ".../callback/callback", et Discord
+ * repond juste "redirect_uri OAuth2 non valide" — sans le moindre indice sur la cause.
+ * On corrige donc le cas, et on previent au demarrage.
+ */
+function normalizePublicUrl(raw) {
+  let url = String(raw || "").trim().replace(/\/+$/, "");
+  if (/\/callback$/i.test(url)) {
+    url = url.replace(/\/callback$/i, "");
+    console.warn(
+      `PUBLIC_URL se terminait par "/callback" : corrige en ${url}. ` +
+        "Mets la RACINE du dashboard dans le .env — le \"/callback\" n'est a declarer que " +
+        "dans le Developer Portal Discord.",
+    );
+  }
+  // Tout autre chemin residuel est suspect : le dashboard est servi a la racine.
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname !== "/" && parsed.pathname !== "") {
+      console.warn(
+        `PUBLIC_URL contient un chemin ("${parsed.pathname}"). Le dashboard est servi a la ` +
+          "racine du domaine : l'authentification Discord echouera probablement.",
+      );
+    }
+  } catch {
+    /* URL vide ou invalide : le dashboard ne demarrera pas, webConfig.enabled() s'en charge */
+  }
+  return url;
+}
+
 // Configuration du dashboard web (optionnel : actif seulement si CLIENT_SECRET est defini).
 export const webConfig = {
   port: Number(process.env.WEB_PORT || 3000),
@@ -36,7 +70,7 @@ export const webConfig = {
   host: process.env.WEB_HOST || "0.0.0.0",
   clientSecret: process.env.CLIENT_SECRET || "",
   // URL publique du dashboard (ex: https://dash.mondomaine.com). Sert a construire le redirect OAuth.
-  publicUrl: (process.env.PUBLIC_URL || "").replace(/\/+$/, ""),
+  publicUrl: normalizePublicUrl(process.env.PUBLIC_URL),
   // Secret pour signer les cookies de session (mets une longue chaine aleatoire).
   sessionSecret: process.env.SESSION_SECRET || "",
   enabled() {
