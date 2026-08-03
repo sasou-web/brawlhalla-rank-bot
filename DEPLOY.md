@@ -59,20 +59,66 @@ Le script `backup-data.sh` crée une archive locale **et** l'envoie vers un stoc
 **externe** (pour survivre à une perte du serveur). Configure la cible externe :
 
 ```bash
-cd /home/kaya/brawlhalla-rank-bot
-cp backup.env.example backup.env
-nano backup.env     # renseigne UNE cible : webhook Discord, rclone, ou scp
+cd /root/brawlhalla-rank-bot
+sudo cp backup.env.example backup.env
+sudo nano backup.env   # renseigne UNE cible : webhook Discord, rclone, ou scp
 ```
 
 Le plus simple : un **webhook Discord** (salon privé `#backups` → Intégrations → Webhooks →
-copier l'URL → la coller dans `BACKUP_WEBHOOK_URL`). L'archive `data/` est minuscule.
+copier l'URL → la coller dans `BACKUP_WEBHOOK_URL`).
 
-Puis automatise (cron quotidien à 4h) avec `crontab -e` :
+Puis automatise (cron quotidien à 4h) avec `sudo crontab -e` :
 ```
-0 4 * * * cd /home/kaya/brawlhalla-rank-bot && bash backup-data.sh >> backup.log 2>&1
+0 4 * * * cd /root/brawlhalla-rank-bot && bash backup-data.sh >> backup.log 2>&1
 ```
 
-Teste tout de suite : `bash backup-data.sh` (tu dois voir « Envoye au webhook Discord ✅ »).
+Teste tout de suite : `sudo bash backup-data.sh` (tu dois voir « Envoye au webhook Discord ✅ »).
+
+### Ce qui est sauvegardé (et pourquoi c'est léger)
+
+L'archive n'est **pas** `data/` brut mais un instantané allégé de `bot.db` :
+
+| Sauvegardé | Retiré de la copie (reconstructible depuis l'API) |
+|---|---|
+| `kv` (liaisons, réglages, configs, tournois) | `leaderboard` — miroir du classement Brawlhalla, ~40 000 lignes |
+| `xp`, `rating_history` | `profiles`, `searches` — caches de l'API |
+| `achievements`, `counters` | `pending` — file de récupération (7 j) |
+| `giveaways`, `giveaway_entries` | |
+
+À elle seule, la table `leaderboard` représentait l'essentiel des 14 Mo de la base. En la
+retirant, l'archive passe de **~6,7 Mo à ~330 Ko**. La taille suit désormais le nombre de
+membres, plus celle du ladder Brawlhalla — donc plus de risque de dépasser en silence la
+limite d'upload de 25 Mo de Discord.
+
+L'instantané est produit par `VACUUM INTO`, qui lit la base **sans arrêter le bot** et garantit
+un fichier cohérent. Un `PRAGMA integrity_check` est fait avant archivage : une base corrompue
+n'est jamais sauvegardée. En cas d'échec, une alerte est postée sur le webhook (un cron cassé
+ne passe plus inaperçu).
+
+`.env` n'est **jamais** sauvegardé (il contient le token du bot) — garde-le dans un
+gestionnaire de mots de passe.
+
+### Restaurer une sauvegarde
+
+```bash
+sudo pm2 stop brawl-bot
+cd /root/brawlhalla-rank-bot
+sudo mv data/bot.db data/bot.db.avant-restauration
+sudo rm -f data/bot.db-wal data/bot.db-shm
+sudo sh -c 'gunzip -c backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > data/bot.db'
+sudo pm2 start brawl-bot
+```
+
+⚠️ Le `rm` des fichiers `-wal` / `-shm` est **indispensable** : laissés en place, SQLite
+rejouerait l'ancien journal par-dessus la base restaurée. Les caches (classement, profils,
+recherches) se reconstruisent tout seuls dans les minutes qui suivent.
+
+Pour vérifier une archive **sans rien restaurer** :
+```bash
+gunzip -c backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > /tmp/verif.db
+sqlite3 /tmp/verif.db "PRAGMA integrity_check; SELECT COUNT(*) FROM kv;"
+rm /tmp/verif.db
+```
 
 ## Rappel important
 
