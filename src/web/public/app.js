@@ -118,6 +118,7 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   sparkles: '<path d="m12 3.5 1.7 4.6 4.6 1.7-4.6 1.7L12 16.1l-1.7-4.6-4.6-1.7 4.6-1.7L12 3.5Z"/><path d="m18.5 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>',
   command: '<path d="M6 9a3 3 0 1 1 3-3v12a3 3 0 1 1-3-3h12a3 3 0 1 1-3 3V6a3 3 0 1 1 3 3H6Z"/>',
+  swords: '<path d="M14.5 3H21v6.5"/><path d="M21 3 12 12"/><path d="m3.5 14.5 6 6-2.5 2.5-6-6 2.5-2.5Z"/><path d="M9.5 3H3v6.5"/><path d="m3 3 9 9"/><path d="m20.5 14.5-6 6 2.5 2.5 6-6-2.5-2.5Z"/>',
 };
 
 // Fabrique un élément SVG à partir du jeu d'icônes.
@@ -660,9 +661,18 @@ const NAV_GROUPS = [
       { id: "tickets", label: "Tickets", icon: "ticket", ico: "🎫", sub: "Panneau de support et salons privés", cfg: "tickets" },
     ],
   },
+  // Section dédiée à League of Legends : `theme: "lol"` applique une identité
+  // visuelle distincte (or hextech / bleu Rift) sur toutes ses pages.
+  {
+    label: "League of Legends",
+    theme: "lol",
+    items: [
+      { id: "lol", label: "Accueil & rôle", icon: "swords", ico: "🎮", sub: "Message quand le rôle LoL est attribué", cfg: "lol" },
+    ],
+  },
 ];
 
-const NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
+const NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label, theme: g.theme || null })));
 const pageOf = (id) => NAV.find((p) => p.id === id) || NAV[0];
 // Modules dont l'état activé/inactif est pilotable (pastille + grille de l'accueil).
 const TOGGLEABLE = NAV.filter((p) => p.cfg && p.cfg !== "settings" && p.cfg !== "linkpanel");
@@ -771,8 +781,12 @@ function renderNav() {
       (i) => !q || i.label.toLowerCase().includes(q) || (i.sub || "").toLowerCase().includes(q) || group.label.toLowerCase().includes(q),
     );
     if (!items.length) continue;
-    nav.append(el("div", { class: "nav-group" }, group.label));
-    for (const item of items) nav.append(makeItem(item));
+    nav.append(el("div", { class: "nav-group" + (group.theme ? " theme-" + group.theme : "") }, group.label));
+    for (const item of items) {
+      const btn = makeItem(item);
+      if (group.theme) btn.classList.add("theme-" + group.theme);
+      nav.append(btn);
+    }
     shown += items.length;
   }
   if (!shown) nav.append(el("div", { class: "nav-empty" }, "Aucune section ne correspond à « " + navFilter + " »."));
@@ -997,9 +1011,20 @@ function renderApp() {
     });
   }
 
+  // Thème propre à la section courante (ex. identité League of Legends).
+  applySectionTheme(pageOf(current).theme);
+
   renderNav();
   renderTopbar();
   renderSection(current);
+}
+
+// Applique/retire la classe de thème de section sur <body>. Les variables CSS
+// posées par cette classe l'emportent sur l'accent global (déclaré en inline
+// sur <html>), ce qui donne une identité visuelle propre à chaque univers.
+const SECTION_THEMES = ["lol"];
+function applySectionTheme(theme) {
+  for (const t of SECTION_THEMES) document.body.classList.toggle("theme-" + t, theme === t);
 }
 
 // ═══════════════════ 6. Schémas de configuration ═══════════════════
@@ -1171,7 +1196,93 @@ function sectionSchema(id, cfg) {
           ] },
         ],
       };
+    case "lol":
+      if (!cfg.embed) cfg.embed = {};
+      return {
+        ico: "🎮",
+        title: "Accueil & rôle LoL",
+        sub: "Quand un membre obtient le rôle League of Legends, le bot l'accueille dans le salon de la section.",
+        cards: [
+          { title: "Déclencheur", sub: "Le bot surveille l'ajout du rôle, peu importe la source : onboarding Discord, reaction-role ou attribution manuelle par le staff.", fields: [
+            ["Activé", "Active l'accueil automatique de la section LoL.", toggle(cfg, "enabled")],
+            ["Rôle League of Legends", "Le rôle qui déclenche le message d'accueil.", roleSelect(cfg, "roleId")],
+            ["Salon d'accueil", "Où poster le message (idéalement le salon de discussion LoL).", channelSelect(cfg, "channelId", "textann")],
+            ["Une seule fois par membre", "Évite de reposter si le rôle est retiré puis redonné.", toggle(cfg, "oncePerMember")],
+          ], extra: lolOnboardingHelp() },
+          { title: "Message", sub: "Format et contenu de l'accueil.", fields: [
+            ["Format", "Carte stylée, texte simple, ou les deux.", selectInput(cfg, "mode", [{ value: "embed", label: "Carte (embed)" }, { value: "text", label: "Texte" }, { value: "both", label: "Texte + carte" }])],
+            ["Mentionner le membre", "Ping le membre accueilli.", toggle(cfg, "pingUser")],
+            ["Message texte", "Utilisé si format Texte ou Texte + carte.", textareaInput(cfg, "text", "{user} vient de rejoindre la section LoL 🎮")],
+          ] },
+          { title: "Apparence de la carte", sub: "Utilisée pour les formats « Carte » et « Texte + carte ».", fields: [
+            ["Couleur", "Bordure de la carte.", colorInput(cfg.embed, "color")],
+            ["Titre", "", textInput(cfg.embed, "title", "🎮 Bienvenue sur la section LoL, {username} !")],
+            ["Description", "Markdown supporté.", textareaInput(cfg.embed, "description", "Ici tu peux parler de League of Legends…")],
+            ["Avatar du membre en miniature", "Affiche son avatar à droite du titre.", toggle(cfg.embed, "thumbnailUser")],
+            ["Image / bannière (URL)", "Grande image en bas de la carte.", textInput(cfg.embed, "image", "https://...")],
+            ["Pied de carte", "", textInput(cfg.embed, "footer", "{server} • Section LoL")],
+            ["Icône du serveur dans le pied", "", toggle(cfg.embed, "footerIcon")],
+          ] },
+          { title: "Variables disponibles", fields: [], extra: el("div", { class: "card-sub", style: "margin:0", html:
+            "<code>{user}</code> mention · <code>{username}</code> pseudo affiché · <code>{user.tag}</code> tag complet · " +
+            "<code>{server}</code> nom du serveur · <code>{membercount}</code> nombre de membres" }) },
+          { title: "Historique d'accueil", sub: "Liste des membres déjà accueillis, utilisée par l'option « une seule fois par membre ».", fields: [], extra: lolGreetedBox() },
+        ],
+      };
   }
+}
+
+// Rappel de la marche à suivre côté Discord : l'attribution du rôle via la question
+// d'onboarding se configure dans les paramètres du serveur, pas depuis le bot.
+function lolOnboardingHelp() {
+  const box = el("div", { class: "callout info", style: "cursor:default;margin:14px 0 0;align-items:flex-start" });
+  box.append(
+    el("span", { class: "co-ico" }, icon("alert", 18)),
+    el("div", { style: "font-weight:500;line-height:1.6" , html:
+      "<b>Côté Discord</b> — pour que la réponse « League of Legends » donne le rôle :<br>" +
+      "Paramètres du serveur → <b>Intégration</b> → <b>Onboarding</b> → ta question → " +
+      "coche le rôle LoL sur la réponse correspondante.<br>" +
+      "<span style=\"opacity:.85\">Le bot ne configure pas l'onboarding lui-même : il réagit à l'ajout du rôle. " +
+      "Tout ce qui donne ce rôle déclenchera donc l'accueil.</span>" }),
+  );
+  return box;
+}
+
+// Compteur de membres accueillis + réinitialisation.
+function lolGreetedBox() {
+  const wrap = el("div", { style: "width:100%" });
+  const info = el("div", { class: "card-sub", style: "margin:0 0 10px" }, "Chargement…");
+  const reset = el("button", { class: "tbtn danger" }, icon("refresh", 15), "Réinitialiser l'historique");
+
+  const load = async () => {
+    try {
+      const r = await api("/api/lol/greeted");
+      info.textContent = r.count
+        ? `${r.count} membre(s) déjà accueilli(s) — ils ne recevront plus le message.`
+        : "Aucun membre accueilli pour l'instant.";
+    } catch {
+      info.textContent = "Impossible de lire l'historique.";
+    }
+  };
+  reset.addEventListener("click", async () => {
+    if (!(await confirmModal(
+      "Réinitialiser l'historique d'accueil LoL ? Les membres qui ont déjà le rôle pourront être accueillis à nouveau lors d'un prochain ajout de rôle.",
+      { title: "Réinitialiser", okLabel: "Réinitialiser", danger: true },
+    ))) return;
+    reset.disabled = true;
+    try {
+      const r = await api("/api/lol/reset-greeted", "POST", {});
+      toast(r.message || "Historique réinitialisé", "ok");
+      await load();
+    } catch (e) {
+      toast("Erreur : " + e.message, "err");
+    }
+    reset.disabled = false;
+  });
+
+  load();
+  wrap.append(info, reset);
+  return wrap;
 }
 
 // ═══════════════════ 7. Rendu d'une section ═══════════════════
@@ -1270,6 +1381,12 @@ function renderSection(id) {
     secondary("Aperçu level up", "sparkles", async () => {
       await api("/api/levels/test", "POST", {});
       toast("Aperçu envoyé", "ok");
+    });
+  }
+  if (id === "lol") {
+    secondary("Envoyer un test", "sparkles", async () => {
+      await api("/api/lol/test", "POST", {});
+      toast("Message d'accueil envoyé dans le salon", "ok");
     });
   }
   if (id === "linkpanel") {

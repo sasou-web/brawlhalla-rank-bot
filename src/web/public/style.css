@@ -3373,3 +3373,102 @@ body.catgirl .login-neko {
 body.catgirl .login-card .logo {
   display: none;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   ⚔️ SECTION LEAGUE OF LEGENDS
+   Identité visuelle propre : or hextech + bleu Rift.
+   `body.theme-lol` est posée par applySectionTheme() quand la page
+   courante appartient au groupe LoL. Déclarée APRÈS le thème catgirl
+   pour que la section garde son identité même en mode catgirl.
+   Les items de nav du groupe portent `.theme-lol` en permanence, pour
+   qu'on repère la section même en étant ailleurs dans le dashboard.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ---- Palette de la section (sombre : ambiance client LoL) ---- */
+body.theme-lol {
+  --accent: #c8aa6e;
+  --accent-2: #0ac8b9;
+  --accent-grad: linear-gradient(135deg, #c8aa6e, #0ac8b9);
+  --accent-soft: rgba(200, 170, 110, 0.14);
+  --accent-ring: rgba(200, 170, 110, 0.3);
+  --bg-glow-1: rgba(200, 170, 110, 0.14);
+  --bg-glow-2: rgba(10, 200, 185, 0.1);
+  --shadow-accent: 0 8px 26px rgba(200, 170, 110, 0.3);
+
+  --bg: #05070d;
+  --surface: #0d1420;
+  --surface-2: #131c2b;
+  --surface-3: #1c283a;
+  --surface-hover: #16202f;
+  --border: #253449;
+  --border-strong: #3a5070;
+  --text: #f0e6d2;
+  --text-soft: #cdbe91;
+  --muted: #8b9ab0;
+}
+
+/* ---- Palette clair de la section ---- */
+body.theme-lol.light {
+  --accent: #a3833f;
+  --accent-2: #0a8f86;
+  --accent-grad: linear-gradient(135deg, #c8aa6e, #0a8f86);
+  --accent-soft: rgba(163, 131, 63, 0.12);
+  --accent-ring: rgba(163, 131, 63, 0.26);
+  --bg: #f3f1ea;
+  --surface: #ffffff;
+  --surface-2: #f6f4ec;
+  --surface-3: #ebe6d7;
+  --surface-hover: #f1eee3;
+  --border: #e3ddcc;
+  --border-strong: #c9c0a6;
+  --text: #1a2030;
+  --text-soft: #3b4354;
+  --muted: #6d7385;
+}
+
+/* Titre de la section dans la sidebar : liseré doré, toujours visible */
+.nav-group.theme-lol {
+  color: #c8aa6e;
+}
+.nav-group.theme-lol::after {
+  background: linear-gradient(to right, rgba(200, 170, 110, 0.5), transparent);
+}
+body.light .nav-group.theme-lol {
+  color: #8d6f31;
+}
+
+/* Items de nav de la section : pastille dorée même hors de la section */
+.nav-item.theme-lol .ico {
+  background: rgba(200, 170, 110, 0.12);
+  color: #c8aa6e;
+}
+.nav-item.theme-lol:hover .ico {
+  color: #e3c98f;
+}
+.nav-item.theme-lol.active .ico {
+  background: linear-gradient(135deg, #c8aa6e, #0ac8b9);
+  color: #05070d;
+}
+body.light .nav-item.theme-lol .ico {
+  color: #8d6f31;
+}
+
+/* En-tête de page de la section : pastille dorée */
+body.theme-lol .page-head .ph-ico {
+  background: linear-gradient(150deg, rgba(200, 170, 110, 0.22), transparent), var(--surface-2);
+  border-color: rgba(200, 170, 110, 0.4);
+}
+
+/* Cartes légèrement plus « client de jeu » : liseré doré au survol */
+body.theme-lol .card:hover {
+  border-color: rgba(200, 170, 110, 0.45);
+}
+
+/* Titre de page : petite majuscule dorée en surtitre */
+body.theme-lol .crumbs .cb-group {
+  color: #c8aa6e;
+  font-weight: 600;
+}
+body.light.theme-lol .crumbs .cb-group {
+  color: #8d6f31;
+}

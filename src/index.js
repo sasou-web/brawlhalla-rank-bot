@@ -29,6 +29,7 @@ import { handleClipMessage, handleClipReaction } from "./clips.js";
 import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
+import { handleLolRole } from "./lol.js";
 import { runWeeklyRecap } from "./progression.js";
 import { tournamentTick } from "./tournamentAutomation.js";
 import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
@@ -312,6 +313,32 @@ client.on(Events.GuildMemberAdd, async (member) => {
     }
   } catch (err) {
     console.warn("Erreur bienvenue :", err.message);
+  }
+
+  // Section LoL : certains membres arrivent déjà avec le rôle (onboarding appliqué
+  // au moment du join). On tente donc aussi l'accueil LoL dès l'arrivée.
+  try {
+    await handleLolRole(member, { previousRoleIds: [] });
+  } catch (err) {
+    console.warn("Erreur accueil LoL (arrivée) :", err.message);
+  }
+});
+
+// ---------- Section LoL : accueil quand le rôle LoL est attribué ----------
+// Couvre toutes les sources d'attribution : onboarding Discord, reaction-role,
+// ou ajout manuel par le staff. On transmet les rôles d'avant la mise à jour :
+// lol.js compare avec le rôle configuré pour n'accueillir qu'au vrai ajout.
+
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+  try {
+    const before = oldMember?.roles?.cache;
+    if (!before) return; // membre partiel : on ne peut pas comparer, on ignore
+    const previousRoleIds = [...before.keys()];
+    // Rien à faire si aucun rôle n'a été ajouté (pseudo, timeout, boost…).
+    if (newMember.roles.cache.every((_r, id) => before.has(id))) return;
+    await handleLolRole(newMember, { previousRoleIds });
+  } catch (err) {
+    console.warn("Erreur accueil LoL :", err.message);
   }
 });
 

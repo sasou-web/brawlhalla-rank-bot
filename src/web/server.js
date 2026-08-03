@@ -27,6 +27,7 @@ import {
 } from "../giveaway.js";
 import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
+import { getLolConfig, setLolConfig, buildLolWelcomePayload, resetGreeted, greetedCount } from "../lol.js";
 import { buildAnnouncePayload, dataUrlToAttachment } from "../announce.js";
 import {
   getTournament,
@@ -91,6 +92,7 @@ function buildSections(guildId) {
     tickets: { get: () => getTicketConfig(guildId), set: (b) => setTicketConfig(guildId, b) },
     giveaway: { get: () => getGiveawayConfig(guildId), set: (b) => setGiveawayConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
+    lol: { get: () => getLolConfig(guildId), set: (b) => setLolConfig(guildId, b) },
   };
 }
 
@@ -430,6 +432,42 @@ export function startWebServer(client) {
       const ch = await guild.channels.fetch(cfg.channelId);
       await ch.send(buildWelcomePayload(member, guild, cfg));
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Section LoL ----
+  // Apercu du message d'accueil LoL dans le salon configure (bouton Test du dashboard).
+  app.post("/api/lol/test", requireAdmin, async (req, res) => {
+    try {
+      const cfg = await getLolConfig(config.guildId);
+      if (!cfg.channelId) return res.status(400).json({ error: "Aucun salon d'accueil LoL défini." });
+      const guild = await client.guilds.fetch(config.guildId);
+      const member = await guild.members.fetch(req.session.id);
+      const ch = await guild.channels.fetch(cfg.channelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      await ch.send(buildLolWelcomePayload(member, guild, cfg));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Nombre de membres deja accueillis (anti-doublon).
+  app.get("/api/lol/greeted", requireAdmin, async (req, res) => {
+    try {
+      res.json({ count: await greetedCount(config.guildId) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Reinitialise l'historique d'accueil : tout le monde pourra etre accueilli a nouveau.
+  app.post("/api/lol/reset-greeted", requireAdmin, async (req, res) => {
+    try {
+      const n = await resetGreeted(config.guildId);
+      res.json({ ok: true, cleared: n, message: `Historique réinitialisé (${n} membre(s)).` });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
