@@ -183,7 +183,68 @@ Test-NetConnection -ComputerName <ip-du-serveur> -Port 443 -InformationLevel Qui
 > ```
 > Pense aussi au pare-feu de ton hébergeur (Hetzner Cloud Firewall), qui est distinct d'ufw.
 
-### 3. Caddy (le plus simple, HTTPS automatique)
+### 3a. Si nginx est DÉJÀ installé sur le serveur
+
+Vérifie avant toute chose — deux serveurs web ne peuvent pas écouter le même port, et Caddy
+refuserait de démarrer avec `bind: address already in use` :
+
+```bash
+sudo ss -tlnp '( sport = :80 or sport = :443 )'
+ls -l /etc/nginx/sites-enabled/
+sudo nginx -T 2>/dev/null | grep -E "server_name|proxy_pass|root " | sort -u
+```
+
+Si nginx sert déjà un site, **garde-le** et fais-en le reverse proxy du dashboard. Saute
+l'étape Caddy (3b).
+
+```bash
+sudo nano /etc/nginx/sites-available/dash.tondomaine.com
+```
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name dash.tondomaine.com;
+
+    # La page Annonces accepte des images jusqu'a 8 Mo, encodees en base64 (~11 Mo).
+    # Sans ca, nginx coupe a 1 Mo par defaut et l'upload echoue en 413.
+    client_max_body_size 15M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # INDISPENSABLE : le bot lit cet en-tete pour savoir qu'il est derriere du HTTPS.
+        # Sans lui, PUBLIC_URL en https provoque une boucle de redirection infinie.
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/dash.tondomaine.com /etc/nginx/sites-enabled/
+sudo nginx -t                 # doit dire "syntax is ok" / "test is successful"
+sudo systemctl reload nginx
+```
+
+Puis le certificat, via certbot (idempotent, ne casse rien s'il est déjà installé) :
+
+```bash
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d dash.tondomaine.com
+```
+
+Choisis la redirection HTTP→HTTPS quand certbot la propose. Il ajoute le bloc `listen 443
+ssl` et gère le renouvellement automatiquement.
+
+> Si Caddy a été installé avant de découvrir nginx, désactive-le pour qu'il n'essaie plus
+> de démarrer à chaque boot : `sudo systemctl disable --now caddy`.
+
+Passe ensuite directement à l'étape 4.
+
+### 3b. Caddy (si aucun serveur web n'occupe déjà 80/443)
 
 ```bash
 sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
