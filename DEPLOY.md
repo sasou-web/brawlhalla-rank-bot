@@ -153,7 +153,37 @@ l'OAuth. Mais le chiffrement TLS doit être assuré par un **reverse proxy** dev
 
 Fais pointer un domaine (ex: `dash.tondomaine.com`) vers l'IP du serveur (enregistrement A).
 
-### 2. Caddy (le plus simple, HTTPS automatique)
+Attends que la propagation soit faite avant de continuer — sinon Caddy échouera à obtenir
+le certificat. Depuis ton PC :
+
+```powershell
+nslookup dash.tondomaine.com
+```
+
+Tu dois voir l'IP de ton serveur. Compte de quelques minutes à une heure.
+
+### 2. Ouvrir les ports 80 et 443
+
+Caddy en a besoin : le **80** pour la validation Let's Encrypt, le **443** pour le HTTPS.
+Vérifie-les depuis ton PC :
+
+```powershell
+Test-NetConnection -ComputerName <ip-du-serveur> -Port 80  -InformationLevel Quiet
+Test-NetConnection -ComputerName <ip-du-serveur> -Port 443 -InformationLevel Quiet
+```
+
+> ⚠️ Si tu utilises ufw et qu'il est **inactif**, ne fais surtout pas `sudo ufw enable`
+> sans avoir autorisé SSH d'abord : la politique par défaut est « tout refuser en entrée »,
+> et tu te couperais l'accès au serveur. Dans cet ordre, jamais l'inverse :
+> ```bash
+> sudo ufw allow OpenSSH
+> sudo ufw allow 80
+> sudo ufw allow 443
+> sudo ufw enable
+> ```
+> Pense aussi au pare-feu de ton hébergeur (Hetzner Cloud Firewall), qui est distinct d'ufw.
+
+### 3. Caddy (le plus simple, HTTPS automatique)
 
 ```bash
 sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -174,12 +204,22 @@ dash.tondomaine.com {
 sudo systemctl reload caddy
 ```
 
-Caddy obtient et renouvelle le certificat Let's Encrypt tout seul.
+```bash
+sudo systemctl reload caddy
+sudo systemctl status caddy --no-pager     # doit être "active (running)"
+```
 
-### 3. Mettre à jour le .env
+Caddy obtient et renouvelle le certificat Let's Encrypt tout seul. En cas d'échec du
+certificat, la cause est presque toujours le DNS pas encore propagé ou le port 80 fermé :
 
 ```bash
-nano /root/brawlhalla-rank-bot/.env
+sudo journalctl -u caddy -n 40 --no-pager
+```
+
+### 4. Mettre à jour le .env
+
+```bash
+sudo nano /root/brawlhalla-rank-bot/.env
 ```
 - `PUBLIC_URL=https://dash.tondomaine.com`  (sans `:3000`, sans `/` final)
 - garde `WEB_PORT=3000`
@@ -191,13 +231,37 @@ Puis dans le **Discord Developer Portal → OAuth2 → Redirects**, ajoute
 sudo pm2 restart brawl-bot
 ```
 
-### 4. Fermer le port 3000 au public
+Le passage de `PUBLIC_URL` en `https` active automatiquement, côté code : le cookie de
+session en `secure`, l'en-tête HSTS et la redirection HTTP→HTTPS. Le message
+d'avertissement au démarrage doit disparaître (`sudo pm2 logs brawl-bot`).
 
-Le dashboard ne doit être joignable que par le proxy local. Avec ufw :
-```bash
-sudo ufw deny 3000
+### 5. Ne plus exposer le port 3000
+
+Le dashboard ne doit plus être joignable qu'à travers le proxy. **À faire seulement une
+fois que le HTTPS fonctionne**, sinon tu perds l'accès.
+
+Ajoute dans le `.env` :
+
 ```
-(Le proxy parle au bot via `127.0.0.1:3000`, donc ça reste fonctionnel.)
+WEB_HOST=127.0.0.1
+```
+
+```bash
+sudo pm2 restart brawl-bot
+```
+
+Le bot n'écoute alors plus que en local : le port 3000 devient injoignable depuis Internet,
+et Caddy continue de lui parler via `127.0.0.1:3000`. C'est préférable à une règle de
+pare-feu — aucun risque de se couper SSH au passage.
+
+Vérifie depuis ton PC (doit échouer) :
+```powershell
+Test-NetConnection -ComputerName <ip-du-serveur> -Port 3000 -InformationLevel Quiet
+```
+
+### 6. Mettre à jour la surveillance
+
+L'URL du moniteur UptimeRobot change : `https://dash.tondomaine.com/health`.
 
 ## Être alerté si le bot tombe (surveillance externe)
 

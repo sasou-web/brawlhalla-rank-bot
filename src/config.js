@@ -30,6 +30,10 @@ export const config = {
 // Configuration du dashboard web (optionnel : actif seulement si CLIENT_SECRET est defini).
 export const webConfig = {
   port: Number(process.env.WEB_PORT || 3000),
+  // Adresse d'ecoute. 0.0.0.0 = joignable depuis Internet (defaut historique).
+  // Derriere un reverse proxy HTTPS : 127.0.0.1, pour que le port ne soit plus
+  // expose publiquement sans avoir a modifier le pare-feu.
+  host: process.env.WEB_HOST || "0.0.0.0",
   clientSecret: process.env.CLIENT_SECRET || "",
   // URL publique du dashboard (ex: https://dash.mondomaine.com). Sert a construire le redirect OAuth.
   publicUrl: (process.env.PUBLIC_URL || "").replace(/\/+$/, ""),

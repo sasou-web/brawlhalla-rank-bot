@@ -1220,7 +1220,19 @@ export function startWebServer(client) {
   app.use(express.static(PUBLIC_DIR));
   app.get("*", (req, res) => res.sendFile(resolve(PUBLIC_DIR, "index.html")));
 
-  app.listen(webConfig.port, () => {
-    console.log(`Dashboard web sur ${webConfig.publicUrl} (port ${webConfig.port}).`);
+  // Adresse d'ecoute. Par defaut 0.0.0.0 (comportement historique : dashboard joignable
+  // directement sur http://<ip>:PORT). Derriere un reverse proxy HTTPS, mettre
+  // WEB_HOST=127.0.0.1 dans le .env : le port n'est alors plus joignable depuis
+  // Internet, sans avoir a toucher au pare-feu (donc aucun risque de se couper SSH).
+  app.listen(webConfig.port, webConfig.host, () => {
+    const scope = webConfig.host === "127.0.0.1" ? "local uniquement" : `ecoute ${webConfig.host}`;
+    console.log(`Dashboard web sur ${webConfig.publicUrl} (port ${webConfig.port}, ${scope}).`);
+    if (!webConfig.publicUrl.startsWith("https")) {
+      console.warn(
+        "ATTENTION : PUBLIC_URL n'est pas en https. Le cookie de session (acces admin, 24 h) " +
+          "circule EN CLAIR : n'importe qui sur le chemin reseau peut le capturer. " +
+          "Mets un reverse proxy HTTPS devant le bot (voir DEPLOY.md).",
+      );
+    }
   });
 }
