@@ -1,16 +1,18 @@
-# Brawlhalla Rank Bot — contexte projet
+# Xray Kaya (XK) Bot — contexte projet
 
 Infos à connaître dans toutes les sessions. (Le déploiement est dans `deploiement.md`.)
 
 ## Vue d'ensemble
 
-Bot Discord (Node.js, ESM, **discord.js v14**) pour un serveur Brawlhalla. Il attribue
-des rôles selon le rank Brawlhalla (1v1 / 2v2) et embarque plein de modules annexes
-(niveaux, tournois, TikTok, vocaux temporaires, etc.). Langue : **français** (réponses,
-messages du bot, commentaires).
+Bot Discord (Node.js, ESM, **discord.js v14**) du serveur **Xray Kaya**. Nom du projet :
+**Xray Kaya (XK) Bot** (anciennement « Brawlhalla Rank Bot » — le bot ne se limite plus
+à Brawlhalla). Dossier / paquet : `xray-kaya-bot`. Il attribue des rôles selon le rank
+Brawlhalla (1v1 / 2v2) et embarque tous les modules du serveur (niveaux, tournois,
+TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français**
+(réponses, messages du bot, commentaires).
 
 - API Brawlhalla **v1 publique** (`https://api.brawlhalla.com/v1`) — **aucune clé API**.
-- Node >= 18. Lancé en prod via **pm2** (process `brawl-bot`).
+- Node >= 18. Lancé en prod via **pm2** (process `xk-bot`).
 - Dépendances : discord.js, express, dotenv, cookie-parser, jsonwebtoken, @napi-rs/canvas (cartes profil).
 
 ## Démarrage / scripts

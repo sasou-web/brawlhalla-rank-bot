@@ -1,6 +1,10 @@
-# Brawlhalla Rank Bot
+# Xray Kaya (XK) Bot
 
-Bot Discord (Node.js / discord.js v14) qui attribue automatiquement des roles selon le rank Brawlhalla d'un membre, en **1v1** et **2v2**.
+Bot Discord (Node.js / discord.js v14) du serveur **Xray Kaya** : rôles de rank Brawlhalla,
+niveaux et récompenses, tournois, modération, tickets, vocaux temporaires et dashboard web.
+
+> Anciennement « Brawlhalla Rank Bot » : le bot couvre maintenant l'ensemble du serveur,
+> pas seulement Brawlhalla.
 
 ## Fonctionnement
 

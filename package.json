@@ -1,13 +1,14 @@
 {
-  "name": "brawlhalla-rank-bot",
+  "name": "xray-kaya-bot",
   "version": "1.0.0",
-  "description": "Bot Discord qui attribue automatiquement des roles selon le rank Brawlhalla (1v1 et 2v2).",
+  "description": "Xray Kaya (XK) Bot : bot Discord du serveur Xray Kaya (roles de rank Brawlhalla, niveaux, tournois, moderation, dashboard web).",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
     "check": "node scripts/check.js",
+    "icons": "node scripts/make-icons.js",
     "lint": "eslint .",
     "test": "node scripts/run-tests.js",
     "ci": "npm run check && npm run lint && npm test"

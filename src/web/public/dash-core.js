@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 1/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 1/10
    État global, helpers DOM, icônes SVG, thème, modales, sélecteurs
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

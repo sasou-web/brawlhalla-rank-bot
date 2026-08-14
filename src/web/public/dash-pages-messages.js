@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 8/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 8/10
    Aperçus d'embed Discord, bienvenue, annonces
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

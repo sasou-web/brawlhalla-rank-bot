@@ -7,14 +7,17 @@
 //   pm2 save
 //   pm2 startup     # suivre la commande affichee pour le demarrage au boot
 //
-// Logs :     pm2 logs brawl-bot
+// Logs :     pm2 logs xk-bot
 // Statut :   pm2 status
-// Restart :  pm2 restart brawl-bot
+// Restart :  pm2 restart xk-bot
+//
+// Le process s'appelait "brawl-bot" avant le renommage en Xray Kaya (XK) Bot :
+// update.sh et install-server.sh gerent la bascule automatiquement.
 
 module.exports = {
   apps: [
     {
-      name: "brawl-bot",
+      name: "xk-bot",
       script: "src/index.js",
       // Redemarre si le process plante, mais evite une boucle infinie de crash.
       autorestart: true,

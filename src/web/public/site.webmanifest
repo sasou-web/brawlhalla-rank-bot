@@ -1,0 +1,16 @@
+{
+  "name": "Xray Kaya (XK) Bot — Dashboard",
+  "short_name": "XK Bot",
+  "description": "Dashboard d'administration du bot Discord du serveur Xray Kaya.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#041b1a",
+  "theme_color": "#041b1a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

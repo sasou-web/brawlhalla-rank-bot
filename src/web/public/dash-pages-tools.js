@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 6/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 6/10
    Pages outils : seeding start.gg, base de combos
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

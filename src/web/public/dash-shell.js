@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 3/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 3/10
    Navigation, topbar, routing par hash, palette Ctrl+K, renderApp
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

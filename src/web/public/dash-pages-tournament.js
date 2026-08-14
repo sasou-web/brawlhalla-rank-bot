@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 9/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 9/10
    Tournoi : formulaire, pilotage, bracket, librairie
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

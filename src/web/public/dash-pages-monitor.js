@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 5/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 5/10
    Pages de pilotage : accueil, statistiques, logs, fiabilité API, rôles, vocaux par rank
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

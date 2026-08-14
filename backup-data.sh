@@ -23,17 +23,17 @@
 #
 #  Lancer manuellement :  sudo bash backup-data.sh
 #  Automatiser (cron quotidien a 4h), avec `sudo crontab -e` :
-#    0 4 * * * cd /root/brawlhalla-rank-bot && bash backup-data.sh >> backup.log 2>&1
+#    0 4 * * * cd /root/xray-kaya-bot && bash backup-data.sh >> backup.log 2>&1
 #
 # ---------------------------------------------------------------------------
 #  RESTAURATION  (chemins ABSOLUS : `cd /root/...` echoue pour l'utilisateur kaya)
 # ---------------------------------------------------------------------------
-#   D=/root/brawlhalla-rank-bot
-#   sudo pm2 stop brawl-bot
+#   D=/root/xray-kaya-bot
+#   sudo pm2 stop xk-bot
 #   sudo mv $D/data/bot.db $D/data/bot.db.avant-restauration
 #   sudo rm -f $D/data/bot.db-wal $D/data/bot.db-shm       # <-- INDISPENSABLE
 #   sudo bash -c "gunzip -c $D/backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > $D/data/bot.db"
-#   sudo pm2 start brawl-bot
+#   sudo pm2 start xk-bot
 #
 #   Le retrait de bot.db-wal / bot.db-shm est critique : laisses en place, ils
 #   seraient rejoues par SQLite par-dessus la base restauree.
@@ -49,8 +49,8 @@
 #  Variables a mettre dans un fichier "backup.env" a cote de ce script
 #  (voir backup.env.example). Active UNE OU PLUSIEURS cibles :
 #    BACKUP_WEBHOOK_URL   : webhook Discord (salon prive) -> upload de l'archive
-#    BACKUP_RCLONE_REMOTE : remote rclone, ex: "b2:mon-bucket/brawlbot"
-#    BACKUP_SCP_DEST      : destination scp, ex: "user@autreserveur:/backups/brawlbot"
+#    BACKUP_RCLONE_REMOTE : remote rclone, ex: "b2:mon-bucket/xk-bot"
+#    BACKUP_SCP_DEST      : destination scp, ex: "user@autreserveur:/backups/xk-bot"
 #
 #  NOTE : .env (token Discord) n'est volontairement JAMAIS sauvegarde ici --
 #  garde-le dans un gestionnaire de mots de passe.

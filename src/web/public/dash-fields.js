@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 2/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 2/10
    En-têtes de page, champs de formulaire et éditeurs réutilisables
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.

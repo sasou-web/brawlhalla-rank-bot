@@ -3,7 +3,7 @@
 #  PREMIERE installation du bot sur un serveur vierge (Ubuntu/Debian)
 # ============================================================
 #  A ne lancer QU'UNE FOIS, pour preparer un serveur neuf :
-#     sudo bash -c "cd /root/brawlhalla-rank-bot && bash install-server.sh"
+#     sudo bash -c "cd /root/xray-kaya-bot && bash install-server.sh"
 #
 #  Pour les mises a jour du quotidien, utiliser update.sh (git pull + lint +
 #  tests + deploy des commandes + restart). Ne PAS utiliser ce script-ci.
@@ -62,7 +62,10 @@ npm run deploy
 
 # --- 6. Demarrage 24/7 avec pm2 ---
 echo "==> Demarrage du bot avec pm2..."
-pm2 start ecosystem.config.cjs --update-env || pm2 restart brawl-bot --update-env
+# Nettoie l'ancien nom de process ("brawl-bot", avant le renommage en Xray Kaya)
+# pour eviter que le bot tourne en double.
+pm2 delete brawl-bot > /dev/null 2>&1 || true
+pm2 start ecosystem.config.cjs --update-env || pm2 restart xk-bot --update-env
 pm2 save
 
 echo ""
@@ -73,7 +76,7 @@ pm2 save
 echo ""
 echo "============================================================"
 echo " Termine. Le bot tourne maintenant 24/7."
-echo "   Voir les logs :   pm2 logs brawl-bot"
+echo "   Voir les logs :   pm2 logs xk-bot"
 echo "   Voir le statut :  pm2 status"
-echo "   Redemarrer :      pm2 restart brawl-bot"
+echo "   Redemarrer :      pm2 restart xk-bot"
 echo "============================================================"

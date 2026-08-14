@@ -5,8 +5,42 @@ Le bot ne nécessite **aucun port entrant** (connexion sortante vers Discord). G
 > **Déjà installé ?** Va directement à [Mettre à jour le bot](#mettre-à-jour-le-bot-plus-tard).
 > Les étapes ci-dessous ne servent qu'à la **première installation** d'un serveur vierge.
 
-Le dossier de production est **`/root/brawlhalla-rank-bot`** et le process pm2 s'appelle
-**`brawl-bot`**. Comme tout vit sous `/root`, les commandes serveur passent par `sudo`.
+Le dossier de production est **`/root/xray-kaya-bot`** et le process pm2 s'appelle
+**`xk-bot`**. Comme tout vit sous `/root`, les commandes serveur passent par `sudo`.
+
+> **Serveur installé avant le renommage ?** Il tourne encore sous `/root/brawlhalla-rank-bot`
+> avec le process pm2 `brawl-bot`. Voir [Renommage : aligner le serveur](#renommage--aligner-le-serveur).
+> Tant que la migration n'est pas faite, remplace `xray-kaya-bot` par `brawlhalla-rank-bot`
+> dans les chemins ci-dessous. `update.sh` bascule le process pm2 tout seul.
+
+## Renommage : aligner le serveur
+
+Le projet s'appelait « Brawlhalla Rank Bot » (dossier `brawlhalla-rank-bot`, process pm2
+`brawl-bot`). Pour aligner un serveur déjà installé, une seule fois :
+
+```bash
+# 1. Arrêter le bot et renommer le dossier de prod
+sudo pm2 stop brawl-bot
+sudo mv /root/brawlhalla-rank-bot /root/xray-kaya-bot
+
+# 2. Tirer le code renommé et redémarrer (update.sh remplace brawl-bot par xk-bot)
+sudo bash -c "cd /root/xray-kaya-bot && bash update.sh"
+
+# 3. Vérifier, puis figer la liste pm2
+sudo pm2 status          # doit lister "xk-bot" en ligne, plus de "brawl-bot"
+sudo pm2 save
+```
+
+Si tu renommes aussi le dépôt GitHub (`brawlhalla-rank-bot` → `xray-kaya-bot`), GitHub
+redirige l'ancienne URL : le `git pull` du serveur continue de fonctionner. Pour mettre
+l'URL à jour proprement :
+
+```bash
+sudo bash -c "cd /root/xray-kaya-bot && git remote set-url origin https://github.com/<toi>/xray-kaya-bot.git"
+```
+
+Pense aussi à renommer la crontab de sauvegarde si tu en as une (`sudo crontab -e`) : le
+chemin `/root/brawlhalla-rank-bot` y apparaît.
 
 ## Étape 1 — Se connecter au serveur
 
@@ -17,20 +51,20 @@ ssh <utilisateur>@<ip-du-serveur>
 ## Étape 2 — Cloner le projet
 
 ```bash
-sudo git clone https://github.com/<toi>/brawlhalla-rank-bot.git /root/brawlhalla-rank-bot
+sudo git clone https://github.com/<toi>/xray-kaya-bot.git /root/xray-kaya-bot
 ```
 
 ## Étape 3 — Préparer le .env
 
 ```bash
-sudo cp /root/brawlhalla-rank-bot/.env.example /root/brawlhalla-rank-bot/.env
-sudo nano /root/brawlhalla-rank-bot/.env   # DISCORD_TOKEN, CLIENT_ID, GUILD_ID
+sudo cp /root/xray-kaya-bot/.env.example /root/xray-kaya-bot/.env
+sudo nano /root/xray-kaya-bot/.env   # DISCORD_TOKEN, CLIENT_ID, GUILD_ID
 ```
 
 ## Étape 4 — Tout installer et démarrer (une seule commande)
 
 ```bash
-sudo bash -c "cd /root/brawlhalla-rank-bot && bash install-server.sh"
+sudo bash -c "cd /root/xray-kaya-bot && bash install-server.sh"
 ```
 
 `install-server.sh` installe Node et pm2, installe les dépendances, enregistre les slash
@@ -43,18 +77,18 @@ commands, démarre le bot 24/7 et configure le redémarrage au boot.
 
 ```bash
 sudo pm2 status
-sudo pm2 logs brawl-bot      # tu dois voir "Connecte en tant que ..."
+sudo pm2 logs xk-bot      # tu dois voir "Connecte en tant que ..."
 ```
 
 ## Mettre à jour le bot plus tard
 
-Le dossier de prod est un clone git sous `/root/brawlhalla-rank-bot`. Pour déployer une mise à jour, pousse ton code sur GitHub puis, sur le serveur :
+Le dossier de prod est un clone git sous `/root/xray-kaya-bot`. Pour déployer une mise à jour, pousse ton code sur GitHub puis, sur le serveur :
 
 ```bash
-sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
+sudo bash -c "cd /root/xray-kaya-bot && bash update.sh"
 ```
 
-`update.sh` enchaîne : `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart brawl-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
+`update.sh` enchaîne : `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart xk-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
 
 ## Sauvegardes automatiques des données (XP, liaisons)
 
@@ -62,7 +96,7 @@ Le script `backup-data.sh` crée une archive locale **et** l'envoie vers un stoc
 **externe** (pour survivre à une perte du serveur). Configure la cible externe :
 
 ```bash
-cd /root/brawlhalla-rank-bot
+cd /root/xray-kaya-bot
 sudo cp backup.env.example backup.env
 sudo nano backup.env   # renseigne UNE cible : webhook Discord, rclone, ou scp
 ```
@@ -72,7 +106,7 @@ copier l'URL → la coller dans `BACKUP_WEBHOOK_URL`).
 
 Puis automatise (cron quotidien à 4h) avec `sudo crontab -e` :
 ```
-0 4 * * * cd /root/brawlhalla-rank-bot && bash backup-data.sh >> backup.log 2>&1
+0 4 * * * cd /root/xray-kaya-bot && bash backup-data.sh >> backup.log 2>&1
 ```
 
 Teste tout de suite : `sudo bash backup-data.sh` (tu dois voir « Envoye au webhook Discord ✅ »).
@@ -106,7 +140,7 @@ gestionnaire de mots de passe.
 À faire au moins une fois : une sauvegarde jamais vérifiée est une hypothèse, pas une garantie.
 
 ```bash
-sudo bash -c 'A=$(ls -1t /root/brawlhalla-rank-bot/backups/bot_*.db.gz | head -1); echo "Archive : $A"; gunzip -c "$A" > /tmp/verif.db'
+sudo bash -c 'A=$(ls -1t /root/xray-kaya-bot/backups/bot_*.db.gz | head -1); echo "Archive : $A"; gunzip -c "$A" > /tmp/verif.db'
 sudo sqlite3 /tmp/verif.db "PRAGMA integrity_check;"
 sudo sqlite3 -header -column /tmp/verif.db "SELECT (SELECT COUNT(*) FROM kv) AS kv, (SELECT COUNT(*) FROM xp) AS xp, (SELECT COUNT(*) FROM rating_history) AS ratings, (SELECT COUNT(*) FROM leaderboard) AS leaderboard;"
 sudo rm -f /tmp/verif.db
@@ -123,12 +157,12 @@ vérifie toujours que les compteurs de lignes sont cohérents.
 ### Restaurer une sauvegarde
 
 ```bash
-sudo pm2 stop brawl-bot
-sudo mv /root/brawlhalla-rank-bot/data/bot.db /root/brawlhalla-rank-bot/data/bot.db.avant-restauration
-sudo rm -f /root/brawlhalla-rank-bot/data/bot.db-wal /root/brawlhalla-rank-bot/data/bot.db-shm
-sudo bash -c 'gunzip -c /root/brawlhalla-rank-bot/backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > /root/brawlhalla-rank-bot/data/bot.db'
-sudo pm2 start brawl-bot
-sudo pm2 logs brawl-bot --lines 20
+sudo pm2 stop xk-bot
+sudo mv /root/xray-kaya-bot/data/bot.db /root/xray-kaya-bot/data/bot.db.avant-restauration
+sudo rm -f /root/xray-kaya-bot/data/bot.db-wal /root/xray-kaya-bot/data/bot.db-shm
+sudo bash -c 'gunzip -c /root/xray-kaya-bot/backups/bot_AAAA-MM-JJ_HH-MM-SS.db.gz > /root/xray-kaya-bot/data/bot.db'
+sudo pm2 start xk-bot
+sudo pm2 logs xk-bot --lines 20
 ```
 
 ⚠️ Le `rm` des fichiers `-wal` / `-shm` est **indispensable** : laissés en place, SQLite
@@ -280,7 +314,7 @@ sudo journalctl -u caddy -n 40 --no-pager
 ### 4. Mettre à jour le .env
 
 ```bash
-sudo nano /root/brawlhalla-rank-bot/.env
+sudo nano /root/xray-kaya-bot/.env
 ```
 - `PUBLIC_URL=https://dash.tondomaine.com`  (sans `:3000`, sans `/` final)
 - garde `WEB_PORT=3000`
@@ -289,12 +323,12 @@ Puis dans le **Discord Developer Portal → OAuth2 → Redirects**, ajoute
 `https://dash.tondomaine.com/callback`.
 
 ```bash
-sudo pm2 restart brawl-bot
+sudo pm2 restart xk-bot
 ```
 
 Le passage de `PUBLIC_URL` en `https` active automatiquement, côté code : le cookie de
 session en `secure`, l'en-tête HSTS et la redirection HTTP→HTTPS. Le message
-d'avertissement au démarrage doit disparaître (`sudo pm2 logs brawl-bot`).
+d'avertissement au démarrage doit disparaître (`sudo pm2 logs xk-bot`).
 
 ### 5. Ne plus exposer le port 3000
 
@@ -308,7 +342,7 @@ WEB_HOST=127.0.0.1
 ```
 
 ```bash
-sudo pm2 restart brawl-bot
+sudo pm2 restart xk-bot
 ```
 
 Le bot n'écoute alors plus que en local : le port 3000 devient injoignable depuis Internet,
@@ -403,12 +437,12 @@ modifier en local  →  npm run ci  →  git push  (la CI vérifie)  →  update
 Le dossier de prod étant un clone git, une seule commande suffit pour déployer :
 
 ```bash
-sudo bash -c "cd /root/brawlhalla-rank-bot && bash update.sh"
+sudo bash -c "cd /root/xray-kaya-bot && bash update.sh"
 ```
 
 `update.sh` enchaîne : `git pull` → `npm install --omit=dev` → `npm run check` + `npm test`
 (**s'arrête si c'est rouge**, donc pas de redémarrage sur du code cassé) → `npm run deploy`
-→ `sudo pm2 restart brawl-bot`.
+→ `sudo pm2 restart xk-bot`.
 
 > Les données (`data/`, `.env`, `backup.env`) sont gitignorées : le pull n'y touche jamais.
 

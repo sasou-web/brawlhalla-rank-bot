@@ -26,9 +26,18 @@ echo "==> Enregistrement des slash commands..."
 npm run deploy
 
 echo "==> Redemarrage du bot..."
-pm2 restart brawl-bot
+# Le process pm2 s'appelait "brawl-bot" avant le renommage en Xray Kaya (XK) Bot.
+# Si l'ancien nom tourne encore, on bascule proprement vers "xk-bot".
+if pm2 describe xk-bot > /dev/null 2>&1; then
+  pm2 restart xk-bot
+else
+  echo "    (bascule du process pm2 vers 'xk-bot')"
+  pm2 delete brawl-bot > /dev/null 2>&1 || true
+  pm2 start ecosystem.config.cjs
+  pm2 save
+fi
 
 echo ""
 echo "============================================================"
-echo " Mise a jour terminee. Logs : pm2 logs brawl-bot"
+echo " Mise a jour terminee. Logs : pm2 logs xk-bot"
 echo "============================================================"

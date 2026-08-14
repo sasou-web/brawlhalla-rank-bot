@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray BrawlBot — Dashboard · fichier 4/10
+   Xray Kaya (XK) Bot — Dashboard · fichier 4/10
    Schémas de configuration déclaratifs et rendu générique d'une section
    ────────────────────────────────────────────────────────────────────────
    ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.
