@@ -24,7 +24,7 @@ import { closeDb } from "./db.js";
 import { setSetting } from "./settings.js";
 import { warmProfiles, syncLeaderboard, getIndexStats, retryPending } from "./brawlhalla.js";
 import { getLevelConfig, setLevelConfig, setReward } from "./levels.js";
-import { pollGuild as pollTikTok, getTikTokConfig } from "./tiktok.js";
+import { tickTikTok } from "./tiktok.js";
 import { handleClipMessage, handleClipReaction } from "./clips.js";
 import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
@@ -218,28 +218,13 @@ client.once(Events.ClientReady, async (c) => {
   every(recapTick, 60 * 60 * 1000);
   recapTick();
 
-  // Notifications TikTok : verifie les nouvelles videos a intervalle regulier.
-  const pollTikTokGuild = async () => {
-    try {
-      const cfg = await getTikTokConfig(guild.id);
-      if (!cfg.enabled) return;
-      const r = await pollTikTok(client, guild.id);
-      if (r.posted) console.log(`TikTok : ${r.posted} nouvelle(s) video(s) postee(s).`);
-    } catch (err) {
-      console.warn("Poll TikTok echoue :", err.message);
-    }
-  };
-  // Tick toutes les minutes, mais ne sonde reellement qu'a l'intervalle configure.
-  let tiktokTick = 0;
-  every(async () => {
-    const cfg = await getTikTokConfig(guild.id).catch(() => null);
-    if (!cfg?.enabled) return;
-    tiktokTick++;
-    if (tiktokTick >= Math.max(1, cfg.pollIntervalMin)) {
-      tiktokTick = 0;
-      await pollTikTokGuild();
-    }
-  }, 60 * 1000);
+  // Notifications TikTok : tick toutes les 30 s, le module ne lit réellement TikTok qu'à
+  // l'intervalle configuré (défaut 2 min), gère ses pauses en cas d'erreur et alerte le
+  // salon d'alertes si la lecture reste impossible plus d'une heure.
+  const tiktokTick = () =>
+    tickTikTok(client, guild.id, { notify: notifyAdmin }).catch((err) => console.warn("Poll TikTok échoué :", err.message));
+  every(tiktokTick, 30 * 1000);
+  tiktokTick();
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

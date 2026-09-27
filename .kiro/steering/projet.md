@@ -43,7 +43,8 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 - **bracketImage.js** — rendu visuel du bracket en image PNG via `@napi-rs/canvas` (commande `/bracket`).
 - **tempvoice.js** — salons vocaux temporaires ("rejoindre pour créer").
 - **rankvoice.js** — salons vocaux par rank (accès restreint selon le tier).
-- **tiktok.js** — notifications TikTok via flux RSS.
+- **tiktok.js** — notifications TikTok. Config (`kv.tiktok`, clés whitelistées) séparée de l'état (`kv.tiktokState` : IDs vidéo déjà vus, santé des sources) : le dashboard ne peut plus écraser l'état. Tick 30 s, lecture à `pollIntervalMin` (défaut 2), amorçage silencieux à la 1ʳᵉ lecture d'une source, plusieurs nouveautés = un seul message, pause progressive + alerte (`notifyAdmin`) après 1 h d'échec. `planPost` = décision pure (testée).
+- **tiktokSource.js** — lecture des sources TikTok sans dépendance : embed officiel `tiktok.com/embed/@compte` (principal, ~10 dernières vidéos + épinglées) et flux RSS de secours (dépôt `sasou-web/tiktok-rss-flat`). `videoIdTime` = heure d'**upload** encodée dans l'ID (≠ publication pour une vidéo programmée).
 - **clips.js** — réactions auto + modération des clips.
 - **guessrank.js** — jeu "devine le rang".
 - **welcome.js** — messages de bienvenue/au revoir + auto-rôles. Exporte `applyVars`, réutilisé par `lol.js`.
@@ -60,7 +61,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 
 | Irremplaçable (sauvegardé) | Reconstructible depuis l'API (exclu des sauvegardes) |
 |---|---|
-| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
+| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
 | `xp`, `rating_history`, `achievements`, `counters` | `profiles`, `searches` (caches API, TTL 15 min) |
 | `giveaways`, `giveaway_entries` | `pending` (file de récupération, 7 j) |
 
@@ -76,7 +77,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 ## Tests
 
 - Runner natif **`node:test`** (aucune dépendance). Lancer : `npm test` — jamais `node --test` directement, le runner isole la base via `BOT_DB_PATH` pour ne pas toucher `data/bot.db`.
-- **147 tests** dans `test/`. Les plus sensibles : `tournament.bracket.test.js` (seeding, byes, progression, podium — un bug s'y manifeste pendant un tournoi en direct), `giveaway.test.js` (`parseDuration`, `drawWinners`), `messagevars.test.js` (`applyVars` + `allowedMentions`, partagés Bienvenue/LoL).
+- **160 tests** dans `test/`. Les plus sensibles : `tournament.bracket.test.js` (seeding, byes, progression, podium — un bug s'y manifeste pendant un tournoi en direct), `giveaway.test.js` (`parseDuration`, `drawWinners`), `messagevars.test.js` (`applyVars` + `allowedMentions`, partagés Bienvenue/LoL).
 - Les modules qui importent `config.js` exigent des variables d'env au chargement : les tests les fixent en factice (`process.env.X ||= "test"`) avant un `import()` dynamique.
 - Lancer les tests **avant chaque déploiement** comme filet de sécurité.
 

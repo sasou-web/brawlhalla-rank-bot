@@ -82,14 +82,14 @@ function sectionSchema(id, cfg) {
       return {
         ico: "📱",
         title: "Notifications TikTok",
-        sub: "Poste automatiquement les nouvelles vidéos d'un compte via son flux RSS.",
+        sub: "Annonce chaque nouvelle vidéo d'un compte, lue directement sur TikTok (plusieurs vidéos d'un coup = un seul message).",
         cards: [
-          { title: "Source", sub: "Le compte à suivre et la fréquence de vérification.", fields: [
+          { title: "Source", sub: "Le compte à suivre et la fréquence de vérification. État détaillé des sources : /setup-tiktok sur Discord.", fields: [
             ["Activé", "", toggle(cfg, "enabled")],
-            ["URL du flux RSS", "Généré par rss.app, GitHub Pages, etc.", textInput(cfg, "feedUrl", "https://...")],
-            ["Pseudo affiché", "Sans le @.", textInput(cfg, "username", "kayagoldforged")],
-            ["Photo de profil (URL)", "Affichée à côté du pseudo.", textInput(cfg, "avatarUrl", "https://...")],
-            ["Intervalle (min)", "Fréquence de vérification (min. 2).", numberInput(cfg, "pollIntervalMin", 2)],
+            ["Compte TikTok", "Pseudo du compte à suivre, sans le @ (ou lien du profil). Source principale, quasi temps réel.", textInput(cfg, "account", "kayagoldforged")],
+            ["Flux RSS de secours", "Optionnel. Utilisé seulement si TikTok ne répond pas (plus lent).", textInput(cfg, "feedUrl", "https://...")],
+            ["Nom affiché", "Remplace {pseudo} dans l'annonce. Vide = nom du profil TikTok.", textInput(cfg, "username", "Kaya GF")],
+            ["Intervalle (min)", "Fréquence de vérification (1 à 1440, défaut 2).", numberInput(cfg, "pollIntervalMin", 1, 1440)],
           ] },
           { title: "Publication", sub: "Où et comment la vidéo est annoncée.", fields: [
             ["Salon", "Où poster les vidéos.", channelSelect(cfg, "channelId", "text")],
