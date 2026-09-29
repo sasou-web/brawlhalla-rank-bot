@@ -9,6 +9,7 @@
     "deploy": "node src/deploy-commands.js",
     "check": "node scripts/check.js",
     "icons": "node scripts/make-icons.js",
+    "dash:mock": "node scripts/dash-mock.js",
     "lint": "eslint .",
     "test": "node scripts/run-tests.js",
     "ci": "npm run check && npm run lint && npm test"

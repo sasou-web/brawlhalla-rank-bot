@@ -1,455 +1,832 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray Kaya (XK) Bot — Dashboard · fichier 3/10
-   Navigation, topbar, routing par hash, palette Ctrl+K, renderApp
+   Xray Kaya (XK) Bot — Dashboard · coquille
+   Navigation, routage par hash, rendu de page, onglets de page, palette
+   de commandes, menu du compte, démarrage, connexion, session et réseau.
    ────────────────────────────────────────────────────────────────────────
-   ⚠️ SCRIPT CLASSIQUE, PAS un module ES — et l'ORDRE DE CHARGEMENT COMPTE.
+   Script classique (voir l'en-tête de dash-core.js).
 
-   Pourquoi pas de modules ES : catgirl.js se greffe sur des fonctions
-   globales (toast, renderApp, renderOverview, showLogin). Passer en modules
-   les rendrait inaccessibles et casserait la surcouche.
-
-   Comment ça tient : les déclarations `function` deviennent des propriétés
-   globales (donc appelables depuis n'importe quel fichier, et remplaçables
-   par catgirl.js), et les `let`/`const` de premier niveau vivent dans
-   l'environnement lexical global, partagé entre tous les scripts classiques.
-   Un fichier ne peut donc lire les `const` que des fichiers chargés AVANT lui.
-
-   L'ordre est fixé dans index.html. `boot()` est appelé en dernier, depuis
-   dash-boot.js, une fois tous les fichiers évalués.
+   Architecture d'information : 16 pages en 5 groupes, organisées par tâche.
+   Les anciennes adresses (#/stats, #/logs, #/startgg…) sont redirigées vers
+   leur nouvel emplacement (ROUTE_ALIASES).
    ════════════════════════════════════════════════════════════════════════ */
 
 "use strict";
-// ═══════════════════ 5. Navigation, topbar & routing ═══════════════════
-/*
-  Organisation des sections par intention plutôt que par module technique :
-    Pilotage         → observer (état, stats, santé API, logs)
-    Liaison & rangs  → le cœur du bot : lier un compte, valider, distribuer les rôles
-    Engagement       → faire vivre la communauté (XP, accueil, concours, jeux)
-    Contenu          → ce que le bot publie (annonces, rappels, TikTok, clips, combos)
-    Vocal            → tout ce qui touche aux salons vocaux
-    Compétition      → tournois et seeding
-    Support          → tickets
-  `cfg` pointe vers la clé de CONFIG dont le champ `enabled` pilote la pastille d'état.
-*/
+
+// ═══════════════════ 1. Navigation ═══════════════════
 const NAV_GROUPS = [
   {
-    label: "Pilotage",
+    label: null,
+    items: [{ id: "overview", label: "Vue d'ensemble", icon: "dashboard", keywords: "accueil santé statistiques", render: (ctx) => renderOverview(ctx.root) }],
+  },
+  {
+    label: "Modération",
     items: [
-      { id: "overview", label: "Vue d'ensemble", icon: "home", ico: "📊", sub: "État du bot et raccourcis" },
-      { id: "stats", label: "Statistiques", icon: "chart", ico: "📈", sub: "Comptes liés, XP, répartition par tier" },
-      { id: "metrics", label: "Fiabilité API", icon: "pulse", ico: "📡", sub: "Santé de l'API Brawlhalla en direct" },
-      { id: "logs", label: "Logs en direct", icon: "terminal", ico: "📜", sub: "Dernières actions du bot" },
+      {
+        id: "wordfilter",
+        label: "Filtre de mots",
+        icon: "message-x",
+        keywords: "censure mots interdits insultes grossièretés automod filtre modération",
+        tabs: [
+          { id: "terms", label: "Termes" },
+          { id: "sanctions", label: "Sanctions" },
+          { id: "exceptions", label: "Exceptions" },
+          { id: "history", label: "Historique" },
+        ],
+        wide: true,
+        render: (ctx) => renderWordFilter(ctx),
+      },
+      {
+        id: "tickets",
+        label: "Tickets",
+        icon: "ticket",
+        keywords: "support staff motifs",
+        tabs: [
+          { id: "config", label: "Configuration" },
+          { id: "panel", label: "Panneau" },
+          { id: "ticket", label: "Salon de ticket" },
+        ],
+        render: (ctx) => renderTickets(ctx),
+      },
     ],
   },
   {
-    label: "Liaison & rangs",
+    label: "Contenu",
     items: [
-      { id: "linkpanel", label: "Panneau de liaison", icon: "link", ico: "🔗", sub: "Cadre + bouton « Lier mon compte »", cfg: "linkpanel" },
-      { id: "settings", label: "Validation & salons", icon: "shield", ico: "🛡️", sub: "Salons système, auto-validation, preuves", cfg: "settings" },
-      { id: "roles", label: "Rôles de rank", icon: "refresh", ico: "🔄", sub: "Resynchroniser tous les membres liés" },
+      { id: "tiktok", label: "TikTok", icon: "music", wide: true, keywords: "vidéos notifications compte annonce", render: (ctx) => renderTikTok(ctx) },
+      { id: "announce", label: "Annonces", icon: "megaphone", wide: true, keywords: "message embed publier", render: (ctx) => renderAnnounce(ctx) },
+      { id: "reminders", label: "Rappels", icon: "bell", keywords: "messages récurrents", render: (ctx) => renderReminders(ctx) },
+      {
+        id: "clips",
+        label: "Clips",
+        icon: "film",
+        keywords: "réactions devine ton rang vidéos",
+        tabs: [
+          { id: "reactions", label: "Réactions automatiques" },
+          { id: "guessrank", label: "Devine ton rang" },
+        ],
+        render: (ctx) => renderClips(ctx),
+      },
+      { id: "combos", label: "Combos", icon: "flame", keywords: "brawldatabase true combos armes", render: (ctx) => renderCombos(ctx) },
     ],
   },
   {
-    label: "Engagement",
+    label: "Événements",
     items: [
-      { id: "levels", label: "Niveaux", icon: "star", ico: "⭐", sub: "XP, paliers et rôles de récompense", cfg: "levels" },
-      { id: "welcome", label: "Bienvenue", icon: "userplus", ico: "👋", sub: "Accueil, auto-rôle et au revoir", cfg: "welcome" },
-      { id: "giveaway", label: "Giveaways", icon: "gift", ico: "🎉", sub: "Concours et tirages au sort", cfg: "giveaway" },
-      { id: "guessrank", label: "Devine ton rang", icon: "medal", ico: "🏅", sub: "Votes par réactions de rank", cfg: "guessrank" },
+      {
+        id: "tournament",
+        label: "Tournois",
+        icon: "trophy",
+        wide: true,
+        keywords: "bracket inscriptions check-in seeding",
+        tabs: [
+          { id: "current", label: "Tournoi en cours" },
+          { id: "archives", label: "Archives" },
+          { id: "startgg", label: "Seeding start.gg" },
+        ],
+        render: (ctx) => renderTournament(ctx),
+      },
+      {
+        id: "giveaway",
+        label: "Giveaways",
+        icon: "gift",
+        keywords: "concours tirage gagnants",
+        tabs: [
+          { id: "contests", label: "Concours" },
+          { id: "settings", label: "Réglages" },
+        ],
+        render: (ctx) => renderGiveaway(ctx),
+      },
     ],
   },
   {
-    label: "Contenu & annonces",
+    label: "Communauté",
     items: [
-      { id: "announce", label: "Annonces", icon: "megaphone", ico: "📢", sub: "Composer et publier un message" },
-      { id: "reminders", label: "Rappels auto", icon: "bell", ico: "🔔", sub: "Messages récurrents dans un salon", cfg: "reminders" },
-      { id: "tiktok", label: "TikTok", icon: "music", ico: "📱", sub: "Notifications des nouvelles vidéos", cfg: "tiktok" },
-      { id: "clips", label: "Clips", icon: "film", ico: "🎬", sub: "Réactions automatiques et modération", cfg: "clips" },
-      { id: "combos", label: "Combos", icon: "flame", ico: "🥊", sub: "Base de true combos BrawlDatabase" },
+      {
+        id: "linking",
+        label: "Liaison & rangs",
+        icon: "link",
+        keywords: "lier compte brawlhalla validation rôles rank",
+        tabs: [
+          { id: "validation", label: "Validation" },
+          { id: "panel", label: "Panneau de liaison" },
+        ],
+        render: (ctx) => renderLinking(ctx),
+      },
+      { id: "levels", label: "Niveaux", icon: "star", keywords: "xp récompenses paliers", render: (ctx) => renderLevels(ctx) },
+      {
+        id: "welcome",
+        label: "Accueil",
+        icon: "user-plus",
+        keywords: "bienvenue arrivée départ au revoir auto-rôle",
+        tabs: [
+          { id: "arrival", label: "Arrivée" },
+          { id: "goodbye", label: "Départ" },
+          { id: "autorole", label: "Auto-rôle" },
+        ],
+        render: (ctx) => renderWelcome(ctx),
+      },
+      {
+        id: "voice",
+        label: "Vocaux",
+        icon: "headphones",
+        keywords: "vocal salons temporaires hubs rank",
+        tabs: [
+          { id: "temp", label: "Salons temporaires" },
+          { id: "rank", label: "Salons par rank" },
+        ],
+        render: (ctx) => renderVoice(ctx),
+      },
+      { id: "lol", label: "League of Legends", icon: "swords", theme: "lol", keywords: "lol accueil rôle", render: (ctx) => renderLol(ctx) },
     ],
   },
   {
-    label: "Vocal",
+    label: "Système",
     items: [
-      { id: "tempvoice", label: "Vocaux temporaires", icon: "volume", ico: "🔊", sub: "Rejoindre un hub pour créer un salon", cfg: "tempvoice" },
-      { id: "vocrank", label: "Vocaux par rank", icon: "mic", ico: "🎙️", sub: "Un salon vocal par tier, accès vérifié" },
-    ],
-  },
-  {
-    label: "Compétition",
-    items: [
-      { id: "tournament", label: "Tournoi", icon: "trophy", ico: "🏆", sub: "Inscriptions, bracket et scores" },
-      { id: "startgg", label: "Seeding start.gg", icon: "sprout", ico: "🌱", sub: "Seeder un événement start.gg" },
-    ],
-  },
-  {
-    label: "Support",
-    items: [
-      { id: "tickets", label: "Tickets", icon: "ticket", ico: "🎫", sub: "Panneau de support et salons privés", cfg: "tickets" },
-    ],
-  },
-  // Section dédiée à League of Legends : `theme: "lol"` applique une identité
-  // visuelle distincte (or hextech / bleu Rift) sur toutes ses pages.
-  {
-    label: "League of Legends",
-    theme: "lol",
-    items: [
-      { id: "lol", label: "Accueil & rôle", icon: "swords", ico: "🎮", sub: "Message quand le rôle LoL est attribué", cfg: "lol" },
+      {
+        id: "system",
+        label: "Santé & journal",
+        icon: "activity",
+        keywords: "api fiabilité métriques logs journal",
+        tabs: [
+          { id: "api", label: "Fiabilité API" },
+          { id: "logs", label: "Journal" },
+        ],
+        render: (ctx) => renderSystem(ctx),
+      },
+      { id: "settings", label: "Paramètres", icon: "settings", keywords: "salons audit alertes succès thème apparence", render: (ctx) => renderSettings(ctx) },
     ],
   },
 ];
 
-const NAV = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label, theme: g.theme || null })));
-const pageOf = (id) => NAV.find((p) => p.id === id) || NAV[0];
-// Modules dont l'état activé/inactif est pilotable (pastille + grille de l'accueil).
-const TOGGLEABLE = NAV.filter((p) => p.cfg && p.cfg !== "settings" && p.cfg !== "linkpanel");
-const isEnabled = (p) => !!(p.cfg && CONFIG[p.cfg] && CONFIG[p.cfg].enabled);
+const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.label })));
 
-// ----- Boot -----
-async function boot() {
-  applyTheme(localStorage.getItem("bh_theme") || "dark");
-  applyAccent(localStorage.getItem("bh_accent") || "violet");
-  const err = new URLSearchParams(location.search).get("error");
-  try {
-    ME = await api("/api/me");
-  } catch {
-    return showLogin(err);
-  }
-  if (!ME.isAdmin) return showLogin("notadmin");
-  try {
-    [GUILD, CONFIG] = await Promise.all([api("/api/guild"), api("/api/config")]);
-  } catch (e) {
-    return showLogin(err || "oauth");
-  }
-  const fromHash = pageIdFromHash();
-  if (fromHash) current = fromHash;
-  renderApp();
+// Anciennes adresses → nouvel emplacement [page, onglet].
+const ROUTE_ALIASES = {
+  stats: ["overview", null],
+  metrics: ["system", "api"],
+  logs: ["system", "logs"],
+  linkpanel: ["linking", "panel"],
+  roles: ["linking", null],
+  vocrank: ["voice", "rank"],
+  tempvoice: ["voice", "temp"],
+  guessrank: ["clips", "guessrank"],
+  startgg: ["tournament", "startgg"],
+};
+
+function navItem(id) {
+  return NAV_ITEMS.find((i) => i.id === id) || NAV_ITEMS[0];
 }
 
-function showLogin(err) {
-  $("#loading").style.display = "none";
-  $("#login").style.display = "flex";
-  if (err && errorMessages[err]) {
-    const b = $("#login-error");
-    b.textContent = errorMessages[err];
-    b.style.display = "block";
+function renderNav() {
+  const nav = document.getElementById("nav");
+  if (!nav) return;
+  clearNode(nav);
+  for (const g of NAV_GROUPS) {
+    const labelId = g.label ? uid("navg") : null;
+    const list = el("ul", { class: "nav-list", role: "list", "aria-labelledby": labelId });
+    for (const it of g.items) {
+      const a = el("a", { class: "nav-link" + (it.theme ? " theme-" + it.theme : ""), href: "#/" + it.id, "aria-current": ROUTE.page === it.id ? "page" : null }, icon(it.icon, 16), el("span", { class: "nav-label" }, it.label));
+      const attn = navAttention(it.id);
+      if (attn) a.append(attn);
+      list.append(el("li", {}, a));
+    }
+    nav.append(el("div", { class: "nav-group" }, g.label ? el("div", { class: "nav-group-label", id: labelId }, g.label) : null, list));
   }
 }
 
-// ----- Routing par hash (#/levels) : liens partageables + retour navigateur -----
-function pageIdFromHash() {
-  const id = (location.hash || "").replace(/^#\/?/, "");
-  return NAV.some((p) => p.id === id) ? id : null;
-}
-
-async function navigateTo(id, { fromHash = false } = {}) {
-  if (id === current) return true;
-  if (dirty && !(await confirmModal(
-    "Tu as des modifications non enregistrées. Changer de section quand même ?",
-    { okLabel: "Quitter sans enregistrer", danger: true },
-  ))) {
-    if (fromHash) setHash(current);
-    return false;
+function navAttention(id) {
+  if (id === "tournament" && ATTN.disputes > 0) {
+    return el("span", { class: "badge badge-warn", "aria-label": plural(ATTN.disputes, "litige à trancher", "litiges à trancher") }, String(ATTN.disputes));
   }
-  setDirty(false);
-  current = id;
-  navFilter = "";
-  if (!fromHash) setHash(id);
-  closeSidebar();
-  renderApp();
-  window.scrollTo(0, 0);
-  return true;
+  if (id === "tiktok" && (ATTN.tiktok === "degraded" || ATTN.tiktok === "down")) {
+    const label = ATTN.tiktok === "down" ? "TikTok : aucune source lisible" : "TikTok : surveillance dégradée";
+    return el("span", { class: "nav-dot" + (ATTN.tiktok === "down" ? " danger" : ""), role: "img", "aria-label": label, "data-tip": label, "data-tip-pos": "right" });
+  }
+  if (id === "system" && ATTN.api !== "ok") {
+    const label = ATTN.api === "down" ? "API Brawlhalla perturbée" : "API Brawlhalla dégradée";
+    return el("span", { class: "nav-dot" + (ATTN.api === "down" ? " danger" : ""), role: "img", "aria-label": label, "data-tip": label, "data-tip-pos": "right" });
+  }
+  return null;
 }
 
-function setHash(id) {
-  const target = "#/" + id;
-  if (location.hash === target) return;
-  suppressHash = true;
+function setAttention(patch) {
+  const before = JSON.stringify(ATTN);
+  Object.assign(ATTN, patch);
+  if (JSON.stringify(ATTN) !== before) renderNav();
+}
+
+function apiHealthLevel(m) {
+  if (!m || !m.meaningful) return "ok";
+  if (m.successRate < 0.6) return "down";
+  if (m.successRate < 0.9 || m.cooldownActiveMs > 0) return "degraded";
+  return "ok";
+}
+
+// Indicateurs de navigation chargés en arrière-plan au démarrage.
+async function loadAttention() {
+  const [t, m, tt] = await Promise.allSettled([api("/api/tournament"), api("/api/metrics"), api("/api/tiktok/status")]);
+  const patch = {};
+  if (t.status === "fulfilled") patch.disputes = t.value ? Object.values(t.value.matches || {}).filter((x) => x.status === "dispute").length : 0;
+  if (m.status === "fulfilled") patch.api = apiHealthLevel(m.value);
+  if (tt.status === "fulfilled") patch.tiktok = tiktokHealth(CONFIG.tiktok, tt.value).level;
+  setAttention(patch);
+}
+
+// ═══════════════════ 2. Routage ═══════════════════
+function parseHash() {
+  const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
+  let page = parts[0] || "overview";
+  let tab = parts[1] || null;
+  if (ROUTE_ALIASES[page]) {
+    const [p, t] = ROUTE_ALIASES[page];
+    page = p;
+    tab = tab || t;
+  }
+  if (!NAV_ITEMS.some((i) => i.id === page)) page = "overview";
+  const item = navItem(page);
+  if (tab && !(item.tabs || []).some((t) => t.id === tab)) tab = null;
+  return { page, tab };
+}
+
+function routeHash(r) {
+  return "#/" + r.page + (r.tab ? "/" + r.tab : "");
+}
+
+// Navigation applicative : passe par le hash (historique du navigateur).
+function navigate(page, tab = null) {
+  const target = routeHash({ page, tab });
+  if (location.hash === target) {
+    if (ROUTE.page !== page || ROUTE.tab !== tab) onHashChange();
+    return;
+  }
   location.hash = target;
 }
 
-function openSidebar() {
-  $("#sidebar").classList.add("open");
-  $("#scrim").classList.add("show");
+async function confirmLeave() {
+  return confirmDialog({
+    title: "Modifications non enregistrées",
+    message: "Tu as des modifications non enregistrées sur cette page. Les abandonner ?",
+    confirmLabel: "Abandonner les modifications",
+    cancelLabel: "Rester sur la page",
+    danger: true,
+  });
 }
-function closeSidebar() {
-  $("#sidebar").classList.remove("open");
-  $("#scrim").classList.remove("show");
-}
 
-// ----- Sidebar : navigation filtrable -----
-function renderNav() {
-  const nav = $("#nav");
-  nav.innerHTML = "";
-  const q = navFilter.trim().toLowerCase();
-
-  const makeItem = (item) => {
-    const btn = el("button", {
-      class: "nav-item" + (item.id === current ? " active" : ""),
-      "aria-current": item.id === current ? "page" : null,
-      title: item.sub || item.label,
-      onclick: () => navigateTo(item.id),
-    },
-      el("span", { class: "ico" }, icon(item.icon, 16)),
-      el("span", { class: "nav-label" }, item.label));
-    if (item.cfg && item.cfg !== "settings" && item.cfg !== "linkpanel") {
-      const on = isEnabled(item);
-      btn.append(el("span", {
-        class: "nav-state" + (on ? " on" : ""),
-        title: on ? "Module activé" : "Module inactif",
-      }));
-    }
-    return btn;
-  };
-
-  let shown = 0;
-  for (const group of NAV_GROUPS) {
-    const items = group.items.filter(
-      (i) => !q || i.label.toLowerCase().includes(q) || (i.sub || "").toLowerCase().includes(q) || group.label.toLowerCase().includes(q),
-    );
-    if (!items.length) continue;
-    nav.append(el("div", { class: "nav-group" + (group.theme ? " theme-" + group.theme : "") }, group.label));
-    for (const item of items) {
-      const btn = makeItem(item);
-      if (group.theme) btn.classList.add("theme-" + group.theme);
-      nav.append(btn);
-    }
-    shown += items.length;
+async function onHashChange() {
+  const next = parseHash();
+  if (next.page === ROUTE.page && next.tab === ROUTE.tab) return;
+  if (hasUnsavedChanges() && !(await confirmLeave())) {
+    history.replaceState(null, "", routeHash(ROUTE));
+    return;
   }
-  if (!shown) nav.append(el("div", { class: "nav-empty" }, "Aucune section ne correspond à « " + navFilter + " »."));
-}
-
-// ----- Topbar : fil d'Ariane, recherche, thème, palette de couleurs -----
-function renderTopbar() {
-  const bar = $("#topbar");
-  bar.innerHTML = "";
-  const p = pageOf(current);
-
-  const burger = el("button", { class: "menu-toggle", "aria-label": "Ouvrir le menu", onclick: openSidebar }, icon("menu", 19));
-
-  const crumbs = el("div", { class: "crumbs" },
-    el("span", { class: "cb-group" }, p.group),
-    el("span", { class: "cb-sep" }, icon("chevron", 13)),
-    el("span", { class: "cb-cur" }, p.label));
-
-  const search = el("button", { class: "tb-search", title: "Recherche rapide (Ctrl+K)", onclick: () => openPalette() },
-    icon("search", 15), el("span", {}, "Rechercher…"), el("kbd", {}, "Ctrl K"));
-
-  const isLight = document.body.classList.contains("light");
-  const themeBtn = el("button", {
-    class: "tb-icon theme-toggle",
-    title: isLight ? "Passer en mode sombre" : "Passer en mode clair",
-    "aria-label": "Changer de thème",
-    onclick: () => { applyTheme(isLight ? "dark" : "light"); renderTopbar(); },
-  }, icon(isLight ? "moon" : "sun", 18));
-
-  // Palette de couleurs d'accent dans un popover.
-  const popWrap = el("div", { class: "pop-wrap" });
-  const pop = el("div", { class: "pop" }, el("div", { class: "pop-title" }, "Couleur d'accent"));
-  const accentRow = el("div", { class: "accent-row" });
-  const currentAccent = localStorage.getItem("bh_accent") || "violet";
-  for (const [name, preset] of Object.entries(ACCENT_PRESETS)) {
-    accentRow.append(el("button", {
-      class: "accent-dot" + (name === currentAccent ? " sel" : ""),
-      title: name,
-      "aria-label": "Accent " + name,
-      style: `background:linear-gradient(135deg, ${preset.a}, ${preset.b})`,
-      onclick: () => { applyAccent(name); renderTopbar(); },
-    }));
+  ROUTE = next;
+  closeSidebar();
+  renderRoute();
+  window.scrollTo(0, 0);
+  const h = $("#content .page-title");
+  if (h) {
+    h.tabIndex = -1;
+    h.focus({ preventScroll: true });
   }
-  pop.append(accentRow);
-  const paletteBtn = el("button", {
-    class: "tb-icon",
-    title: "Couleur d'accent",
-    "aria-label": "Couleur d'accent",
-    "aria-expanded": "false",
-    onclick: (e) => {
-      e.stopPropagation();
-      const open = pop.classList.toggle("open");
-      paletteBtn.setAttribute("aria-expanded", String(open));
-    },
-  }, icon("droplet", 18));
-  popWrap.append(paletteBtn, pop);
-  // La fermeture au clic extérieur est gérée par un unique écouteur global
-  // posé dans renderApp (voir `appHooked`) pour éviter d'empiler des listeners.
-
-  const guild = el("div", { class: "tb-guild", title: GUILD.name });
-  guild.append(
-    GUILD.icon ? el("img", { src: GUILD.icon, alt: "" }) : el("span", { class: "tg-fallback" }, "🎮"),
-    el("span", {}, GUILD.name),
-  );
-
-  bar.append(burger, crumbs, el("div", { class: "topbar-spacer" }),
-    el("div", { class: "topbar-actions" }, search, themeBtn, popWrap, guild));
 }
 
-// ----- Palette de commandes (Ctrl+K) -----
-function openPalette() {
-  if ($(".cmdk")) return;
-  const overlay = el("div", { class: "cmdk", role: "dialog", "aria-modal": "true" });
-  const input = el("input", { type: "text", placeholder: "Aller à une section, changer de thème…", "aria-label": "Recherche" });
-  const list = el("div", { class: "cmdk-list" });
-  const close = () => {
-    document.removeEventListener("keydown", onKey);
-    overlay.classList.remove("show");
-    setTimeout(() => overlay.remove(), 180);
+// ═══════════════════ 3. Rendu de page ═══════════════════
+let PAGE = null; // { id, root, ctx, cleanups, token }
+
+function renderRoute() {
+  if (PAGE) for (const fn of PAGE.cleanups) {
+    try {
+      fn();
+    } catch {
+      /* nettoyage best-effort */
+    }
+  }
+  closePopover();
+  hideTip();
+  FORMS = [];
+  WATCHERS = [];
+  updateSaveBar();
+
+  const item = navItem(ROUTE.page);
+  const content = document.getElementById("content");
+  clearNode(content);
+  const root = el("div", { class: "page" + (item.wide ? " page-wide" : "") });
+  content.append(root);
+
+  // Adresse canonique (anciens liens #/logs → #/system/logs), sans nouvelle entrée d'historique.
+  if (location.hash !== routeHash(ROUTE)) history.replaceState(null, "", location.pathname + location.search + routeHash(ROUTE));
+
+  const token = {};
+  PAGE = { id: item.id, root, cleanups: [], token };
+  const ctx = {
+    page: item.id,
+    root,
+    tab: ROUTE.tab,
+    alive: () => !!PAGE && PAGE.token === token,
+    onCleanup: (fn) => PAGE.cleanups.push(fn),
+    setTab: (tab) => {
+      ROUTE.tab = tab;
+      ctx.tab = tab;
+      history.replaceState(null, "", routeHash(ROUTE));
+    },
+    // Intervalle arrêté à la sortie de la page et suspendu onglet masqué.
+    interval: (fn, ms) => {
+      const t = setInterval(() => {
+        if (ctx.alive() && !document.hidden) fn();
+      }, ms);
+      PAGE.cleanups.push(() => clearInterval(t));
+      return t;
+    },
   };
+  PAGE.ctx = ctx;
 
-  // Commandes = sections + actions globales.
-  const commands = NAV.map((p) => ({
-    kind: p.group,
-    icon: p.icon,
-    name: p.label,
-    hint: p.sub,
-    run: () => navigateTo(p.id),
-  }));
-  commands.push(
-    {
-      kind: "Apparence", icon: "sun", name: "Basculer le thème clair / sombre", hint: "Thème",
-      run: () => { applyTheme(document.body.classList.contains("light") ? "dark" : "light"); renderTopbar(); },
-    },
-    {
-      kind: "Apparence", icon: "droplet", name: "Couleur d'accent suivante", hint: "Accent",
-      run: () => {
-        const keys = Object.keys(ACCENT_PRESETS);
-        const i = keys.indexOf(localStorage.getItem("bh_accent") || "violet");
-        applyAccent(keys[(i + 1) % keys.length]);
-        renderTopbar();
-      },
-    },
-    { kind: "Compte", icon: "logout", name: "Se déconnecter", hint: "Quitter le dashboard", run: () => (location.href = "/logout") },
+  document.body.classList.toggle("theme-lol", item.theme === "lol");
+  document.title = `${item.label} · Xray Kaya`;
+  const mt = document.getElementById("mobile-title");
+  if (mt) mt.textContent = item.label;
+  renderNav();
+  try {
+    item.render(ctx);
+  } catch (e) {
+    console.error(e);
+    root.append(inlineError("Cette page n'a pas pu s'afficher : " + e.message, () => rerenderPage()));
+  }
+  afterChange();
+}
+
+function rerenderPage() {
+  const y = window.scrollY;
+  renderRoute();
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
+// En-tête de page : titre, contexte, actions (une seule primaire).
+function pageHeader({ title, description, actions = [], hasTabs = false } = {}) {
+  return el(
+    "header",
+    { class: "page-header" + (hasTabs ? " has-tabs" : "") },
+    el("div", { class: "ph-text" }, el("h1", { class: "page-title" }, title), description ? el("p", { class: "page-desc" }, description) : null),
+    actions.filter(Boolean).length ? el("div", { class: "page-actions" }, ...actions.filter(Boolean)) : null,
   );
+}
 
-  let matches = commands;
-  let sel = 0;
-
+/**
+ * Onglets de page (définis dans NAV_GROUPS). renderPanel(tabId, panel, scope)
+ * reconstruit uniquement le panneau ; les brouillons de la page sont conservés.
+ * items : surcharge facultative (compteurs, alertes).
+ */
+function pageTabs(ctx, renderPanel, { items, host = ctx.root } = {}) {
+  const list = (items || navItem(ctx.page).tabs || []).filter(Boolean);
+  let active = list.some((t) => t.id === ctx.tab) ? ctx.tab : list[0].id;
+  const panelEl = el("div", { class: "tab-panel", role: "tabpanel", id: "tabpanel", tabindex: "-1" });
+  let scope = [];
+  const runCleanups = () => {
+    for (const fn of scope) {
+      try {
+        fn();
+      } catch {
+        /* best-effort */
+      }
+    }
+    scope = [];
+  };
   const draw = () => {
-    list.innerHTML = "";
-    const q = input.value.trim().toLowerCase();
-    matches = commands.filter(
-      (c) => !q || c.name.toLowerCase().includes(q) || (c.hint || "").toLowerCase().includes(q) || c.kind.toLowerCase().includes(q),
-    );
-    if (!matches.length) {
-      list.append(el("div", { class: "empty-row", style: "margin:8px" }, "Aucun résultat."));
-      return;
-    }
-    if (sel >= matches.length) sel = matches.length - 1;
-    let lastKind = null;
-    matches.forEach((c, i) => {
-      if (c.kind !== lastKind) { list.append(el("div", { class: "cmdk-group" }, c.kind)); lastKind = c.kind; }
-      const opt = el("button", {
-        class: "cmdk-opt" + (i === sel ? " sel" : ""),
-        onmouseenter: () => { sel = i; paint(); },
-        onclick: () => { close(); c.run(); },
+    runCleanups();
+    closePopover();
+    clearNode(panelEl);
+    panelEl.setAttribute("aria-labelledby", "tab-" + active);
+    renderPanel(active, panelEl, {
+      onCleanup: (fn) => scope.push(fn),
+      interval: (fn, ms) => {
+        const t = setInterval(() => {
+          if (ctx.alive() && !document.hidden) fn();
+        }, ms);
+        scope.push(() => clearInterval(t));
       },
-        el("span", { class: "ico" }, icon(c.icon, 15)),
-        el("span", { class: "co-name" }, c.name),
-        c.hint ? el("span", { class: "co-hint" }, c.hint) : null);
-      opt.dataset.idx = String(i);
-      list.append(opt);
     });
+    afterChange();
+  };
+  ctx.onCleanup(runCleanups);
+  const bar = tabBar(list, active, (id) => {
+    active = id;
+    ctx.setTab(id);
+    draw();
+  });
+  host.append(bar, panelEl);
+  draw();
+  return { bar, panel: panelEl, redraw: draw, get active() { return active; } };
+}
+
+// ═══════════════════ 4. Barre latérale (mobile) ═══════════════════
+function openSidebar() {
+  const sb = document.getElementById("sidebar");
+  sb.classList.add("open");
+  document.getElementById("scrim").hidden = false;
+  document.getElementById("nav-toggle").setAttribute("aria-expanded", "true");
+  const current = sb.querySelector('[aria-current="page"]') || sb.querySelector("a, button");
+  if (current) current.focus();
+}
+
+function closeSidebar() {
+  const sb = document.getElementById("sidebar");
+  if (!sb || !sb.classList.contains("open")) return;
+  sb.classList.remove("open");
+  document.getElementById("scrim").hidden = true;
+  const t = document.getElementById("nav-toggle");
+  t.setAttribute("aria-expanded", "false");
+  if (sb.contains(document.activeElement)) t.focus();
+}
+
+function isMobileNav() {
+  return window.matchMedia("(max-width: 1023px)").matches;
+}
+
+// ═══════════════════ 5. Palette de commandes (Ctrl K) ═══════════════════
+function catgirlApi() {
+  return window.xkCatgirl && typeof window.xkCatgirl.toggle === "function" ? window.xkCatgirl : null;
+}
+
+function paletteCommands() {
+  const cmds = [];
+  for (const it of NAV_ITEMS) {
+    cmds.push({ group: "Pages", label: it.label, hint: it.group || "", icon: it.icon, keywords: it.keywords || "", run: () => navigate(it.id) });
+    for (const t of it.tabs || []) {
+      cmds.push({ group: "Pages", label: `${it.label} › ${t.label}`, hint: "", icon: it.icon, keywords: it.keywords || "", run: () => navigate(it.id, t.id) });
+    }
+  }
+  cmds.push(
+    { group: "Actions", label: "Nouvelle annonce", icon: "megaphone", keywords: "message publier", run: () => navigate("announce") },
+    { group: "Actions", label: "Nouveau giveaway", icon: "gift", keywords: "concours lancer", run: () => startNewGiveaway() },
+    { group: "Actions", label: "Resynchroniser les rôles de rank", icon: "refresh", keywords: "actualiser roles", run: () => resyncRoles().catch(reportError) },
+    { group: "Actions", label: "Ouvrir le journal", icon: "terminal", keywords: "logs", run: () => navigate("system", "logs") },
+    { group: "Préférences", label: "Thème : système", icon: "monitor", keywords: "apparence auto", run: () => applyTheme("system") },
+    { group: "Préférences", label: "Thème : clair", icon: "sun", keywords: "apparence light", run: () => applyTheme("light") },
+    { group: "Préférences", label: "Thème : sombre", icon: "moon", keywords: "apparence dark", run: () => applyTheme("dark") },
+  );
+  const cg = catgirlApi();
+  if (cg) cmds.push({ group: "Préférences", label: cg.isOn() ? "Désactiver le mode Catgirl" : "Activer le mode Catgirl", icon: "sparkles", keywords: "neko kawaii", run: () => cg.toggle() });
+  cmds.push({ group: "Compte", label: "Se déconnecter", icon: "log-out", keywords: "logout quitter", run: () => (location.href = "/logout") });
+  return cmds;
+}
+
+function openPalette() {
+  if (DIALOGS.length) return;
+  const commands = paletteCommands();
+  const listId = uid("pal");
+  const input = el("input", {
+    class: "palette-input",
+    type: "text",
+    placeholder: "Aller à une page, lancer une action…",
+    "aria-label": "Rechercher une page ou une action",
+    role: "combobox",
+    "aria-expanded": "true",
+    "aria-controls": listId,
+    "aria-autocomplete": "list",
+    autocomplete: "off",
+    spellcheck: "false",
+  });
+  const list = el("ul", { class: "palette-list", role: "listbox", id: listId });
+  let matches = commands;
+  let active = 0;
+
+  const backdrop = el("div", { class: "dialog-backdrop palette-backdrop" });
+  const box = el(
+    "div",
+    { class: "dialog palette", role: "dialog", "aria-modal": "true", "aria-label": "Palette de commandes" },
+    el("div", { class: "palette-input-wrap" }, icon("search", 18), input, kbd("Échap")),
+    list,
+    el("div", { class: "palette-foot" }, el("span", {}, kbd("↑"), kbd("↓"), "naviguer"), el("span", {}, kbd("Entrée"), "ouvrir"), el("span", {}, kbd("Ctrl K"), "fermer")),
+  );
+  backdrop.append(box);
+  const prevFocus = document.activeElement;
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey, true);
+    document.documentElement.classList.remove("scroll-lock");
+    if (prevFocus && document.contains(prevFocus)) prevFocus.focus({ preventScroll: true });
+  };
+  const run = (c) => {
+    close();
+    Promise.resolve().then(c.run).catch(reportError);
   };
   const paint = () => {
-    list.querySelectorAll(".cmdk-opt").forEach((o) => o.classList.toggle("sel", Number(o.dataset.idx) === sel));
-    const active = list.querySelector(".cmdk-opt.sel");
-    if (active) active.scrollIntoView({ block: "nearest" });
+    $$(".palette-opt", list).forEach((n) => n.classList.toggle("active", Number(n.dataset.idx) === active));
+    const cur = list.querySelector(".palette-opt.active");
+    if (cur) {
+      input.setAttribute("aria-activedescendant", cur.id);
+      cur.scrollIntoView({ block: "nearest" });
+    }
   };
-  const onKey = (e) => {
-    if (e.key === "Escape") return close();
-    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, matches.length - 1); paint(); }
-    if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); paint(); }
-    if (e.key === "Enter" && matches[sel]) { e.preventDefault(); const c = matches[sel]; close(); c.run(); }
+  // Pertinence : le dernier segment du libellé (« Page › Onglet ») commence par la
+  // recherche, puis un mot du libellé, puis le libellé la contient, puis mots-clés.
+  const groupOrder = [...new Set(commands.map((c) => c.group))];
+  const score = (c, q) => {
+    const label = normText(c.label);
+    const last = label.split("›").pop().trim();
+    if (last.startsWith(q)) return 0;
+    if (label.split(/[\s›&'-]+/).some((w) => w.startsWith(q))) return 1;
+    if (label.includes(q)) return 2;
+    return 3;
   };
-
-  input.addEventListener("input", () => { sel = 0; draw(); });
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-  document.addEventListener("keydown", onKey);
-
-  overlay.append(el("div", { class: "cmdk-card" },
-    el("div", { class: "cmdk-input-wrap" }, icon("search", 18), input),
-    list,
-    el("div", { class: "cmdk-foot" },
-      el("span", {}, el("kbd", {}, "↑↓"), " naviguer"),
-      el("span", {}, el("kbd", {}, "↵"), " ouvrir"),
-      el("span", {}, el("kbd", {}, "Échap"), " fermer"))));
-  document.body.append(overlay);
+  const draw = () => {
+    const q = normText(input.value.trim());
+    matches = q
+      ? commands
+          .filter((c) => normText(`${c.label} ${c.hint} ${c.keywords} ${c.group}`).includes(q))
+          .map((c, i) => ({ c, i, s: score(c, q), g: groupOrder.indexOf(c.group) }))
+          .sort((a, b) => a.g - b.g || a.s - b.s || a.i - b.i)
+          .map((x) => x.c)
+      : commands;
+    active = 0;
+    clearNode(list);
+    input.removeAttribute("aria-activedescendant");
+    if (!matches.length) {
+      list.append(el("li", { class: "lb-empty", role: "presentation" }, `Aucun résultat pour « ${input.value.trim()} ».`));
+      return;
+    }
+    let group = null;
+    matches.forEach((c, i) => {
+      if (c.group !== group) {
+        group = c.group;
+        list.append(el("li", { class: "palette-group", role: "presentation" }, group));
+      }
+      const li = el("li", { class: "palette-opt", role: "option", id: `${listId}-${i}`, dataset: { idx: String(i) }, "aria-selected": "false" }, icon(c.icon, 16), el("span", { class: "palette-opt-label" }, c.label), c.hint ? el("span", { class: "palette-opt-hint" }, c.hint) : null);
+      li.addEventListener("pointermove", () => {
+        if (active !== i) {
+          active = i;
+          paint();
+        }
+      });
+      li.addEventListener("mousedown", (e) => e.preventDefault());
+      li.addEventListener("click", () => run(c));
+      list.append(li);
+    });
+    paint();
+  };
+  function onKey(e) {
+    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    } else if (e.key === "ArrowDown" && matches.length) {
+      e.preventDefault();
+      active = (active + 1) % matches.length;
+      paint();
+    } else if (e.key === "ArrowUp" && matches.length) {
+      e.preventDefault();
+      active = (active - 1 + matches.length) % matches.length;
+      paint();
+    } else if (e.key === "Enter" && matches[active]) {
+      e.preventDefault();
+      run(matches[active]);
+    } else if (e.key === "Tab") e.preventDefault();
+  }
+  input.addEventListener("input", draw);
+  backdrop.addEventListener("pointerdown", (e) => {
+    if (e.target === backdrop) close();
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.append(backdrop);
+  document.documentElement.classList.add("scroll-lock");
   draw();
-  requestAnimationFrame(() => { overlay.classList.add("show"); input.focus(); });
+  input.focus();
 }
 
-// ----- Rendu de la coquille -----
-function renderApp() {
-  $("#loading").style.display = "none";
-  $("#app").classList.add("active");
+// ═══════════════════ 6. Menu du compte ═══════════════════
+function openAccountMenu(anchor) {
+  const pref = themePref();
+  const cg = catgirlApi();
+  openMenu(
+    anchor,
+    [
+      { heading: ME ? `Connecté en tant que ${ME.username}` : "Compte" },
+      "-",
+      { heading: "Thème" },
+      { label: "Système", icon: "monitor", radio: true, checked: pref === "system", onSelect: () => applyTheme("system") },
+      { label: "Clair", icon: "sun", radio: true, checked: pref === "light", onSelect: () => applyTheme("light") },
+      { label: "Sombre", icon: "moon", radio: true, checked: pref === "dark", onSelect: () => applyTheme("dark") },
+      cg ? "-" : null,
+      cg ? { label: "Mode Catgirl", icon: "sparkles", checked: cg.isOn(), onSelect: () => cg.toggle() } : null,
+      "-",
+      { label: "Se déconnecter", icon: "log-out", onSelect: () => (location.href = "/logout") },
+    ],
+    { placement: "bottom-start" },
+  );
+}
+
+// ═══════════════════ 7. Session, réseau ═══════════════════
+let SESSION_LOST = false;
+let NET_RETRY = 0;
+
+function onSessionLost(kind) {
+  if (SESSION_LOST) return;
+  SESSION_LOST = true;
+  const app = document.getElementById("app");
+  if (!app || app.hidden) return showLogin(kind === "revoked" ? "revoked" : "expired");
+  const revoked = kind === "revoked";
+  openDialog({
+    title: revoked ? "Accès retiré" : "Session expirée",
+    body: el(
+      "p",
+      { class: "dialog-text" },
+      revoked
+        ? "Ton compte n'a plus la permission « Gérer le serveur » sur ce serveur. Le dashboard n'est plus accessible."
+        : "Ta session a expiré. Reconnecte-toi pour continuer ; les modifications non enregistrées de cette page seront perdues.",
+    ),
+    dismissible: false,
+    actions: [
+      revoked
+        ? { label: "Se déconnecter", variant: "primary", onClick: () => { location.href = "/logout"; return false; } }
+        : { label: "Se reconnecter", variant: "primary", onClick: () => { location.href = "/login"; return false; } },
+    ],
+  });
+}
+
+function setOnline(ok) {
+  if (ok === NET.online) return;
+  NET.online = ok;
+  const b = document.getElementById("conn-banner");
+  if (!b) return;
+  if (!ok) {
+    clearNode(b).append(
+      icon("wifi-off", 16),
+      el("span", {}, "Connexion au dashboard perdue. Les données affichées peuvent être obsolètes."),
+      button("Réessayer", { size: "sm", variant: "secondary", onClick: () => pingServer() }),
+    );
+    b.hidden = false;
+    clearInterval(NET_RETRY);
+    NET_RETRY = setInterval(pingServer, 10000);
+  } else {
+    b.hidden = true;
+    clearInterval(NET_RETRY);
+    if (ME) toast("Connexion rétablie", "ok");
+  }
+}
+
+async function pingServer() {
+  try {
+    await api("/api/me");
+  } catch {
+    /* setOnline gère l'état */
+  }
+}
+
+// ═══════════════════ 8. Démarrage & connexion ═══════════════════
+const LOGIN_ERRORS = {
+  notadmin: "Ton compte Discord n'a pas la permission « Gérer le serveur » sur Xray Kaya.",
+  token: "L'authentification Discord a échoué. Réessaie.",
+  oauth: "Une erreur est survenue pendant la connexion. Réessaie.",
+  nocode: "Connexion annulée.",
+  state: "La demande de connexion a expiré. Relance la connexion.",
+  expired: "Ta session a expiré. Reconnecte-toi.",
+  revoked: "Ton accès au dashboard a été retiré.",
+  network: "Le serveur du dashboard ne répond pas. Vérifie ta connexion puis réessaie.",
+};
+
+function showLogin(err) {
+  document.getElementById("loading").hidden = true;
+  const app = document.getElementById("app");
+  app.hidden = true;
+  app.classList.remove("active");
+  document.getElementById("login").hidden = false;
+  const box = document.getElementById("login-error");
+  const msg = LOGIN_ERRORS[err];
+  box.hidden = !msg;
+  clearNode(box);
+  if (msg) box.append(icon("alert-circle", 16), el("div", { class: "callout-body" }, msg));
+}
+
+// Échec de chargement des données du serveur : écran dédié avec relance.
+function showBootError(message) {
+  showLogin(null);
+  const box = document.getElementById("login-error");
+  clearNode(box).append(icon("alert-circle", 16), el("div", { class: "callout-body" }, el("div", { class: "callout-title" }, "Impossible de charger le serveur Discord"), el("div", { class: "callout-text" }, message)));
+  box.hidden = false;
+  const note = $(".login-note");
+  if (note) note.hidden = true;
+  const actions = document.getElementById("login-actions");
+  clearNode(actions).append(
+    button("Réessayer", { variant: "primary", size: "lg", block: true, icon: "refresh", onClick: () => location.reload() }),
+    linkButton("Se déconnecter", "/logout", { variant: "ghost", size: "lg" }),
+  );
+}
+
+let SHELL_READY = false;
+
+function initShell() {
+  if (SHELL_READY) return;
+  SHELL_READY = true;
+
+  $("#nav-toggle").append(icon("menu", 18));
+  $("#mobile-search").append(icon("search", 18));
+  $("#sb-search").prepend(icon("search", 14));
+  $("#account-btn").append(icon("chevrons-up-down", 14));
+
+  $("#nav-toggle").addEventListener("click", () => ($("#sidebar").classList.contains("open") ? closeSidebar() : openSidebar()));
+  $("#scrim").addEventListener("click", closeSidebar);
+  $("#nav").addEventListener("click", (e) => {
+    if (e.target.closest("a") && isMobileNav()) closeSidebar();
+  });
+  $("#sb-search").addEventListener("click", openPalette);
+  $("#mobile-search").addEventListener("click", openPalette);
+  $("#account-btn").addEventListener("click", (e) => {
+    const b = e.currentTarget;
+    if (isPopoverFor(b)) return closePopover();
+    openAccountMenu(b);
+  });
+
+  $("#savebar-save").addEventListener("click", (e) => runBusy(e.currentTarget, () => saveAllForms()));
+  $("#savebar-discard").addEventListener("click", () => rerenderPage());
+
+  document.addEventListener("input", touch);
+  document.addEventListener("change", touch);
+  // Emoji Discord introuvable dans un aperçu : son nom en texte plutôt qu'une image cassée.
+  document.addEventListener(
+    "error",
+    (e) => {
+      const img = e.target;
+      if (img && img.matches && img.matches("img.dc-emoji")) img.replaceWith(document.createTextNode(img.alt || ""));
+    },
+    true,
+  );
+  trackTextFields();
+  initTooltips();
+  setInterval(tickRelativeTimes, 30000);
+
+  window.addEventListener("hashchange", onHashChange);
+  window.addEventListener("beforeunload", (e) => {
+    // Session perdue : l'utilisateur a déjà été prévenu par le dialogue.
+    if (!SESSION_LOST && hasUnsavedChanges()) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+  window.addEventListener("offline", () => setOnline(false));
+  window.addEventListener("online", () => pingServer());
+  window.addEventListener("resize", () => {
+    if (!isMobileNav()) closeSidebar();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      openPalette();
+    } else if (mod && e.key.toLowerCase() === "s") {
+      const save = $("#savebar-save");
+      if (!$("#savebar").hidden && save && !save.disabled && !DIALOGS.length) {
+        e.preventDefault();
+        save.click();
+      }
+    } else if (e.key === "Escape" && $("#sidebar").classList.contains("open") && !DIALOGS.length && !POPOVER) {
+      closeSidebar();
+    }
+  });
+}
+
+function renderShellChrome() {
   $("#guild-name").textContent = GUILD.name;
+  const gi = clearNode($("#guild-icon"));
+  if (GUILD.icon) gi.append(el("img", { src: GUILD.icon, alt: "" }));
+  else gi.textContent = (GUILD.name || "?").slice(0, 2).toUpperCase();
   $("#user-name").textContent = ME.username;
   if (ME.avatar) $("#user-avatar").src = ME.avatar;
-
-  // Hooks globaux, une seule fois.
-  if (!appHooked) {
-    appHooked = true;
-
-    $("#content").addEventListener("input", () => setDirty(true));
-    $("#content").addEventListener("change", () => setDirty(true));
-    $("#scrim").addEventListener("click", closeSidebar);
-    $("#nav-search-ico").append(icon("search", 15));
-    $(".sidebar-foot .logout").append(icon("logout", 16));
-
-    // Ferme les popovers de la topbar au clic extérieur.
-    document.addEventListener("click", () => {
-      $$(".pop.open").forEach((p) => {
-        p.classList.remove("open");
-        const btn = p.parentElement && p.parentElement.querySelector(".tb-icon");
-        if (btn) btn.setAttribute("aria-expanded", "false");
-      });
-    });
-
-    // Recherche de section dans la sidebar.
-    const q = $("#nav-q");
-    q.addEventListener("input", () => { navFilter = q.value; renderNav(); });
-    q.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { q.value = ""; navFilter = ""; renderNav(); q.blur(); }
-      if (e.key === "Enter") {
-        const first = $("#nav .nav-item");
-        if (first) first.click();
-      }
-    });
-
-    // Garde-fou : avertit avant de quitter/recharger avec des modifications en attente.
-    window.addEventListener("beforeunload", (e) => {
-      if (dirty) { e.preventDefault(); e.returnValue = ""; }
-    });
-
-    // Routing : retour/avance du navigateur.
-    window.addEventListener("hashchange", () => {
-      if (suppressHash) { suppressHash = false; return; }
-      const id = pageIdFromHash();
-      if (id && id !== current) navigateTo(id, { fromHash: true });
-    });
-
-    // Raccourcis clavier globaux.
-    window.addEventListener("keydown", (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === "k" || e.key === "K")) { e.preventDefault(); openPalette(); return; }
-      if (mod && (e.key === "s" || e.key === "S")) {
-        const saveBtn = $("#content .btn-save:not(:disabled)");
-        if (saveBtn) { e.preventDefault(); saveBtn.click(); }
-      }
-    });
-  }
-
-  // Thème propre à la section courante (ex. identité League of Legends).
-  applySectionTheme(pageOf(current).theme);
-
-  renderNav();
-  renderTopbar();
-  renderSection(current);
 }
 
-// Applique/retire la classe de thème de section sur <body>. Les variables CSS
-// posées par cette classe l'emportent sur l'accent global (déclaré en inline
-// sur <html>), ce qui donne une identité visuelle propre à chaque univers.
-const SECTION_THEMES = ["lol"];
-function applySectionTheme(theme) {
-  for (const t of SECTION_THEMES) document.body.classList.toggle("theme-" + t, theme === t);
+// Rendu complet de l'application. Appelé aussi par catgirl.js (bascule) :
+// la page n'est pas reconstruite si un brouillon est en cours.
+function renderApp() {
+  document.getElementById("loading").hidden = true;
+  document.getElementById("login").hidden = true;
+  const app = document.getElementById("app");
+  app.hidden = false;
+  app.classList.add("active");
+  initShell();
+  renderShellChrome();
+  if (PAGE && hasUnsavedChanges()) renderNav();
+  else renderRoute();
+}
+
+async function boot() {
+  const err = new URLSearchParams(location.search).get("error");
+  try {
+    ME = await api("/api/me");
+  } catch (e) {
+    ME = null;
+    return showLogin(e.status === 0 ? "network" : err);
+  }
+  if (!ME.isAdmin) {
+    ME = null;
+    return showLogin("notadmin");
+  }
+  try {
+    [GUILD, CONFIG] = await Promise.all([api("/api/guild"), api("/api/config")]);
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) return showLogin(e.status === 403 ? "revoked" : "expired");
+    return showBootError(e.message);
+  }
+  if (err) history.replaceState(null, "", location.pathname + location.hash);
+  ROUTE = parseHash();
+  renderApp();
+  loadAttention();
 }

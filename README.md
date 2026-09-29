@@ -84,11 +84,23 @@ Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que le
 - **Fiabilité API** : métriques exposées via `/ping`, l'endpoint `/api/metrics` et un onglet dédié du dashboard (taux de succès, erreurs 429/5xx/réseau, cooldown, files de récupération, fraîcheur de l'index).
 - **Anti-abus** : cooldowns par utilisateur sur les commandes coûteuses (API/canvas).
 
+## Filtre de mots
+
+Configurable depuis le dashboard (Modération › Filtre de mots), **désactivé par défaut**.
+
+- **Termes** : `mot` (mot entier), `mot*` (commence par), `*mot` (finit par), `*mot*` (n'importe où), expressions de plusieurs mots. Majuscules et accents ignorés. Une liste de base (insultes courantes) peut être ajoutée en un clic, jamais automatiquement.
+- **Contournements détectés** (option) : chiffres/symboles à la place des lettres (`c0nn4rd`), lettres répétées, espacées ou coupées par de la ponctuation, lettres cyrilliques ressemblantes. Mentions, emojis personnalisés et (option) liens sont ignorés. Moteur pur dans `src/wordfilterEngine.js`.
+- **Actions** : supprimer, masquer (republié sous le nom et l'avatar de l'auteur avec les termes masqués, via un webhook) ou signaler seulement. Avertissement dans le salon ou en MP, exclusion temporaire après N infractions en X minutes, journal de modération (texte d'origine sous spoiler). Les messages modifiés sont revérifiés.
+- **Exceptions** : termes autorisés (ex. `concombre` si `con*` est interdit), staff (« Gérer les messages »), rôles, salons et catégories.
+- **Permissions du bot** : « Gérer les messages » (suppression), « Gérer les webhooks » (masquage), « Exclure temporairement des membres » (exclusions). Le dashboard signale celles qui manquent.
+- Un message retiré ne rapporte pas d'XP et n'est pas traité comme un clip. Le dashboard propose un testeur qui applique les réglages en cours (même non enregistrés) sans rien envoyer sur Discord.
+
 ## Architecture & développement
 
 - Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `tournament.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
 - Persistance SQLite (`data/bot.db`) : configs en documents JSON (table `kv`) ; données à forte écriture (XP, historique de rating, succès, compteurs) dans des **tables dédiées** avec écritures atomiques. Migration automatique depuis l'ancien format au premier démarrage.
 - Tests : `npm test` (lance `node --test` sur une base SQLite **temporaire isolée** via `scripts/run-tests.js`, donc sans toucher `data/bot.db`). Lint syntaxique : `npm run check`. CI locale : `npm run ci`.
+- Dashboard sans Discord : `npm run dash:mock` sert `src/web/public` sur `http://127.0.0.1:4173` avec une API simulée (données fictives, rien n'est publié). Scénarios d'états via `/__mock/scenario/<full|empty|errors|slow|loggedout|notadmin|bootfail|expired>`.
 - Variables d'environnement utiles : `LEADERBOARD_SYNC_PAGES`, `LEADERBOARD_SYNC_SHALLOW_PAGES`, `LEADERBOARD_SYNC_DEEP_CHUNK` (sync incrémentale du leaderboard), `BOT_DB_PATH` (base alternative, surtout pour les tests).
 
 ## Limites connues
