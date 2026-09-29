@@ -26,6 +26,7 @@ import { warmProfiles, syncLeaderboard, getIndexStats, retryPending } from "./br
 import { getLevelConfig, setLevelConfig, setReward } from "./levels.js";
 import { tickTikTok } from "./tiktok.js";
 import { handleClipMessage, handleClipReaction } from "./clips.js";
+import { handleWordFilter } from "./wordfilter.js";
 import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
@@ -266,12 +267,34 @@ client.on(Events.MessageCreate, async (message) => {
   // Ignore les bots, MP et messages systeme.
   if (message.author?.bot || !message.guild) return;
 
+  // Filtre de mots en premier : un message retiré ne rapporte pas d'XP et n'est pas traité
+  // comme un clip. Une erreur du filtre ne bloque jamais le reste.
+  const filtered = await handleWordFilter(message).catch((err) => {
+    console.warn("Filtre de mots :", err.message);
+    return false;
+  });
+  if (filtered) return;
+
   // Reactions auto + moderation des clips (best-effort, n'empeche pas l'XP).
   handleClipMessage(message).catch(() => {});
   handleGuessRankMessage(message).catch(() => {});
 
   // Gain d'XP + montee de niveau.
   await handleMessageXp(message);
+});
+
+// Filtre de mots sur les messages modifiés (contournement « j'écris propre puis j'édite »).
+// Sans partials, discord.js n'émet cet événement que pour les messages en cache (récents).
+client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
+  try {
+    if (!newMessage.guild || newMessage.author?.bot) return;
+    // Mises à jour sans changement de texte (aperçu de lien ajouté par Discord…) : ignorées.
+    if (!oldMessage.partial && oldMessage.content === newMessage.content) return;
+    const msg = newMessage.partial ? await newMessage.fetch() : newMessage;
+    await handleWordFilter(msg, { edited: true });
+  } catch (err) {
+    console.warn("Filtre de mots (modification) :", err.message);
+  }
 });
 
 // ---------- Salons vocaux temporaires ("rejoindre pour creer") ----------

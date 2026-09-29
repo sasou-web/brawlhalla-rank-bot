@@ -9,7 +9,23 @@ import { PermissionFlagsBits, ChannelType } from "discord.js";
 import { config, webConfig, TIERS } from "../config.js";
 import { getSettings, setSetting } from "../settings.js";
 import { getLevelConfig, setLevelConfig, buildLevelUpAnnounce, xpForLevel, totalXpForLevel } from "../levels.js";
-import { getTikTokConfig, setTikTokConfig, postTest as tiktokPostTest } from "../tiktok.js";
+import {
+  getTikTokConfig,
+  setTikTokConfig,
+  postTest as tiktokPostTest,
+  getTikTokStatus,
+  checkTikTokSources,
+  normalizeHandle,
+  DEFAULT_TIKTOK_MESSAGE,
+} from "../tiktok.js";
+import {
+  getWordFilterConfig,
+  setWordFilterConfig,
+  getWordFilterStatus,
+  checkWordFilterText,
+  clearWordFilterHistory,
+} from "../wordfilter.js";
+import { STARTER_TERMS } from "../wordfilterEngine.js";
 import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
@@ -94,6 +110,7 @@ function buildSections(guildId) {
     giveaway: { get: () => getGiveawayConfig(guildId), set: (b) => setGiveawayConfig(guildId, b) },
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
     lol: { get: () => getLolConfig(guildId), set: (b) => setLolConfig(guildId, b) },
+    wordfilter: { get: () => getWordFilterConfig(guildId), set: (b) => setWordFilterConfig(guildId, b) },
   };
 }
 
@@ -497,6 +514,73 @@ export function startWebServer(client) {
     try {
       const n = await resetGreeted(config.guildId);
       res.json({ ok: true, cleared: n, message: `Historique réinitialisé (${n} membre(s)).` });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- TikTok : état et diagnostic (lecture seule) ----
+  // État interne : sources, pauses, dernière vérification / annonce. Aucune écriture.
+  app.get("/api/tiktok/status", requireAdmin, async (req, res) => {
+    try {
+      // defaultMessage : phrase utilisée quand le champ « Message » est vide (aperçu fidèle).
+      res.json({ ...(await getTikTokStatus(config.guildId)), defaultMessage: DEFAULT_TIKTOK_MESSAGE });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lit les sources d'un compte (éventuellement pas encore enregistré) sans toucher à l'état
+  // du bot ni rien publier. body : { account?, feedUrl? }.
+  app.post("/api/tiktok/diagnose", requireAdmin, async (req, res) => {
+    try {
+      const rawAccount = String(req.body?.account || "").trim();
+      const account = normalizeHandle(rawAccount);
+      if (rawAccount && !account) return res.status(400).json({ error: "Compte TikTok invalide (ex : kayagoldforged, sans @)." });
+      const feedUrl = String(req.body?.feedUrl || "").trim();
+      if (feedUrl && !/^https?:\/\/\S+$/i.test(feedUrl)) return res.status(400).json({ error: "URL du flux RSS invalide." });
+      if (!account && !feedUrl) return res.status(400).json({ error: "Indique un compte TikTok." });
+      res.json({ account, results: await checkTikTokSources({ account, feedUrl }) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Filtre de mots ----
+  // Statistiques, historique récent et permissions du bot utiles au filtre.
+  app.get("/api/wordfilter/status", requireAdmin, async (req, res) => {
+    try {
+      const guild = await client.guilds.fetch(config.guildId);
+      const me = guild.members.me || (await guild.members.fetchMe());
+      const p = me.permissions;
+      res.json({
+        ...(await getWordFilterStatus(config.guildId)),
+        permissions: {
+          manageMessages: p.has(PermissionFlagsBits.ManageMessages),
+          manageWebhooks: p.has(PermissionFlagsBits.ManageWebhooks),
+          moderateMembers: p.has(PermissionFlagsBits.ModerateMembers),
+        },
+        starterTerms: STARTER_TERMS,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Testeur : analyse un texte avec la configuration envoyée (non enregistrée). Sans effet.
+  app.post("/api/wordfilter/check", requireAdmin, (req, res) => {
+    try {
+      const b = req.body || {};
+      res.json(checkWordFilterText(b.text, { words: b.words, allowed: b.allowed, evasion: b.evasion, ignoreLinks: b.ignoreLinks }));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/wordfilter/clear-history", requireAdmin, async (req, res) => {
+    try {
+      const n = await clearWordFilterHistory(config.guildId);
+      res.json({ ok: true, cleared: n });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
