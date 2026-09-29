@@ -35,6 +35,8 @@ Les ids BrawlDB sont uniques toutes armes confondues (vérifié : 187/187).
 - Rangée de boutons : ralenti (si ffmpeg), maîtrise (si serveur), Combo Lab (si `PUBLIC_URL`), BrawlDB.
 - customIds : `cbp_slow:<weapon>:<id>:<0|1>`, `cbp_master:<weapon>:<id>:<0|1>` (le dernier champ garde la vitesse affichée).
 - Mise à jour : `deferUpdate()` puis `editReply({ ...payload, attachments: [] })` (modèle existant).
-- ffmpeg : `-stream_loop 2 -an -vf setpts=4*PTS,scale=-2:720 -c:v libx264 -preset veryfast -crf 26 -movflags +faststart`
-  via fichiers temporaires, `-nostdin`, délai max 30 s. Mesuré en local : ~0,6 s, ~1,9 Mo pour 25 s.
+- ffmpeg SANS réencodage : `-stream_loop <n-1> -itsscale 4 -i in.mp4 -map 0:v:0 -an -c:v copy -movflags +faststart`
+  via fichiers temporaires, `-nostdin`, délai max 15 s. n = 3 répétitions, moins si la source est lourde
+  (sortie ≈ source × n, plafonnée à 9 Mo). Mesuré sur le serveur de prod (2 vCPU partagés) : ~0,1 s de
+  CPU et ~1,9 Mo pour 25 s. Un réencodage libx264 720p y coûtait ~25 s de CPU par combo : abandonné.
   Binaire : `FFMPEG_PATH` ou `ffmpeg` du PATH, détecté une fois.

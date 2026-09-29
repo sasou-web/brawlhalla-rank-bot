@@ -69,7 +69,7 @@ export async function handleCombosPick(interaction) {
 export async function handleCombosSlow(interaction) {
   const [, weapon, id, flag] = interaction.customId.split(":");
   const slow = flag === "1";
-  // L'encodage coûte du CPU : cooldown court, uniquement pour activer le ralenti.
+  // Anti-rafale (envoi d'une nouvelle vidéo à chaque clic) : cooldown court pour activer le ralenti.
   if (slow && !(await enforceCooldown(interaction, "combos_slow", 3000))) return;
   await interaction.deferUpdate();
   return updateViewer(interaction, weapon, id, { slow });

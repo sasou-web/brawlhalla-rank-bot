@@ -19,9 +19,10 @@ une page web publique, Discord garde un ralenti prêt à l'emploi et une progres
 
 ## 2. Ralenti dans Discord
 - Bouton « 🐌 Ralenti x0.25 » dans le viewer privé : remplace la vidéo par une version ralentie
-  (x0.25, 720p, jouée 3 fois, sans son) ; bouton « ▶️ Vitesse normale » pour revenir.
-- Généré avec ffmpeg à la demande, mis en cache mémoire ; au plus 2 encodages simultanés.
-- Sans ffmpeg sur le serveur : bouton masqué. Échec d'encodage : vidéo normale + message.
+  (x0.25, qualité d'origine, jouée 3 fois, sans son) ; bouton « ▶️ Vitesse normale » pour revenir.
+- Généré avec ffmpeg à la demande SANS réencodage (horodatages étirés), mis en cache mémoire ;
+  au plus 2 traitements simultanés. Coût négligeable sur un petit serveur.
+- Sans ffmpeg sur le serveur : bouton masqué. Échec : vidéo normale + message.
 
 ## 3. Progression « Je maîtrise ce combo »
 - Bouton bascule dans le viewer ; état visible (✅), progression par arme (x/y) dans le viewer

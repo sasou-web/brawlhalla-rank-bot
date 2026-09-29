@@ -204,17 +204,25 @@ export async function getComboVideo(c) {
   return p;
 }
 
-// ---------- Ralenti x0.25 (ffmpeg) ----------
-// Le lecteur de Discord n'a ni vitesse ni boucle : on encode une version ralentie, jouée
-// plusieurs fois d'affilée, en 720p et sans son (léger à envoyer, ~2 Mo pour ~25 s).
-// ffmpeg est optionnel : sans lui, le bouton n'est simplement pas proposé.
+// ---------- Ralenti x0.25 (ffmpeg, SANS réencodage) ----------
+// Le lecteur de Discord n'a ni vitesse ni boucle : on produit une version ralentie, jouée
+// plusieurs fois d'affilée et sans son. Les images d'origine sont recopiées telles quelles
+// (`-c:v copy`) et seuls leurs horodatages sont étirés (`-itsscale 4`) : 60 i/s deviennent
+// 15 i/s, en qualité d'origine. Mesuré sur le serveur de prod (2 vCPU partagés) : ~0,1 s de
+// CPU, contre ~25 s pour un réencodage libx264. ffmpeg est optionnel : sans lui, le bouton
+// n'est simplement pas proposé.
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 export const SLOW_FACTOR = 4; // x0.25
-export const SLOW_LOOPS = 3; // la séquence est jouée 3 fois
-const SLOW_TIMEOUT_MS = 30_000;
-const SLOW_MAX_JOBS = 2; // encodages simultanés
+export const SLOW_LOOPS = 3; // la séquence est jouée 3 fois (moins si la vidéo est lourde)
+const SLOW_TIMEOUT_MS = 15_000;
+const SLOW_MAX_JOBS = 2; // traitements simultanés
 const SLOW_MAX_QUEUE = 10; // au-delà, on refuse plutôt que d'accumuler
 const SLOW_MAX_UPLOAD = 9 * 1024 * 1024; // marge sous la limite d'envoi Discord (10 Mo)
+
+/** Nombre de répétitions du ralenti pour une source de `size` octets (le fichier final pèse ~size × répétitions). */
+export function slowLoopsFor(size) {
+  return Math.max(1, Math.min(SLOW_LOOPS, Math.floor(SLOW_MAX_UPLOAD / Math.max(1, size))));
+}
 
 let ffmpegProbe = null;
 /** true si ffmpeg répond (détecté une seule fois, résultat mémorisé). */
@@ -271,7 +279,7 @@ function runFfmpeg(args, timeoutMs) {
   });
 }
 
-// File d'attente : au plus SLOW_MAX_JOBS encodages en parallèle. Le créneau est transmis
+// File d'attente : au plus SLOW_MAX_JOBS traitements ffmpeg en parallèle. Le créneau est transmis
 // directement au suivant, sans fenêtre où un nouvel arrivant pourrait doubler la limite.
 let slowJobs = 0;
 const slowQueue = [];
@@ -293,7 +301,7 @@ async function withSlowSlot(fn) {
 
 const slowInflight = new Map();
 
-/** Buffer MP4 ralenti x0.25 (joué SLOW_LOOPS fois), ou null si ffmpeg absent / échec. */
+/** Buffer MP4 ralenti x0.25 (joué slowLoopsFor(source) fois), ou null si ffmpeg absent / échec. */
 export async function getSlowComboVideo(c) {
   const key = `${c.weapon}-${c.id}:slow`;
   const hit = videoCacheGet(key);
@@ -312,11 +320,11 @@ export async function getSlowComboVideo(c) {
         await runFfmpeg(
           [
             "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-stream_loop", String(SLOW_LOOPS - 1),
+            "-stream_loop", String(slowLoopsFor(src.length) - 1),
+            "-itsscale", String(SLOW_FACTOR),
             "-i", inPath,
-            "-an",
-            "-vf", `setpts=${SLOW_FACTOR}*PTS,scale=-2:720`,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+            "-map", "0:v:0", "-an",
+            "-c:v", "copy",
             "-movflags", "+faststart",
             outPath,
           ],
@@ -456,8 +464,11 @@ export async function buildComboViewer(weapon, id, { mastered = null, slow = fal
       new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${name}`)),
     );
     if (slowShown) {
+      const source = await getComboVideo(c); // en cache : sert juste à connaître le nombre de répétitions
+      const loops = slowLoopsFor(source?.length || 0);
+      const repeat = loops > 1 ? ` · joué ${loops} fois de suite` : "";
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`-# 🐌 Ralenti x${1 / SLOW_FACTOR} · joué ${SLOW_LOOPS} fois de suite · sans son`),
+        new TextDisplayBuilder().setContent(`-# 🐌 Ralenti x${1 / SLOW_FACTOR}${repeat} · sans son`),
       );
     }
     container.addSeparatorComponents(cbDivider());
