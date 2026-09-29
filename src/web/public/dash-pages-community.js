@@ -85,8 +85,33 @@ function tierScale(s) {
   return wrap;
 }
 
+/**
+ * Rangs validés par le staff sans capture : au-dessus du seuil d'auto-validation et sous le
+ * rang de preuve (même règle que linking.js). Seuls ceux-là passent par le salon de validation.
+ */
+function reviewOnlyTiers(s) {
+  const tiers = GUILD.tiers || [];
+  const auto = tiers.indexOf(s.autoApproveTier);
+  const proof = s.requireProofScreenshot ? tiers.indexOf(s.proofTier) : Infinity;
+  return tiers.filter((_, i) => i > auto && i < proof);
+}
+
 function validationTab(host, s) {
   const tiers = tierOptions();
+  // Le salon de validation ne sert que si des rangs sont validés sans capture : sinon le bot
+  // ouvre un fil de preuve pour chaque demande et ce salon n'est qu'un secours.
+  const reviewUnused = callout("info", "Au-dessus du seuil, chaque demande ouvre un fil de preuve. Ce salon ne sert qu'en secours, si le bot ne peut pas créer le fil.", {
+    title: "Pas utilisé avec ces réglages",
+  });
+  const reviewHelp = el("span");
+  watch(reviewHelp, () => {
+    const band = reviewOnlyTiers(s);
+    reviewUnused.hidden = band.length > 0;
+    const range = band.length > 1 ? `de ${band[0]} à ${band[band.length - 1]}` : band[0];
+    reviewHelp.textContent = band.length
+      ? `Reçoit les demandes des rangs ${range}, validés sans capture. Vide : ces rangs sont liés sans validation.`
+      : "Vide : si le fil ne peut pas être créé, le compte est lié sans vérification.";
+  });
   host.append(
     groups(
       settingsGroup(
@@ -96,14 +121,8 @@ function validationTab(host, s) {
         tierScale(s),
       ),
       settingsGroup(
-        "Validation par le staff",
-        "Au-dessus du seuil, une demande part dans le salon de validation, avec boutons Valider et Refuser.",
-        field("Salon de validation", channelPicker(s, "reviewChannelId", "text"), { help: "Un salon ou un fil, par exemple un fil du salon de liaison." }),
-        field("Rôle validateur", rolePicker(s, "reviewerRoleId"), { help: "Sans rôle défini, seuls les membres avec « Gérer le serveur » peuvent valider." }),
-      ),
-      settingsGroup(
-        "Preuve pour les hauts rangs",
-        "Un fil privé est créé : le joueur y poste une capture de son profil en jeu, le staff valide depuis ce fil.",
+        "Fils de preuve",
+        "À partir du rang choisi, le bot ouvre un fil privé par demande : le joueur y poste une capture de son profil en jeu, le staff valide depuis le fil.",
         switchField("Exiger une capture d'écran", s, "requireProofScreenshot"),
         showWhen(field("À partir du rang", selectInput(s, "proofTier", tiers, { size: "sm" }), { help: "Ce tier est inclus." }), () => !!s.requireProofScreenshot),
         showWhen(
@@ -112,6 +131,13 @@ function validationTab(host, s) {
           }),
           () => !!s.requireProofScreenshot,
         ),
+      ),
+      settingsGroup(
+        "Validation par le staff",
+        "Qui peut valider, et où arrivent les demandes des rangs validés sans capture.",
+        field("Rôle validateur", rolePicker(s, "reviewerRoleId"), { help: "Mentionné dans chaque fil de preuve. Sans rôle, seuls les membres avec « Gérer le serveur » peuvent valider." }),
+        reviewUnused,
+        field("Salon de validation", channelPicker(s, "reviewChannelId", "text"), { help: reviewHelp }),
       ),
       settingsGroup(
         "Annonces de progression",
