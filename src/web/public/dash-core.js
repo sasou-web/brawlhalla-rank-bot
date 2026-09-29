@@ -206,21 +206,35 @@ function plural(n, one, many) {
   return `${fmtNum(n)} ${Math.abs(n) <= 1 ? one : many}`;
 }
 
-function fmtDate(ts, opts = { day: "numeric", month: "short", year: "numeric" }) {
+function fmtDate(value, opts = { day: "numeric", month: "short", year: "numeric" }) {
+  const ts = toTs(value);
   return ts ? new Date(ts).toLocaleDateString("fr-FR", opts) : "—";
 }
 
-function fmtDateTime(ts) {
+function fmtDateTime(value) {
+  const ts = toTs(value);
   return ts ? new Date(ts).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
-function fmtTime(ts, seconds = false) {
+function fmtTime(value, seconds = false) {
+  const ts = toTs(value);
   return ts
     ? new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: seconds ? "2-digit" : undefined })
     : "—";
 }
 
-function fmtRelative(ts) {
+/**
+ * Horodatage en millisecondes, quel que soit le format reçu de l'API : nombre, chaîne
+ * ISO (« 2026-06-10T04:11:00Z », ex. combos.json) ou Date. 0 si absent ou invalide.
+ */
+function toTs(v) {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = typeof v === "number" ? v : v instanceof Date ? v.getTime() : Date.parse(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function fmtRelative(value) {
+  const ts = toTs(value);
   if (!ts) return "—";
   const diff = (ts - Date.now()) / 1000;
   const abs = Math.abs(diff);
@@ -255,7 +269,8 @@ function fmtDuration(ms) {
 }
 
 // Élément « il y a … » mis à jour automatiquement (voir tickRelativeTimes).
-function timeAgo(ts, { prefix = "" } = {}) {
+function timeAgo(value, { prefix = "" } = {}) {
+  const ts = toTs(value); // numérique : relu tel quel par tickRelativeTimes
   const t = el("time", { datetime: ts ? new Date(ts).toISOString() : null, title: ts ? fmtDateTime(ts) : null, dataset: { ts: String(ts || ""), prefix } });
   t.textContent = prefix + fmtRelative(ts);
   return t;
@@ -269,15 +284,20 @@ function tickRelativeTimes() {
 }
 
 // ═══════════════════ 5. Recherche dans les données du serveur ═══════════════════
-const CHANNEL_KINDS = ["text", "announcement", "voice", "category"];
+const CHANNEL_KINDS = ["text", "announcement", "voice", "category", "thread"];
 
 function channelById(id) {
   if (!GUILD || !id) return null;
   for (const type of CHANNEL_KINDS) {
-    const c = (GUILD.channels[type] || []).find((x) => x.id === id);
+    const c = ((GUILD.channels || {})[type] || []).find((x) => x.id === id);
     if (c) return { ...c, type };
   }
   return null;
+}
+
+// Nom lisible d'un fil : « salon parent › fil ».
+function threadLabel(t) {
+  return t.parentName ? `${t.parentName} › ${t.name}` : t.name;
 }
 
 function roleById(id) {
@@ -287,7 +307,9 @@ function roleById(id) {
 
 function channelName(id, fallback = "Salon introuvable") {
   const c = channelById(id);
-  return c ? (c.type === "category" ? c.name : "#" + c.name) : fallback;
+  if (!c) return fallback;
+  if (c.type === "category") return c.name;
+  return "#" + (c.type === "thread" ? threadLabel(c) : c.name);
 }
 
 function discordChannelUrl(channelId) {
@@ -312,6 +334,7 @@ const ICONS = {
   headphones: '<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>',
   swords: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/><path d="M14.5 6.5 18 3h3v3l-3.5 3.5"/><path d="M5 14l4 4"/><path d="M7 17l-3 3"/><path d="M3 19l2 2"/>',
   "message-x": '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="m14.5 7.5-5 5"/><path d="m9.5 7.5 5 5"/>',
+  thread: '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
   bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',

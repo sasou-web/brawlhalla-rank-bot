@@ -33,10 +33,15 @@ let idSeq = 1000;
 const nextId = () => String(++idSeq);
 const ch = (name) => ({ id: nextId(), name });
 
-const text = ["général", "annonces", "clips", "devine-ton-rang", "validation", "audit", "alertes", "succès", "inscriptions-tournoi", "tournoi-annonces", "tiktok", "bienvenue", "au-revoir", "lol-discussion", "support", "hall-of-fame", "rappels", "combos"].map(ch);
+const text = ["général", "annonces", "lier-mon-compte", "clips", "devine-ton-rang", "validation", "audit", "alertes", "succès", "inscriptions-tournoi", "tournoi-annonces", "tiktok", "bienvenue", "au-revoir", "lol-discussion", "support", "hall-of-fame", "rappels", "combos"].map(ch);
 const voice = ["Créer un vocal", "Général", "Tournoi", "Chill"].map(ch);
 const category = ["Communauté", "Vocaux", "Tickets", "Tournoi", "Vocaux rank"].map(ch);
 const announcement = ["news"].map(ch);
+// Fils : cas réel du serveur, le salon de validation est un fil du salon « lier-mon-compte ».
+const thread = [
+  { id: nextId(), name: "Validation", parentId: text.find((c) => c.name === "lier-mon-compte").id, parentName: "lier-mon-compte", archived: false },
+  { id: nextId(), name: "Annonces tournoi", parentId: text.find((c) => c.name === "général").id, parentName: "général", archived: false },
+];
 const byName = (list, n) => list.find((c) => c.name === n).id;
 const roles = [
   ["Admin", "#e5534b"],
@@ -58,7 +63,7 @@ const guild = {
   icon: "/favicon-192.png",
   memberCount: 12480,
   tiers: TIERS,
-  channels: { text, voice, category, announcement },
+  channels: { text, voice, category, announcement, thread },
   roles,
   emojis: [
     { id: "1", name: "xk", animated: false, token: "<:xk:1>", url: "/favicon-32.png" },
@@ -69,7 +74,7 @@ const guild = {
 function baseConfig() {
   return {
     settings: {
-      reviewChannelId: byName(text, "validation"),
+      reviewChannelId: thread[0].id,
       reviewerRoleId: roleId("Valideur de Rank"),
       auditChannelId: byName(text, "audit"),
       announceChannelId: byName(text, "annonces"),
@@ -584,7 +589,7 @@ app.post("/api/refresh-roles", (req, res) => res.status(202).json({ ok: true, st
 
 // ---- Combos ----
 app.get("/api/combos", (req, res) =>
-  res.json(scenario === "empty" ? { count: 0, scrapedAt: null, byWeapon: {} } : { count: 412, scrapedAt: Date.now() - 12 * 86400000, byWeapon: { sword: 48, hammer: 41, katars: 39, spear: 37, axe: 35, rocketlance: 33, blasters: 31, bow: 30, gauntlets: 29, scythe: 27, cannon: 22, orb: 20, greatsword: 20 } }),
+  res.json(scenario === "empty" ? { count: 0, scrapedAt: null, byWeapon: {} } : { count: 412, scrapedAt: new Date(Date.now() - 12 * 86400000).toISOString(), byWeapon: { sword: 48, hammer: 41, katars: 39, spear: 37, axe: 35, rocketlance: 33, blasters: 31, bow: 30, gauntlets: 29, scythe: 27, cannon: 22, orb: 20, greatsword: 20 } }),
 );
 app.post("/api/combos/refresh", (req, res) => setTimeout(() => ok(res, { count: 412 }), 800));
 

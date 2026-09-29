@@ -392,14 +392,31 @@ function tierOptions() {
 }
 
 // ═══════════════════ 5. Sélecteurs de salons et de rôles ═══════════════════
-const CHANNEL_ICON = { text: "hash", announcement: "megaphone", voice: "volume", category: "folder" };
+const CHANNEL_ICON = { text: "hash", announcement: "megaphone", voice: "volume", category: "folder", thread: "thread" };
 
+/**
+ * Options des sélecteurs de salons. Les fils sont proposés partout où un salon textuel
+ * l'est (le bot y écrit comme dans un salon), rangés juste sous leur salon parent.
+ */
 function channelOptions(kind = "text") {
-  const c = GUILD.channels;
+  const c = GUILD.channels || {};
   const map = (list, type) => (list || []).map((x) => ({ value: x.id, label: x.name, icon: CHANNEL_ICON[type] }));
   if (kind === "voice") return map(c.voice, "voice");
   if (kind === "category") return map(c.category, "category");
-  const text = [...map(c.text, "text"), ...map(c.announcement, "announcement")];
+  const threads = (c.thread || []).map((t) => ({ value: t.id, label: threadLabel(t), icon: "thread", parentId: t.parentId }));
+  const placed = new Set();
+  const text = [];
+  for (const o of [...map(c.text, "text"), ...map(c.announcement, "announcement")]) {
+    text.push(o);
+    for (const t of threads) {
+      if (t.parentId === o.value) {
+        text.push(t);
+        placed.add(t.value);
+      }
+    }
+  }
+  // Fils dont le parent n'est pas listé (forum, salon masqué au bot…) : en fin de liste.
+  for (const t of threads) if (!placed.has(t.value)) text.push(t);
   return kind === "textvoice" ? [...text, ...map(c.voice, "voice")] : text;
 }
 

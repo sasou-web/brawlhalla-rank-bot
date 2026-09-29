@@ -290,8 +290,7 @@ const TT_VIA = { embed: "via la source directe", rss: "via le flux RSS de secour
 const TT_ACCENT = "#fe2c55"; // couleur de la carte publiée par le bot (tiktok.js)
 
 function ttTs(v) {
-  const t = typeof v === "number" ? v : Date.parse(v || "");
-  return Number.isFinite(t) && t > 0 ? t : 0;
+  return toTs(v);
 }
 
 function ttHandle(v) {

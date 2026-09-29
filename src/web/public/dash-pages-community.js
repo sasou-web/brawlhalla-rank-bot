@@ -98,7 +98,7 @@ function validationTab(host, s) {
       settingsGroup(
         "Validation par le staff",
         "Au-dessus du seuil, une demande part dans le salon de validation, avec boutons Valider et Refuser.",
-        field("Salon de validation", channelPicker(s, "reviewChannelId", "text")),
+        field("Salon de validation", channelPicker(s, "reviewChannelId", "text"), { help: "Un salon ou un fil, par exemple un fil du salon de liaison." }),
         field("Rôle validateur", rolePicker(s, "reviewerRoleId"), { help: "Sans rôle défini, seuls les membres avec « Gérer le serveur » peuvent valider." }),
       ),
       settingsGroup(

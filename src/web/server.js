@@ -384,6 +384,42 @@ export function startWebServer(client) {
         token: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
         url: e.imageURL(),
       }));
+
+      // Fils : un réglage peut pointer vers un fil (ex. salon de validation = fil du salon
+      // « lier mon compte »). guild.channels.fetch() ne renvoie pas les fils : on ajoute les
+      // fils publics actifs, puis tout fil déjà utilisé dans un réglage (même archivé ou
+      // privé), résolu individuellement, pour que le dashboard l'affiche au lieu de
+      // « Salon introuvable ».
+      const threadOf = (t) => ({ id: t.id, name: t.name, parentId: t.parentId || "", parentName: t.parent?.name || "", archived: Boolean(t.archived) });
+      const referenced = new Set();
+      const collect = (v, key = "") => {
+        if (Array.isArray(v)) v.forEach((x) => collect(x, key));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) collect(x, k);
+        else if (typeof v === "string" && /channel/i.test(key) && /^\d{15,25}$/.test(v)) referenced.add(v);
+      };
+      for (const s of Object.values(sections)) collect(await Promise.resolve().then(() => s.get()).catch(() => null));
+
+      const threads = new Map();
+      try {
+        // Fils privés exclus (fils de preuve par joueur), sauf ceux utilisés dans un réglage.
+        const active = await guild.channels.fetchActiveThreads();
+        for (const t of active.threads.values()) {
+          if (t.type !== ChannelType.PrivateThread || referenced.has(t.id)) threads.set(t.id, threadOf(t));
+        }
+      } catch {
+        /* permission manquante : on se contente des fils référencés */
+      }
+      let fetches = 0;
+      for (const id of referenced) {
+        if (threads.has(id)) continue;
+        // Le cache de la guilde contient aussi les fils : seul un vrai salon est ignoré ici.
+        const cached = guild.channels.cache.get(id);
+        if (cached && !cached.isThread()) continue;
+        if (!cached && fetches++ >= 25) continue;
+        const ch = cached || (await client.channels.fetch(id).catch(() => null));
+        if (ch?.isThread?.() && ch.guildId === guild.id) threads.set(ch.id, threadOf(ch));
+      }
+
       res.json({
         name: guild.name,
         id: guild.id,
@@ -395,6 +431,7 @@ export function startWebServer(client) {
           voice: chan(ChannelType.GuildVoice),
           category: chan(ChannelType.GuildCategory),
           announcement: chan(ChannelType.GuildAnnouncement),
+          thread: [...threads.values()].sort((a, b) => a.parentName.localeCompare(b.parentName) || a.name.localeCompare(b.name)),
         },
         roles,
         emojis,
