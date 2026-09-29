@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0e0f11" />
+    <meta name="description" content="Combo Lab Xray Kaya : apprends les true combos Brawlhalla au ralenti, image par image, avec zoom et boucle A-B." />
+    <title>Combo Lab · Xray Kaya</title>
+
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/lab/lab.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#player">Aller au lecteur</a>
+
+    <header class="topbar">
+      <div class="brand">
+        <img src="/icon-192.png" alt="" width="28" height="28" />
+        <div>
+          <h1 class="brand-title">Combo Lab</h1>
+          <p class="brand-sub">Apprends les true combos Brawlhalla, image par image.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <!-- aria-label : sur mobile, seul l'icône reste visible (libellé masqué). -->
+        <button id="btn-share" class="btn btn-ghost" type="button" data-icon="link" aria-label="Copier le lien">Copier le lien</button>
+        <button id="btn-help" class="btn btn-ghost" type="button" data-icon="keyboard" aria-haspopup="dialog" aria-label="Raccourcis clavier">Raccourcis</button>
+      </div>
+    </header>
+
+    <!-- Erreur globale (catalogue illisible) ou base vide : remplace la mise en page. -->
+    <section id="global-state" class="global-state" hidden aria-live="polite"></section>
+
+    <main id="layout" class="layout" aria-busy="true">
+      <!-- ══════════ Liste des combos ══════════ -->
+      <aside class="sidebar" aria-labelledby="list-title">
+        <h2 id="list-title" class="sr-only">Choisir un combo</h2>
+        <div class="filters">
+          <label class="field">
+            <span class="field-label">Arme</span>
+            <select id="weapon" disabled></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Rechercher</span>
+            <input id="search" type="search" placeholder="Ex. Nair, Dlight…" autocomplete="off" spellcheck="false" disabled />
+          </label>
+          <label class="field">
+            <span class="field-label">Trier</span>
+            <select id="sort" disabled>
+              <option value="easy">Les plus faciles d'abord</option>
+              <option value="damage">Les plus de dégâts d'abord</option>
+              <option value="short">Les plus courts d'abord</option>
+            </select>
+          </label>
+        </div>
+        <p id="list-count" class="list-count" aria-live="polite"></p>
+        <ul id="combo-list" class="combo-list">
+          <li class="skel skel-item"></li>
+          <li class="skel skel-item"></li>
+          <li class="skel skel-item"></li>
+          <li class="skel skel-item"></li>
+          <li class="skel skel-item"></li>
+        </ul>
+      </aside>
+
+      <!-- ══════════ Lecteur ══════════ -->
+      <section id="player" class="player" aria-labelledby="combo-title" tabindex="-1">
+        <div class="player-head">
+          <p id="combo-weapon" class="combo-weapon"></p>
+          <h2 id="combo-title" class="combo-title"><span class="skel skel-title"></span></h2>
+          <ol id="combo-steps" class="steps" aria-label="Étapes du combo"></ol>
+        </div>
+
+        <div id="notice" class="callout" role="status" hidden></div>
+
+        <div id="stage" class="stage" role="group" aria-label="Vidéo du combo. Molette ou pincement : zoom. Glisser : déplacer. Double-clic : zoom x2.">
+          <div id="pan" class="pan">
+            <video id="video" class="video" muted playsinline preload="auto" loop disablepictureinpicture></video>
+          </div>
+          <div class="stage-badges" aria-hidden="true">
+            <span id="badge-speed" class="badge">x1</span>
+            <span id="badge-zoom" class="badge" hidden>Zoom x1</span>
+            <span id="badge-mirror" class="badge" hidden>Miroir</span>
+          </div>
+          <div id="stage-loading" class="stage-overlay" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Chargement de la vidéo…</span>
+          </div>
+          <div id="stage-error" class="stage-overlay stage-overlay-error" hidden role="alert"></div>
+        </div>
+        <p class="stage-hint">Molette ou pincement : zoom · Glisser : déplacer · Double-clic : zoom x2 · Clic : lecture/pause</p>
+
+        <!-- Barre de lecture (par image) + zone de boucle A-B -->
+        <div class="timeline">
+          <div class="timeline-track">
+            <div id="ab-range" class="ab-range" hidden></div>
+            <input id="scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Position dans la vidéo" disabled />
+          </div>
+          <p id="frame-info" class="frame-info" aria-live="off">Image — / —</p>
+        </div>
+
+        <div class="controls" role="group" aria-label="Contrôles de lecture">
+          <div class="ctrl-group">
+            <button id="btn-prev" class="btn btn-icon" type="button" data-icon="skip-back" aria-label="Combo précédent (P)" title="Combo précédent (P)"></button>
+            <button id="btn-back" class="btn btn-icon" type="button" data-icon="chevron-left" aria-label="Image précédente (←)" title="Image précédente (←)"></button>
+            <button id="btn-play" class="btn btn-primary btn-icon btn-play" type="button" data-icon="play" aria-label="Lecture (K)" title="Lecture / pause (K)"></button>
+            <button id="btn-fwd" class="btn btn-icon" type="button" data-icon="chevron-right" aria-label="Image suivante (→)" title="Image suivante (→)"></button>
+            <button id="btn-next" class="btn btn-icon" type="button" data-icon="skip-forward" aria-label="Combo suivant (N)" title="Combo suivant (N)"></button>
+          </div>
+
+          <div class="ctrl-group" role="group" aria-label="Vitesse">
+            <span class="ctrl-label" aria-hidden="true">Vitesse</span>
+            <div id="speeds" class="segmented"></div>
+          </div>
+
+          <div class="ctrl-group" role="group" aria-label="Boucle A-B">
+            <button id="btn-a" class="btn" type="button" title="Début de boucle à l'image actuelle (A)">A</button>
+            <button id="btn-b" class="btn" type="button" title="Fin de boucle à l'image actuelle (B)">B</button>
+            <button id="btn-ab-clear" class="btn btn-ghost" type="button" title="Effacer la boucle A-B (X)" disabled>Effacer</button>
+          </div>
+
+          <div class="ctrl-group" role="group" aria-label="Zoom">
+            <button id="btn-zoom-out" class="btn btn-icon" type="button" data-icon="zoom-out" aria-label="Zoom arrière (-)" title="Zoom arrière (-)"></button>
+            <span id="zoom-level" class="ctrl-value" aria-live="off">x1</span>
+            <button id="btn-zoom-in" class="btn btn-icon" type="button" data-icon="zoom-in" aria-label="Zoom avant (+)" title="Zoom avant (+)"></button>
+            <button id="btn-zoom-reset" class="btn btn-icon btn-ghost" type="button" data-icon="rotate-ccw" aria-label="Réinitialiser le zoom (0)" title="Réinitialiser le zoom (0)"></button>
+          </div>
+
+          <div class="ctrl-group">
+            <button id="btn-mirror" class="btn btn-icon" type="button" data-icon="flip" aria-label="Miroir (M)" aria-pressed="false" title="Miroir : voir le combo de l'autre côté (M)"></button>
+            <button id="btn-loop" class="btn btn-icon" type="button" data-icon="repeat" aria-label="Boucle (L)" aria-pressed="true" title="Lire en boucle (L)"></button>
+            <button id="btn-mute" class="btn btn-icon" type="button" data-icon="volume-x" aria-label="Activer le son" aria-pressed="false" title="Son"></button>
+            <button id="btn-fullscreen" class="btn btn-icon" type="button" data-icon="maximize" aria-label="Plein écran (F)" title="Plein écran (F)"></button>
+          </div>
+        </div>
+
+        <dl id="stats" class="stats"></dl>
+
+        <p class="source">
+          Données et vidéos :
+          <a id="source-link" href="https://www.brawldatabase.com" target="_blank" rel="noopener noreferrer">BrawlDatabase.com</a>
+          · Astuce : travaille le combo à x0.25, puis remonte la vitesse jusqu'à x1.
+        </p>
+      </section>
+    </main>
+
+    <!-- Annonces pour lecteurs d'écran (vitesse, zoom, boucle…) -->
+    <p id="live" class="sr-only" role="status" aria-live="polite"></p>
+
+    <dialog id="help" class="dialog" aria-labelledby="help-title">
+      <div class="dialog-head">
+        <h2 id="help-title">Raccourcis clavier</h2>
+        <button id="help-close" class="btn btn-icon btn-ghost" type="button" data-icon="x" aria-label="Fermer"></button>
+      </div>
+      <dl class="shortcuts">
+        <dt><kbd>K</kbd></dt><dd>Lecture / pause</dd>
+        <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Image précédente / suivante</dd>
+        <dt><kbd>Maj</kbd> + <kbd>←</kbd> <kbd>→</kbd></dt><dd>10 images en arrière / en avant</dd>
+        <dt><kbd>↓</kbd> <kbd>↑</kbd> ou <kbd>[</kbd> <kbd>]</kbd></dt><dd>Vitesse − / +</dd>
+        <dt><kbd>1</kbd> … <kbd>5</kbd></dt><dd>Vitesse x0.1, x0.25, x0.5, x0.75, x1</dd>
+        <dt><kbd>A</kbd> <kbd>B</kbd> <kbd>X</kbd></dt><dd>Début / fin de boucle, effacer la boucle</dd>
+        <dt><kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd></dt><dd>Zoom avant / arrière / réinitialiser</dd>
+        <dt><kbd>M</kbd></dt><dd>Miroir</dd>
+        <dt><kbd>L</kbd></dt><dd>Boucle on / off</dd>
+        <dt><kbd>F</kbd></dt><dd>Plein écran</dd>
+        <dt><kbd>N</kbd> <kbd>P</kbd></dt><dd>Combo suivant / précédent</dd>
+        <dt><kbd>Début</kbd></dt><dd>Revenir au début (ou au point A)</dd>
+        <dt><kbd>?</kbd></dt><dd>Afficher cette aide</dd>
+      </dl>
+    </dialog>
+
+    <script src="/lab/lab.js"></script>
+  </body>
+</html>

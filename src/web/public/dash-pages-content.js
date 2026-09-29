@@ -651,7 +651,9 @@ function renderCombos(ctx) {
         onPublish: (channelId) => api("/api/combos/publish", "POST", { channelId }),
       }),
   });
-  ctx.root.append(pageHeader({ title: "Combos", description: "Base de true combos (source BrawlDatabase), consultable avec /combos ou un panneau interactif.", actions: [refresh, publish] }));
+  // Page publique d'entraînement (sans connexion), servie par ce même serveur.
+  const lab = linkButton("Ouvrir le Combo Lab", "/lab/", { icon: "play", external: true });
+  ctx.root.append(pageHeader({ title: "Combos", description: "Base de true combos (source BrawlDatabase), consultable avec /combos, un panneau interactif ou le Combo Lab public (/lab/).", actions: [lab, refresh, publish] }));
   const body = el("div", {}, panel(skelLines(4)));
   ctx.root.append(body);
 

@@ -11,11 +11,18 @@
 // Scénarios (états vide, chargement, erreur…) : ouvrir
 //   /__mock/scenario/<nom>   nom ∈ full | empty | errors | slow | loggedout | notadmin | bootfail | expired
 // puis recharger le dashboard. /__mock affiche le scénario courant.
+//
+// Combo Lab (page publique) : http://127.0.0.1:4173/lab/ — mêmes routes que la prod
+// (src/web/comboLab.js), dataset réel data/combos.json, vidéos récupérées sur BrawlDatabase
+// (réseau requis pour la lecture). Scénarios pris en compte : empty, errors, slow.
 
 import express from "express";
+import { readFileSync } from "node:fs";
 // Moteur de filtre réel (module pur, sans Discord ni base) : le testeur du dashboard
 // donne ici exactement les mêmes verdicts qu'en production.
 import { compileFilter, findMatches, maskText, matchedTerms, STARTER_TERMS } from "../src/wordfilterEngine.js";
+// Routes du Combo Lab (module pur, sans Discord ni base) : identiques à la prod.
+import { mountComboLab } from "../src/web/comboLab.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -458,6 +465,43 @@ app.get("/logout", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptimeSec: 3 * 86400 + 4 * 3600, discord: { connected: true, pingMs: 42 }, brawlhallaApi: { reachable: true, lastCheckTs: Date.now() } });
+});
+
+// ---- Combo Lab (public, sans connexion : ni loggedout ni expired ne s'appliquent) ----
+const COMBOS_FILE = resolve(__dirname, "..", "data", "combos.json");
+let labCombos = null;
+function readLabCombos() {
+  if (!labCombos) {
+    try {
+      labCombos = JSON.parse(readFileSync(COMBOS_FILE, "utf8")).combos || [];
+    } catch {
+      labCombos = [];
+    }
+  }
+  return labCombos;
+}
+const labVideos = new Map(); // id -> Buffer (petit cache, évite de re-télécharger)
+app.use("/lab/api", async (req, res, next) => {
+  if (scenario === "slow") await new Promise((r) => setTimeout(r, 1500));
+  if (scenario === "errors") return fail(res, "Erreur interne simulée", 500);
+  next();
+});
+mountComboLab(app, {
+  catalogCacheControl: "no-store",
+  getCombos: async () => (scenario === "empty" ? [] : readLabCombos()),
+  getVideo: async (c) => {
+    if (labVideos.has(c.id)) return labVideos.get(c.id);
+    try {
+      const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (labVideos.size >= 40) labVideos.delete(labVideos.keys().next().value);
+      labVideos.set(c.id, buf);
+      return buf;
+    } catch {
+      return null;
+    }
+  },
 });
 
 // Délai et erreurs simulés selon le scénario.

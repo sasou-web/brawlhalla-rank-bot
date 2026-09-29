@@ -9,7 +9,7 @@
 #  tests + deploy des commandes + restart). Ne PAS utiliser ce script-ci.
 #
 #  Le script :
-#   1. installe Node.js 20 + git (si absents)
+#   1. installe Node.js 20 + git + ffmpeg (si absents)
 #   2. installe pm2 (gestionnaire de process 24/7)
 #   3. installe les dependances du bot
 #   4. verifie la presence du .env
@@ -33,6 +33,13 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   echo "==> Installation de git..."
   apt-get install -y git
+fi
+
+# ffmpeg : ralenti x0.25 des combos dans Discord (optionnel, le bot fonctionne sans).
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "==> Installation de ffmpeg..."
+  # Optionnel : un echec ne doit pas interrompre l'installation (set -e).
+  { apt-get update -y && apt-get install -y ffmpeg; } || echo "!! ffmpeg non installe : le ralenti des combos sera desactive."
 fi
 
 echo "==> Node $(node -v) / npm $(npm -v)"

@@ -90,6 +90,28 @@ sudo bash -c "cd /root/xray-kaya-bot && bash update.sh"
 
 `update.sh` enchaîne : `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart xk-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
 
+### ffmpeg (ralenti des combos)
+
+Le bouton « Ralenti x0.25 » du viewer `/combos` a besoin de **ffmpeg** sur le serveur.
+`install-server.sh` l'installe sur un serveur neuf ; sur un serveur déjà en place, une fois :
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg
+sudo pm2 restart xk-bot
+```
+
+Sans ffmpeg, le bot fonctionne normalement : le bouton n'est simplement pas proposé, et les
+logs affichent « Ralenti des combos désactivé : ffmpeg introuvable ». Binaire ailleurs que
+dans le PATH : `FFMPEG_PATH=/chemin/vers/ffmpeg` dans le `.env`.
+
+### Combo Lab (page publique `/lab/`)
+
+Servi par le dashboard (`<PUBLIC_URL>/lab/`), **sans connexion** : rien à configurer de plus
+dans le reverse proxy (tous les chemins sont déjà transmis). Routes en lecture seule, données
+publiques BrawlDatabase uniquement, rate-limit dédié par IP. Si le dashboard est désactivé
+(`CLIENT_SECRET`, `PUBLIC_URL` ou `SESSION_SECRET` manquant), le Lab l'est aussi et le bouton
+« Combo Lab » disparaît de Discord.
+
 ## Sauvegardes automatiques des données (XP, liaisons)
 
 Le script `backup-data.sh` crée une archive locale **et** l'envoie vers un stockage

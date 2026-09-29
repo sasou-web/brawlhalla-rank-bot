@@ -15,7 +15,8 @@ function bestTierIndex(stats) {
 
 /**
  * Définitions. `test(stats)` est PURE. stats = {
- *   linked, tier1v1, tier2v2, level, globalRank, clips
+ *   linked, tier1v1, tier2v2, level, globalRank, clips,
+ *   combos (combos maîtrisés), weaponsCompleted (armes dont tous les combos sont maîtrisés)
  * }
  */
 export const ACHIEVEMENTS = [
@@ -28,6 +29,10 @@ export const ACHIEVEMENTS = [
   { id: "level50", name: "Niveau 50", emoji: "🌟", desc: "Atteindre le niveau 50 sur le serveur", test: (s) => (s.level || 0) >= 50 },
   { id: "clips5", name: "Créateur", emoji: "🎬", desc: "Poster 5 clips", test: (s) => (s.clips || 0) >= 5 },
   { id: "clips25", name: "Vidéaste", emoji: "🎥", desc: "Poster 25 clips", test: (s) => (s.clips || 0) >= 25 },
+  { id: "combo1", name: "Apprenti", emoji: "🥋", desc: "Maîtriser un premier combo", test: (s) => (s.combos || 0) >= 1 },
+  { id: "combos10", name: "Technicien", emoji: "🧠", desc: "Maîtriser 10 combos", test: (s) => (s.combos || 0) >= 10 },
+  { id: "combos50", name: "Maître des combos", emoji: "🥷", desc: "Maîtriser 50 combos", test: (s) => (s.combos || 0) >= 50 },
+  { id: "weaponmaster", name: "Maître d'arme", emoji: "⚔️", desc: "Maîtriser tous les combos d'une arme", test: (s) => (s.weaponsCompleted || 0) >= 1 },
 ];
 
 const BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));

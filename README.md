@@ -47,7 +47,7 @@ npm start              # demarre le bot
 - `/versus` — compare deux joueurs · `/progression` — courbe du rating · `/carte` — carte profil image
 - `/niveau` · `/classement-niveaux` · `/leaderboard-xp` — XP et niveaux du serveur
 - `/achievements [membre]` — succès débloqués (lié, rank, niveau, clips…)
-- `/combos [arme]` — true combos par arme · `/help` — aide · `/ping` — état de l'API + fiabilité
+- `/combos [arme]` — true combos par arme (ralenti, progression, Combo Lab : voir plus bas) · `/help` — aide · `/ping` — état de l'API + fiabilité
 
 **Staff / Admin**
 - `/setup` — config : salon de validation, rôle validateur, salon d'audit, salon d'annonces, seuil d'auto-validation
@@ -78,11 +78,20 @@ Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que le
 
 ## Engagement, saisons & observabilité
 
-- **Succès / achievements** : 9 succès débloquables (liaison, paliers de rank, Top 100, niveaux XP, clips postés). Consultables via `/achievements`. Annoncés dans un salon dédié **sans ping** (configurable via `/setup-succes` ou le dashboard) — sinon silencieux.
+- **Succès / achievements** : 13 succès débloquables (liaison, paliers de rank, Top 100, niveaux XP, clips postés, combos maîtrisés). Consultables via `/achievements`. Annoncés dans un salon dédié **sans ping** (configurable via `/setup-succes` ou le dashboard) — sinon silencieux.
 - **Récap hebdo de progression** : une fois par semaine, le bot poste dans le salon d'annonces le top des plus gros gains de rating 1v1 sur 7 jours (basé sur l'historique).
 - **Badges de saison** : `/reset-saison` attribue à chaque membre lié un rôle **permanent** `🏅 S{n} {Tier}` (selon son meilleur tier) avant de retirer les rôles de rank, puis incrémente le numéro de saison. Ces badges ne sont jamais retirés.
 - **Fiabilité API** : métriques exposées via `/ping`, l'endpoint `/api/metrics` et un onglet dédié du dashboard (taux de succès, erreurs 429/5xx/réseau, cooldown, files de récupération, fraîcheur de l'index).
 - **Anti-abus** : cooldowns par utilisateur sur les commandes coûteuses (API/canvas).
+
+## Combos : apprendre et progresser
+
+Données et vidéos : [BrawlDatabase](https://www.brawldatabase.com) (`data/combos.json`, mis à jour depuis le dashboard).
+
+- **Viewer privé** (`/combos` ou panneau publié depuis le dashboard) : vidéo, notation, facilité, dégâts, dextérité, menus arme / combo.
+- **Ralenti x0.25** : bouton qui remplace la vidéo par une version ralentie (720p, jouée 3 fois, sans son), encodée à la demande avec **ffmpeg** puis gardée en cache mémoire (2 encodages simultanés au plus). Sans ffmpeg, le bouton n'apparaît pas. Installation : `sudo apt-get install -y ffmpeg` (ou `FFMPEG_PATH`).
+- **« Je maîtrise ce combo »** : bascule par membre (table `combo_mastery`), progression x/y par arme dans le viewer et les menus. **10 XP** la première fois qu'un combo est coché, **5 combos récompensés par jour** au plus, jamais deux fois le même combo (décocher / recocher ne rapporte rien). Respecte l'activation des niveaux et le plafond journalier d'XP. Succès : 1, 10 et 50 combos, « Maître d'arme » (tous les combos d'une arme).
+- **Combo Lab** (`<PUBLIC_URL>/lab/`, bouton dans le viewer et le panneau) : page web **publique, sans connexion**. Vitesse x0.1 → x1, image par image (60 i/s), boucle A-B, zoom x1 → x4 (molette, pincement, double-clic) et déplacement, miroir, recherche et tri, liens partageables (`?c=<id>&speed=0.25`), raccourcis clavier (`?`). Routes en lecture seule : `GET /lab/api/combos` et `GET /lab/video/<id>.mp4` (requêtes Range). Le proxy vidéo ne sert que des ids du dataset ; rate-limit dédié (60 et 240 requêtes/min par IP). Nécessite que le dashboard soit actif.
 
 ## Filtre de mots
 
@@ -97,10 +106,10 @@ Configurable depuis le dashboard (Modération › Filtre de mots), **désactivé
 
 ## Architecture & développement
 
-- Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `tournament.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
+- Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `combos.js`, `tournament.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
 - Persistance SQLite (`data/bot.db`) : configs en documents JSON (table `kv`) ; données à forte écriture (XP, historique de rating, succès, compteurs) dans des **tables dédiées** avec écritures atomiques. Migration automatique depuis l'ancien format au premier démarrage.
 - Tests : `npm test` (lance `node --test` sur une base SQLite **temporaire isolée** via `scripts/run-tests.js`, donc sans toucher `data/bot.db`). Lint syntaxique : `npm run check`. CI locale : `npm run ci`.
-- Dashboard sans Discord : `npm run dash:mock` sert `src/web/public` sur `http://127.0.0.1:4173` avec une API simulée (données fictives, rien n'est publié). Scénarios d'états via `/__mock/scenario/<full|empty|errors|slow|loggedout|notadmin|bootfail|expired>`.
+- Dashboard sans Discord : `npm run dash:mock` sert `src/web/public` sur `http://127.0.0.1:4173` avec une API simulée (données fictives, rien n'est publié). Scénarios d'états via `/__mock/scenario/<full|empty|errors|slow|loggedout|notadmin|bootfail|expired>`. Le Combo Lab y est servi sur `/lab/` avec les vraies routes (`src/web/comboLab.js`) et le dataset réel ; la lecture des vidéos demande un accès à BrawlDatabase.
 - Variables d'environnement utiles : `LEADERBOARD_SYNC_PAGES`, `LEADERBOARD_SYNC_SHALLOW_PAGES`, `LEADERBOARD_SYNC_DEEP_CHUNK` (sync incrémentale du leaderboard), `BOT_DB_PATH` (base alternative, surtout pour les tests).
 
 ## Limites connues

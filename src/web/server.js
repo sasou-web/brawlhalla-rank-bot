@@ -64,7 +64,8 @@ import {
 import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
-import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos } from "../combos.js";
+import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos, loadCombos, getComboVideo } from "../combos.js";
+import { mountComboLab } from "./comboLab.js";
 import { getLeaderboard } from "../levels.js";
 import { getRecentLogs } from "../logBuffer.js";
 import { healthSnapshot } from "../health.js";
@@ -354,6 +355,17 @@ export function startWebServer(client) {
       discord: { connected: h.discordConnected, pingMs: h.wsPingMs },
       brawlhallaApi: { reachable: !h.apiDown, lastCheckTs: h.lastApiCheckTs },
     });
+  });
+
+  // ---- Combo Lab PUBLIC (page /lab/ + API en lecture seule) ----
+  // Sans authentification : données publiques (BrawlDatabase) uniquement, aucune donnée
+  // membre. Hors /api pour garder des compteurs de rate-limit séparés du dashboard : un
+  // lecteur vidéo émet plusieurs requêtes Range par combo.
+  mountComboLab(app, {
+    getCombos: loadCombos,
+    getVideo: getComboVideo,
+    apiLimiter: rateLimiter({ windowMs: 60_000, max: 60 }),
+    videoLimiter: rateLimiter({ windowMs: 60_000, max: 240 }),
   });
 
   // ---- API ----
@@ -1174,7 +1186,7 @@ export function startWebServer(client) {
       if (!weapons.length) return res.status(400).json({ error: "Base de combos vide — mets-la à jour d'abord." });
       const ch = await client.channels.fetch(channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
-      await ch.send(await buildPanelMessage());
+      await ch.send(await buildPanelMessage({ labBaseUrl: webConfig.publicUrl }));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

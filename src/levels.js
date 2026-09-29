@@ -315,6 +315,24 @@ export async function addVoiceXp(guildId, userId, amount, multiplier = 1) {
   return { leveledUp: newLevel > oldLevel, oldLevel, level: newLevel, xp: user.xp };
 }
 
+// Accorde un bonus d'XP ponctuel (ex. combo maîtrisé), sans cooldown ni multiplicateur.
+// Respecte l'activation des niveaux et le plafond journalier. Le caractère « une seule fois »
+// est à la charge de l'appelant. Renvoie { leveledUp, oldLevel, level, xp, gain } ou null.
+export async function addBonusXp(guildId, userId, amount) {
+  const g = await getGuild(guildId);
+  if (!g.config.enabled) return null;
+  if (!(amount > 0)) return null;
+
+  const user = getUserRow(guildId, userId) ?? blankUser();
+  const oldLevel = levelFromTotalXp(user.xp).level;
+  const gain = applyDailyCap(g.config, user, Math.max(0, Math.round(amount)));
+  user.xp += gain;
+  saveUserRow(guildId, userId, user);
+
+  const newLevel = levelFromTotalXp(user.xp).level;
+  return { leveledUp: newLevel > oldLevel, oldLevel, level: newLevel, xp: user.xp, gain };
+}
+
 // ---------- Annonce de montee de niveau (embed partage bot + dashboard) ----------
 
 // Petite barre de progression visuelle (XP dans le niveau courant).
