@@ -5,7 +5,7 @@
    ────────────────────────────────────────────────────────────────────────
    Script classique (voir l'en-tête de dash-core.js).
 
-   Architecture d'information : 16 pages en 5 groupes, organisées par tâche.
+   Architecture d'information : 18 pages en 5 groupes, organisées par tâche.
    Les anciennes adresses (#/stats, #/logs, #/startgg…) sont redirigées vers
    leur nouvel emplacement (ROUTE_ALIASES).
    ════════════════════════════════════════════════════════════════════════ */
@@ -34,6 +34,13 @@ const NAV_GROUPS = [
         ],
         wide: true,
         render: (ctx) => renderWordFilter(ctx),
+      },
+      {
+        id: "roletimeout",
+        label: "Timeout par rôle",
+        icon: "clock",
+        keywords: "timeout exclusion temporaire mute sanction rôle cooldown modération",
+        render: (ctx) => renderRoleTimeout(ctx),
       },
       {
         id: "tickets",

@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════════════════════════
-   Xray Kaya (XK) Bot — Dashboard · modération : filtre de mots
+   Xray Kaya (XK) Bot — Dashboard · modération : filtre de mots, timeout par rôle
    ────────────────────────────────────────────────────────────────────────
    Script classique (voir l'en-tête de dash-core.js).
 
@@ -612,4 +612,161 @@ function wfHistoryTab(host, status, reload) {
       ],
     }),
   );
+}
+
+// ═══════════════════ Timeout par rôle ═══════════════════
+// Commande /timeout déléguée à des rôles. Les bornes et les règles sont revérifiées par
+// le serveur (roleTimeoutRules.js) : la page ne fait que les présenter.
+
+const RT_RULES = [
+  ["x", "Personne ne peut s'exclure soi-même, ni exclure un bot ou le propriétaire du serveur."],
+  ["shield", "Les administrateurs et les membres ayant « Exclure temporairement des membres » sont protégés."],
+  ["arrow-down", "La cible doit avoir un rôle plus bas que celui de l'auteur de la commande (sauf pour le propriétaire)."],
+  ["lock", "Un membre déjà exclu ne peut pas l'être à nouveau : une sanction en cours n'est jamais raccourcie."],
+  ["clock", "Durée de 1 minute à 28 jours (limite Discord) : 10m, 2h, 1d, 1h30m… Un nombre seul compte en minutes."],
+  ["info", "Le rôle du bot doit être au-dessus de celui de la cible. La commande s'enregistre sur Discord avec npm run deploy."],
+];
+
+function rtCooldownLabel(sec) {
+  const n = Number(sec) || 0;
+  return n > 0 ? fmtDuration(n * 1000) : "Aucun";
+}
+
+// Salon où les timeouts sont consignés : journal de modération, sinon salon d'audit.
+function rtLogChannel() {
+  const wf = (CONFIG.wordfilter && CONFIG.wordfilter.logChannelId) || "";
+  if (wf) return { id: wf, label: channelName(wf), source: "Journal de modération" };
+  const audit = (CONFIG.settings && CONFIG.settings.auditChannelId) || "";
+  if (audit) return { id: audit, label: channelName(audit), source: "Salon d'audit" };
+  return null;
+}
+
+function renderRoleTimeout(ctx) {
+  const form = configForm("roletimeout");
+  const c = form.data;
+  ctx.root.append(
+    pageHeader({
+      title: "Timeout par rôle",
+      description: "Autorise des rôles à exclure temporairement des membres avec la commande /timeout.",
+      hasTabs: false,
+      actions: [moduleSwitch("roletimeout", "Timeout par rôle")],
+    }),
+  );
+
+  const status = { data: null, error: null };
+  const statusHost = el("div", { class: "page-status" });
+  const noticeHost = el("div", { class: "stack", style: "gap:8px" });
+  ctx.root.append(statusHost);
+
+  function drawStatus() {
+    clearNode(statusHost);
+    const rolesValue = el("span", { class: "status status-strong num" });
+    watch(rolesValue, () => {
+      rolesValue.textContent = plural((c.allowedRoleIds || []).length, "rôle", "rôles");
+    });
+    const cooldownValue = el("span", { class: "status status-strong" });
+    watch(cooldownValue, () => {
+      cooldownValue.textContent = rtCooldownLabel(c.cooldownSec);
+    });
+    const s = status.data;
+    const perm = s && s.permissions ? !!s.permissions.moderateMembers : null;
+    let botValue;
+    if (status.error) botValue = statusDot("neutral", "Inconnue", { strong: true });
+    else if (!s) botValue = el("span", { class: "skel skel-line", style: "width:60%" });
+    else botValue = perm ? statusDot("ok", "Accordée", { strong: true }) : statusDot("danger", "Manquante", { strong: true });
+    statusHost.append(
+      infoStrip(
+        [
+          { label: "Rôles autorisés", value: rolesValue, meta: "En plus des modérateurs" },
+          { label: "Cooldown", value: cooldownValue, meta: "Par membre, après un timeout réussi" },
+          { label: "Permission du bot", value: botValue, meta: s && s.botRoleName ? `Rôle le plus haut : ${s.botRoleName}` : "« Exclure temporairement des membres »" },
+        ],
+        { label: "État du timeout par rôle" },
+      ),
+    );
+    if (status.error) statusHost.append(inlineError("État du bot indisponible : " + status.error, () => loadStatus()));
+    statusHost.append(noticeHost);
+  }
+
+  // Alertes recalculées à chaque modification.
+  watch(noticeHost, () => {
+    clearNode(noticeHost);
+    const enabled = !!(CONFIG.roletimeout && CONFIG.roletimeout.enabled);
+    const p = status.data && status.data.permissions;
+    if (p && !p.moderateMembers) {
+      noticeHost.append(callout("danger", "Le bot n'a pas la permission « Exclure temporairement des membres » : /timeout échouera pour tout le monde.", { title: "Permission manquante" }));
+    }
+    if (enabled && !(c.allowedRoleIds || []).length) {
+      noticeHost.append(callout("warn", "Aucun rôle autorisé : seuls les membres ayant « Exclure temporairement des membres » peuvent utiliser /timeout."));
+    }
+    if (!rtLogChannel()) {
+      noticeHost.append(callout("info", "Aucun journal configuré : les timeouts ne sont visibles que dans le journal d'audit de Discord."));
+    }
+  });
+
+  async function loadStatus() {
+    status.error = null;
+    status.data = null;
+    drawStatus();
+    try {
+      status.data = await api("/api/roletimeout/status");
+    } catch (e) {
+      status.error = e.message;
+    }
+    if (!ctx.alive()) return;
+    drawStatus();
+    touch();
+  }
+
+  const cooldownSummary = el("p", { class: "field-help", "aria-live": "polite" });
+  watch(cooldownSummary, () => {
+    const n = Number(c.cooldownSec) || 0;
+    cooldownSummary.textContent = n > 0 ? `Un membre autorisé peut exclure une fois toutes les ${fmtDuration(n * 1000)}.` : "Pas de cooldown : les membres autorisés peuvent enchaîner les timeouts.";
+  });
+
+  const log = rtLogChannel();
+  ctx.root.append(
+    groups(
+      settingsGroup(
+        "Rôles autorisés",
+        "Les membres de ces rôles peuvent utiliser /timeout quand le module est actif.",
+        field("Rôles", multiRolePicker(c, "allowedRoleIds"), {
+          help: "Les membres ayant « Exclure temporairement des membres » peuvent toujours l'utiliser, sans cooldown, même module inactif.",
+        }),
+      ),
+      settingsGroup(
+        "Cooldown",
+        "Délai entre deux /timeout d'un même membre autorisé.",
+        el(
+          "div",
+          { class: "field" },
+          field("Cooldown", numberInput(c, "cooldownSec", { min: 0, max: 86400, step: 1, suffix: "s", size: "md" }), {
+            help: "0 : pas de cooldown. Maximum 86 400 s (24 h). Seuls les timeouts réussis le déclenchent.",
+          }),
+          cooldownSummary,
+        ),
+      ),
+      settingsGroup(
+        "Règles appliquées",
+        "Vérifiées par le bot à chaque commande, pour tout le monde, modérateurs compris.",
+        el(
+          "div",
+          { class: "syntax" },
+          RT_RULES.map(([ic, text]) => [el("span", { class: "text-2", "aria-hidden": "true" }, icon(ic, 14)), el("span", {}, text)]),
+        ),
+      ),
+      settingsGroup(
+        "Journal",
+        "Chaque timeout y est consigné : auteur, membre, durée, fin, raison et autorisation.",
+        el(
+          "div",
+          { class: "row", style: "gap:12px;align-items:center" },
+          log ? statusDot("ok", `${log.label} · ${log.source}`) : statusDot("neutral", "Aucun salon"),
+          button("Configurer le journal", { size: "sm", variant: "ghost", icon: "arrow-right", onClick: () => navigate("wordfilter", "sanctions") }),
+        ),
+      ),
+    ),
+  );
+
+  loadStatus();
 }

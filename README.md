@@ -56,6 +56,7 @@ npm start              # demarre le bot
 - `/forcelink <membre> <pseudo>` — lier sans validation
 - `/unlink <membre>` — supprimer la liaison d'un membre
 - `/refresh` — mettre à jour tous les membres liés
+- `/timeout <membre> <durée> [raison]` — exclusion temporaire, ouverte aux rôles choisis dans le dashboard (voir « Timeout par rôle »)
 - `/reset-saison` — clôture la saison : attribue les **badges permanents** de saison puis retire les rôles de rank (tiers + Top), avec confirmation
 
 ## Rôles gérés automatiquement
@@ -104,9 +105,21 @@ Configurable depuis le dashboard (Modération › Filtre de mots), **désactivé
 - **Permissions du bot** : « Gérer les messages » (suppression), « Gérer les webhooks » (masquage), « Exclure temporairement des membres » (exclusions). Le dashboard signale celles qui manquent.
 - Un message retiré ne rapporte pas d'XP et n'est pas traité comme un clip. Le dashboard propose un testeur qui applique les réglages en cours (même non enregistrés) sans rien envoyer sur Discord.
 
+## Timeout par rôle
+
+`/timeout <membre> <durée> [raison]` permet à des rôles choisis d'exclure temporairement un membre sans leur donner la permission Discord. Réglages dans le dashboard (Modération › Timeout par rôle), **désactivé par défaut** :
+
+- **Activation** et **rôles autorisés** (25 au maximum, `@everyone` refusé).
+- **Cooldown par membre** de 0 à 86 400 s (24 h), 300 s par défaut, 0 = aucun. Il n'est consommé qu'après un timeout réussi et survit aux redémarrages (`kv.roletimeoutState`).
+- Les membres ayant « Exclure temporairement des membres » (ou administrateurs) peuvent toujours utiliser la commande, sans cooldown, même module désactivé.
+- **Protections**, pour tout le monde : pas soi-même, pas de bot, pas le propriétaire, pas un administrateur ou un modérateur, pas un membre de rôle égal ou supérieur à celui de l'auteur (sauf pour le propriétaire), pas un membre déjà exclu.
+- **Durée** de 1 min à 28 jours (limite Discord) : `10m`, `2h`, `1d`, `1h30m`… ; un nombre seul compte en minutes.
+- **Journal** : embed dans le « Journal de modération » du filtre de mots s'il est défini, sinon message dans le salon d'audit. Réponses de la commande toujours éphémères.
+- Le bot doit avoir « Exclure temporairement des membres » et un rôle placé au-dessus des cibles. La commande s'enregistre avec `npm run deploy` (lancé par `update.sh`).
+
 ## Architecture & développement
 
-- Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `combos.js`, `tournament.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
+- Code des commandes modularisé sous `src/commands/` (`definitions.js`, `shared.js`, `profile.js`, `linking.js`, `levels.js`, `combos.js`, `tournament.js`, `moderation.js`, `panels/*`). `commands.js` ne contient plus que les dispatchers et quelques commandes diverses.
 - Persistance SQLite (`data/bot.db`) : configs en documents JSON (table `kv`) ; données à forte écriture (XP, historique de rating, succès, compteurs) dans des **tables dédiées** avec écritures atomiques. Migration automatique depuis l'ancien format au premier démarrage.
 - Tests : `npm test` (lance `node --test` sur une base SQLite **temporaire isolée** via `scripts/run-tests.js`, donc sans toucher `data/bot.db`). Lint syntaxique : `npm run check`. CI locale : `npm run ci`.
 - Dashboard sans Discord : `npm run dash:mock` sert `src/web/public` sur `http://127.0.0.1:4173` avec une API simulée (données fictives, rien n'est publié). Scénarios d'états via `/__mock/scenario/<full|empty|errors|slow|loggedout|notadmin|bootfail|expired>`. Le Combo Lab y est servi sur `/lab/` avec les vraies routes (`src/web/comboLab.js`) et le dataset réel ; la lecture des vidéos demande un accès à BrawlDatabase.

@@ -16,6 +16,7 @@
 // Modules activables, dans l'ordre d'affichage.
 const MODULES = [
   { section: "wordfilter", label: "Filtre de mots", page: "wordfilter" },
+  { section: "roletimeout", label: "Timeout par rôle", page: "roletimeout" },
   { section: "tiktok", label: "TikTok", page: "tiktok" },
   { section: "levels", label: "Niveaux", page: "levels" },
   { section: "welcome", label: "Accueil", page: "welcome", on: (c) => c.enabled || c.goodbyeEnabled || c.autoRoleEnabled },
@@ -52,6 +53,8 @@ function configWarnings() {
   // TikTok : traité à part (tiktokHealth), à partir de l'état réel des sources.
   const wf = c("wordfilter");
   if (wf.enabled && !(wf.words || []).length) add("Le filtre de mots est actif mais sa liste de termes est vide.", "wordfilter", "terms");
+  const rt = c("roletimeout");
+  if (rt.enabled && !(rt.allowedRoleIds || []).length) add("Le timeout par rôle est actif sans rôle autorisé : seuls les modérateurs peuvent utiliser /timeout.", "roletimeout");
   const cl = c("clips");
   if (cl.enabled && !(cl.channelIds || []).length) add("Les réactions aux clips sont actives sans salon surveillé.", "clips", "reactions");
   const gr = c("guessrank");

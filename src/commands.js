@@ -106,6 +106,7 @@ import {
   handleCombosSlow,
   handleCombosMaster,
 } from "./commands/combos.js";
+import { handleTimeout } from "./commands/moderation.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
@@ -142,6 +143,9 @@ export const MANAGE_GUILD_COMMANDS = new Set([
   "setup-guessrank", "setup-tickets", "setup-giveaway", "tournoi-panneau", "caster",
 ]);
 export const MANAGE_MESSAGES_COMMANDS = new Set(["clear"]);
+// `timeout` n'est dans aucun de ces ensembles : la commande est déléguée à des rôles choisis
+// dans le dashboard, ses droits (rôle autorisé ou « Exclure temporairement des membres »)
+// sont vérifiés dans son handler (commands/moderation.js).
 
 export async function handleChatInput(interaction, ctx) {
   // Garde de permission centralisée (défense en profondeur) avant tout dispatch.
@@ -175,6 +179,7 @@ export async function handleChatInput(interaction, ctx) {
     case "setup": return handleSetup(interaction, ctx);
     case "setup-succes": return handleSetupSucces(interaction, ctx);
     case "clear": return handleClear(interaction, ctx);
+    case "timeout": return handleTimeout(interaction, ctx);
     case "niveau": return handleNiveau(interaction, ctx);
     case "classement-niveaux": return handleClassementNiveaux(interaction, ctx);
     case "leaderboard-xp": return handleLeaderboardXp(interaction, ctx);

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PermissionFlagsBits } from "discord.js";
 import { requirePermission, requireManageGuild } from "../src/commands/shared.js";
-import { handleChatInput, MANAGE_GUILD_COMMANDS, MANAGE_MESSAGES_COMMANDS } from "../src/commands.js";
+import { handleChatInput, MANAGE_GUILD_COMMANDS, MANAGE_MESSAGES_COMMANDS, commandsData } from "../src/commands.js";
+import { setRoleTimeoutConfig } from "../src/roleTimeout.js";
 
 // Fabrique une interaction factice. `hasPerm` contrôle memberPermissions.has().
 // Les méthodes de réponse enregistrent leurs appels ; deferReply jette volontairement
@@ -71,4 +72,48 @@ test("dispatch : /clear bloqué pour qui n'a pas Gérer les messages", async () 
   assert.equal(it._calls.deferReply, 0);
   assert.equal(it._calls.reply.length, 1);
   assert.match(it._calls.reply[0].content, /Gérer les messages/);
+});
+
+test("/timeout : sans permission par défaut, droits vérifiés dans le handler", () => {
+  const def = commandsData.find((c) => c.name === "timeout");
+  assert.ok(def, "/timeout doit être définie");
+  assert.equal(def.default_member_permissions ?? null, null);
+  const opt = (n) => def.options.find((o) => o.name === n);
+  assert.equal(opt("membre").type, 6);
+  assert.equal(opt("membre").required, true);
+  assert.equal(opt("duree").type, 3);
+  assert.equal(opt("duree").required, true);
+  assert.equal(opt("duree").max_length, 20);
+  assert.equal(opt("raison").type, 3);
+  assert.ok(!opt("raison").required);
+  assert.ok(!MANAGE_GUILD_COMMANDS.has("timeout"));
+  assert.ok(!MANAGE_MESSAGES_COMMANDS.has("timeout"));
+});
+
+test("dispatch : /timeout atteint son handler (refus propre à /timeout, pas « Réservé »)", async () => {
+  await setRoleTimeoutConfig("perm-test-guild", { enabled: true, allowedRoleIds: ["helper"] }, {
+    resolveRoles: async () => ({ roleIds: new Set(["helper"]), everyoneRoleId: "perm-test-guild" }),
+  });
+  const it = mockInteraction({ commandName: "timeout", hasPerm: false });
+  const member = {
+    id: "u1",
+    user: { id: "u1", bot: false, tag: "u1#0001" },
+    permissions: { has: () => false },
+    roles: { cache: new Map(), highest: { position: 1 } },
+    moderatable: true,
+    communicationDisabledUntilTimestamp: null,
+  };
+  const target = { ...member, id: "u2", user: { id: "u2", bot: false, tag: "u2#0001" } };
+  Object.assign(it, {
+    guild: { id: "perm-test-guild", ownerId: "owner", members: { fetch: async (id) => (id === "u1" ? member : target) } },
+    member,
+    user: member.user,
+    client: { user: { id: "bot" } },
+    options: { getUser: () => ({ id: "u2" }), getString: () => "10m" },
+  });
+  await assert.doesNotReject(handleChatInput(it, ctx));
+  assert.equal(it._calls.deferReply, 0);
+  assert.equal(it._calls.reply.length, 1);
+  assert.doesNotMatch(it._calls.reply[0].content, /Réservé/);
+  assert.match(it._calls.reply[0].content, /permission d'utiliser \/timeout/);
 });

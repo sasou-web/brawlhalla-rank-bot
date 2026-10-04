@@ -21,6 +21,8 @@ import { readFileSync } from "node:fs";
 // Moteur de filtre réel (module pur, sans Discord ni base) : le testeur du dashboard
 // donne ici exactement les mêmes verdicts qu'en production.
 import { compileFilter, findMatches, maskText, matchedTerms, STARTER_TERMS } from "../src/wordfilterEngine.js";
+// Validation réelle des réglages du timeout par rôle (module pur) : mêmes refus qu'en prod.
+import { validateRoleTimeoutPatch } from "../src/roleTimeoutRules.js";
 // Routes du Combo Lab (module pur, sans Discord ni base) : identiques à la prod.
 import { mountComboLab } from "../src/web/comboLab.js";
 import { dirname, resolve } from "node:path";
@@ -134,6 +136,7 @@ function baseConfig() {
       timeoutWindowMin: 10,
       timeoutMinutes: 10,
     },
+    roletimeout: { enabled: scenario !== "empty", allowedRoleIds: scenario === "empty" ? [] : [roleId("Staff")], cooldownSec: 300 },
     clips: { enabled: true, channelIds: [byName(text, "clips")], reactions: ["🔥", "👍", "<:xk:1>"], requireVideo: true, deleteNonVideo: false, ignoreBots: true, ignoreReplies: true, pinThreshold: 10, extraDomains: ["catbox.moe"] },
     guessrank: { enabled: false, channelIds: [], reactions: [], ignoreBots: true, ignoreReplies: true, requireVideo: true, deleteNonVideo: false, extraDomains: [], singleVote: true },
     tempvoice: { enabled: true, categoryId: "", hubs: { [byName(voice, "Créer un vocal")]: { nameTemplate: "{user}", userLimit: 0 } } },
@@ -510,7 +513,7 @@ app.use("/api", async (req, res, next) => {
   if (req.path === "/me") return next();
   if (loggedOut || scenario === "loggedout" || scenario === "expired") return res.status(401).json({ error: "non authentifié" });
   if (scenario === "bootfail" && req.path === "/guild") return res.status(500).json({ error: "Discord API: Service Unavailable" });
-  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/tiktok/status", "/tiktok/diagnose"].includes(req.path)) {
+  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose"].includes(req.path)) {
     return res.status(500).json({ error: "Erreur interne simulée" });
   }
   next();
@@ -528,6 +531,12 @@ app.get("/api/config", (req, res) => res.json(state.config));
 app.put("/api/config/:section", (req, res) => {
   const cur = state.config[req.params.section];
   if (!cur) return fail(res, "section inconnue", 404);
+  if (req.params.section === "roletimeout") {
+    const v = validateRoleTimeoutPatch(req.body || {}, { roleIds: new Set(roles.map((r) => r.id)), everyoneRoleId: guild.id });
+    if (!v.ok) return fail(res, v.error, 400);
+    Object.assign(cur, v.value);
+    return res.json(cur);
+  }
   for (const [k, v] of Object.entries(req.body || {})) if (k in cur) cur[k] = v;
   if (req.params.section === "tickets") cur.topics = (cur.topics || []).map((t, i) => ({ ...t, id: t.id || `t${Date.now().toString(36)}${i}` }));
   res.json(cur);
@@ -588,6 +597,10 @@ app.post("/api/wordfilter/clear-history", (req, res) => {
   state.wordfilterLog = [];
   ok(res, { cleared: n });
 });
+
+// ---- Timeout par rôle ----
+// Scénario « empty » : permission manquante, pour afficher l'alerte correspondante.
+app.get("/api/roletimeout/status", (req, res) => res.json({ permissions: { moderateMembers: scenario !== "empty" }, botRoleName: "XK Bot" }));
 
 // ---- TikTok : état et diagnostic ----
 app.get("/api/tiktok/status", (req, res) => res.json({ ...state.tiktok, defaultMessage: "Nouvelle vidéo de {pseudo} va la voir tout de suite ! <:xk:1>" }));

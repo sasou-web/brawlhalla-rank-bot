@@ -183,6 +183,17 @@ export const commandsData = [
     )
     .addUserOption((o) => o.setName("membre").setDescription("Ne supprimer que les messages de ce membre.").setRequired(false))
     .toJSON(),
+  // Volontairement SANS setDefaultMemberPermissions : la commande est déléguée à des rôles
+  // choisis dans le dashboard, les droits sont vérifiés dans le handler (commands/moderation.js).
+  new SlashCommandBuilder()
+    .setName("timeout")
+    .setDescription("Exclut temporairement un membre (rôles autorisés dans le dashboard).")
+    .addUserOption((o) => o.setName("membre").setDescription("Le membre à exclure.").setRequired(true))
+    .addStringOption((o) =>
+      o.setName("duree").setDescription("Durée : 10m, 2h, 1d… (nombre seul = minutes, max 28d).").setMaxLength(20).setRequired(true),
+    )
+    .addStringOption((o) => o.setName("raison").setDescription("Raison (visible dans le journal d'audit).").setMaxLength(400).setRequired(false))
+    .toJSON(),
   // ---------- Systeme de niveaux ----------
   new SlashCommandBuilder()
     .setName("niveau")

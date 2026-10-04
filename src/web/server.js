@@ -26,6 +26,8 @@ import {
   clearWordFilterHistory,
 } from "../wordfilter.js";
 import { STARTER_TERMS } from "../wordfilterEngine.js";
+import { roleTimeoutSection } from "../roleTimeout.js";
+import { configPutHandler } from "./configApi.js";
 import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
@@ -90,7 +92,7 @@ const STATE_COOKIE = "bh_oauth_state";
 const DISCORD_API = "https://discord.com/api";
 
 // Sections de config exposees a l'API (lecture/ecriture).
-function buildSections(guildId) {
+function buildSections(guildId, client) {
   return {
     settings: {
       get: () => getSettings(),
@@ -112,6 +114,12 @@ function buildSections(guildId) {
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
     lol: { get: () => getLolConfig(guildId), set: (b) => setLolConfig(guildId, b) },
     wordfilter: { get: () => getWordFilterConfig(guildId), set: (b) => setWordFilterConfig(guildId, b) },
+    // Rôles autorisés vérifiés auprès de Discord (uniquement quand la liste change).
+    roletimeout: roleTimeoutSection(guildId, async () => {
+      const guild = await client.guilds.fetch(guildId);
+      await guild.roles.fetch();
+      return { roleIds: new Set(guild.roles.cache.keys()), everyoneRoleId: guild.id };
+    }),
   };
 }
 
@@ -193,7 +201,7 @@ export function startWebServer(client) {
   app.use(["/login", "/callback"], rateLimiter({ windowMs: 60_000, max: 20 }));
 
   const redirectUri = `${webConfig.publicUrl}/callback`;
-  const sections = buildSections(config.guildId);
+  const sections = buildSections(config.guildId, client);
 
   // ---- Helpers ----
   async function isGuildAdmin(userId) {
@@ -459,24 +467,8 @@ export function startWebServer(client) {
     res.json(out);
   });
 
-  app.put("/api/config/:section", requireAdmin, async (req, res) => {
-    const s = sections[req.params.section];
-    if (!s) return res.status(404).json({ error: "section inconnue" });
-    try {
-      // Anti mass-assignment : on ne garde que les clés déjà présentes dans le schéma
-      // de config courant de la section (empêche d'injecter des champs arbitraires dans
-      // les docs via Object.assign côté setters).
-      const current = await s.get();
-      const allowed = new Set(Object.keys(current || {}));
-      const body = req.body || {};
-      const filtered = {};
-      for (const k of Object.keys(body)) if (allowed.has(k)) filtered[k] = body[k];
-      const updated = await s.set(filtered);
-      res.json(updated);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Filtre anti mass-assignment + statut des erreurs de validation : voir configApi.js.
+  app.put("/api/config/:section", requireAdmin, configPutHandler(sections));
 
   // Stats globales : membres liés, répartition par tier 1v1, activité XP.
   app.get("/api/stats", requireAdmin, async (req, res) => {
@@ -630,6 +622,21 @@ export function startWebServer(client) {
     try {
       const n = await clearWordFilterHistory(config.guildId);
       res.json({ ok: true, cleared: n });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Timeout par rôle ----
+  // Permission du bot nécessaire à /timeout (lecture seule).
+  app.get("/api/roletimeout/status", requireAdmin, async (req, res) => {
+    try {
+      const guild = await client.guilds.fetch(config.guildId);
+      const me = guild.members.me || (await guild.members.fetchMe());
+      res.json({
+        permissions: { moderateMembers: me.permissions.has(PermissionFlagsBits.ModerateMembers) },
+        botRoleName: me.roles.highest.name,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
