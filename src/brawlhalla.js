@@ -595,6 +595,7 @@ function minimalProfileFromLocal(brawlhallaId, local) {
     totalWins: 0,
     region: local.region ?? "?",
     globalRank: 0,
+    regionRank: local.regionRank ?? 0,
     peak1v1: rating1v1,
     games1v1: 0,
     wins1v1: 0,
@@ -794,6 +795,13 @@ async function fetchPlayerProfile(brawlhallaId) {
   return profile;
 }
 
+// Rang dans la region du joueur (region_ranks de ranked_1v1 : [{ region, rank }]), 0 si absent.
+export function regionRankOf(ranked) {
+  const list = Array.isArray(ranked?.region_ranks) ? ranked.region_ranks : [];
+  const rank = Number(list.find((r) => r?.region === ranked?.region)?.rank);
+  return Number.isInteger(rank) && rank > 0 ? rank : 0;
+}
+
 /**
  * Construit la fiche joueur consolidee a partir des reponses BRUTES de l'API (fonction PURE,
  * testable sans reseau) :
@@ -830,6 +838,7 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     totalWins: all?.wins ?? 0,
     region: ranked?.region ?? "?",
     globalRank: ranked?.global_rank ?? 0,
+    regionRank: regionRankOf(ranked),
     peak1v1: ranked?.peak_rating ?? 0,
     games1v1: ranked?.games ?? 0, // games/wins classees 1v1 (niveau joueur)
     wins1v1: ranked?.wins ?? 0,

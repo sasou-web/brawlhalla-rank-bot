@@ -2,7 +2,7 @@ import { getPlayerProfile, getLegends, baseTier, tierFromRating } from "./brawlh
 import { applyMemberRoles, applyMainLegendRole, refreshRankRoles, updateTopServerRole } from "./roles.js";
 import { setLink, getLink, getAllLinks } from "./store.js";
 import { getSettings } from "./settings.js";
-import { tierIndex, ROLE_PREFIX, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
+import { tierIndex, ROLE_PREFIX, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES, HOME_REGION, TOP_RANK_MAX } from "./config.js";
 import { recordRating } from "./ratingStore.js";
 import { getCounter, grantAndAnnounce } from "./achievements.js";
 import { planRankedXp, awardRankedXp } from "./rankedXp.js";
@@ -28,6 +28,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   let level = profile.level;
   let globalRank = profile.globalRank;
   let region = profile.region && profile.region !== "?" ? profile.region : null;
+  let regionRank = profile.regionRank || 0;
   let rating1v1 = profile.ratings?.["1v1"] ?? 0;
   let rating2v2 = profile.ratings?.["2v2"] ?? 0;
   let rating3v3 = profile.ratings?.["3v3"] ?? 0;
@@ -47,6 +48,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
       const seenAt = Date.parse(previous.rankedSeenAt || "");
       if (Number.isFinite(seenAt) && Date.now() - seenAt < RANK_CARRY_MS) {
         globalRank = globalRank || previous.globalRank || 0;
+        regionRank = regionRank || carriedRegionRank(previous, region);
       }
     }
     // Stats globales indisponibles (404 sur /all) : le niveau à 0 n'est pas une vraie valeur.
@@ -70,6 +72,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
       level = profile.level || previous.level || 0;
       globalRank = profile.globalRank || previous.globalRank || 0;
       region = region || previous.region || null;
+      regionRank = regionRank || carriedRegionRank(previous, region);
     }
   }
 
@@ -83,7 +86,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     "3v3": profile.ranked3v3Available === true ? peakTier(profile.peak3v3) : previous?.peakTiers?.["3v3"] ?? null,
   };
 
-  const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
+  const result = await applyMemberRoles(member, { tiers, level, globalRank, region, regionRank }, rolesByName);
 
   // XP des parties ranked : delta des compteurs games/wins depuis la dernière synchro.
   const rankedXp = await planRankedXp(member, brawlhallaId, profile, previous);
@@ -97,6 +100,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     level,
     globalRank,
     region,
+    regionRank,
     rankedSeenAt: profile.ranked1v1Available ? new Date().toISOString() : previous?.rankedSeenAt ?? null,
     ranked3v3SeenAt: profile.ranked3v3Available ? new Date().toISOString() : previous?.ranked3v3SeenAt ?? null,
     rankedCounters: rankedXp.counters ?? undefined,
@@ -118,6 +122,13 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   // Annonce de montee de tier (uniquement si un tier precedent existait et a augmente).
   await announcePromotions(member, previous?.tiers, tiers);
 
+  // Entrée dans le Top 100 de la région maison. Lien d'avant ce suivi (regionRank jamais
+  // enregistré) : rattrapage silencieux, sinon tout le top serait annoncé au déploiement.
+  if (previous && previous.regionRank !== undefined) {
+    const prevHome = previous.region === HOME_REGION ? previous.regionRank : 0;
+    await announceTopRegion(member, prevHome, region === HOME_REGION ? regionRank : 0);
+  }
+
   // Detection de smurf : bond de rating 1v1 anormal entre deux synchros -> alerte staff.
   if (!profile.partial && profile.ranked1v1Available) {
     await detectSmurf(member, previous?.rating1v1, profile.ratings["1v1"]);
@@ -135,13 +146,20 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
       tier2v2: tiers?.["2v2"] ?? null,
       level,
       globalRank,
+      region,
+      regionRank,
       clips: getCounter(member.guild.id, member.id, "clips"),
     }).catch(() => {});
   } catch {
     /* best-effort */
   }
 
-  return { profile, tiers, ratings: profile.ratings, level, globalRank, region, ...result };
+  return { profile, tiers, ratings: profile.ratings, level, globalRank, region, regionRank, ...result };
+}
+
+// Rang régional connu à reprendre : seulement s'il concerne la même région (sinon 0).
+function carriedRegionRank(previous, region) {
+  return previous?.region === region ? previous.regionRank || 0 : 0;
 }
 
 // Tier de base d'un pic de rating. tierFromRating et non resolveBaseTier : sans tier fourni
@@ -226,6 +244,30 @@ export async function announcePromotions(member, oldTiers, newTiers) {
     const ch = await member.guild.channels.fetch(announceChannelId).catch(() => null);
     if (ch?.isTextBased?.()) {
       await ch.send(`🎉 <@${member.id}> est passé ${promos.join(" et ")} ! GG 🔥`);
+    }
+  } catch {
+    /* annonce best-effort */
+  }
+}
+
+/** Vrai si le rang régional ENTRE dans le top 100 (0 ou > 100 avant, 1..100 maintenant). */
+export function entersTopRegion(prevRank, newRank) {
+  const inTop = (r) => r >= 1 && r <= TOP_RANK_MAX;
+  return inTop(newRank) && !inTop(prevRank);
+}
+
+/** Annonce l'entrée d'un membre dans le Top 100 de la région maison. Best-effort. */
+export async function announceTopRegion(member, prevRank, newRank) {
+  if (!entersTopRegion(prevRank, newRank)) return;
+  try {
+    const { announceChannelId } = await getSettings();
+    if (!announceChannelId) return;
+    const ch = await member.guild.channels.fetch(announceChannelId).catch(() => null);
+    if (ch?.isTextBased?.()) {
+      await ch.send({
+        content: `🏆 <@${member.id}> entre dans le **Top 100 ${HOME_REGION}** (#${newRank}) !`,
+        allowedMentions: { users: [member.id] },
+      });
     }
   } catch {
     /* annonce best-effort */

@@ -7,6 +7,9 @@ import {
   TOP_ROLE_NAME,
   TOP_RANK_MAX,
   TOP_ROLE_COLOR,
+  HOME_REGION,
+  TOP_REGION_ROLE_NAME,
+  TOP_REGION_ROLE_COLOR,
   TOP_SERVER_ROLE_NAME,
   TOP_SERVER_ROLE_COLOR,
   MAIN_LEGEND_ROLE_PREFIX,
@@ -18,24 +21,26 @@ import {
 } from "./config.js";
 import { getAllLinks } from "./store.js";
 
-// Tous les noms de roles geres par le bot (tiers 1v1/2v2/3v3 + top mondial + regions).
+// Tous les noms de roles geres par le bot (tiers 1v1/2v2/3v3 + top mondial/regional + regions).
 export function managedRoleNames() {
   const names = new Set();
   for (const mode of Object.keys(ROLE_PREFIX)) {
     for (const tier of TIERS) names.add(roleName(mode, tier));
   }
   names.add(TOP_ROLE_NAME);
+  names.add(TOP_REGION_ROLE_NAME);
   for (const region of REGIONS) names.add(regionRoleName(region));
   return names;
 }
 
-// Roles "saisonniers" (remis a zero en fin de saison) : tiers + top mondial (pas les niveaux).
+// Roles "saisonniers" (remis a zero en fin de saison) : tiers + tops mondial/regional (pas les niveaux).
 export function seasonalRoleNames() {
   const names = new Set();
   for (const mode of Object.keys(ROLE_PREFIX)) {
     for (const tier of TIERS) names.add(roleName(mode, tier));
   }
   names.add(TOP_ROLE_NAME);
+  names.add(TOP_REGION_ROLE_NAME);
   return names;
 }
 
@@ -67,6 +72,7 @@ export async function ensureRoles(guild) {
     }
   }
   byName.set(TOP_ROLE_NAME, await ensureRole(guild, TOP_ROLE_NAME, TOP_ROLE_COLOR));
+  byName.set(TOP_REGION_ROLE_NAME, await ensureRole(guild, TOP_REGION_ROLE_NAME, TOP_REGION_ROLE_COLOR));
 
   // Roles de region (attribues selon la region du compte Brawlhalla lie).
   for (const region of REGIONS) {
@@ -221,7 +227,7 @@ export async function ensureServerLevelRoles(guild) {
 
 /**
  * Applique au membre l'ensemble de ses roles Brawlhalla calcules.
- * info = { tiers: {"1v1","2v2","3v3"}, level, globalRank }
+ * info = { tiers: {"1v1","2v2","3v3"}, level, globalRank, region, regionRank }
  * Retire les autres roles geres qu'il ne devrait plus avoir.
  */
 export async function applyMemberRoles(member, info, rolesByName) {
@@ -236,6 +242,10 @@ export async function applyMemberRoles(member, info, rolesByName) {
   }
   if (info.region) {
     target.add(regionRoleName(info.region));
+  }
+  // Top 100 regional : seulement pour la region maison (un top 100 US-E n'a pas le role EU).
+  if (info.region === HOME_REGION && info.regionRank >= 1 && info.regionRank <= TOP_RANK_MAX) {
+    target.add(TOP_REGION_ROLE_NAME);
   }
 
   const toAdd = [];
