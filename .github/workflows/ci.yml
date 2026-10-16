@@ -9,13 +9,15 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # 20 = version du serveur de prod (fin de vie le 30/04/2026) ; 24 = LTS active, cible
-    # de la prochaine migration du serveur. fail-fast: false : un echec sur 24 ne masque
-    # pas le resultat sur 20 (et inversement).
+    # 20 = version du serveur de prod (fin de vie le 30/04/2026).
+    # Node 24 retire pour l'instant : better-sqlite3 11.x plante a la fermeture du process
+    # sous Node 24 (« Assertion failed: (env) != nullptr », RemoveEnvironmentCleanupHook).
+    # Le correctif est better-sqlite3 13, qui exige Node >= 22 : a faire EN MEME TEMPS que
+    # la migration du serveur vers Node 24, puis remettre "24" ici.
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["20", "24"]
+        node-version: ["20"]
     steps:
       - uses: actions/checkout@v4
 
