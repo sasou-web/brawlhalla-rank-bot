@@ -197,6 +197,7 @@ export function tierEmojiResolvable(tier) {
 export const ROLE_PREFIX = {
   "1v1": "1v1",
   "2v2": "2v2",
+  "3v3": "3v3",
 };
 
 // Construit le nom de role attendu, ex: "1v1 Gold".
@@ -237,7 +238,7 @@ export function tierIndex(tier) {
   return tier ? TIERS.indexOf(tier) : -1;
 }
 
-// Tier le plus haut entre 1v1 et 2v2 (ou null si aucun).
+// Tier le plus haut parmi ceux fournis (1v1, 2v2, 3v3...), ou null si aucun.
 export function highestTier(tiers) {
   let best = null;
   let bestIdx = -1;

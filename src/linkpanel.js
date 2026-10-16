@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
   description: "Relie ton compte en 10 secondes et reçois automatiquement tes rôles selon ton rang.",
   benefitsTitle: "✨ Pourquoi lier ton compte ?",
   benefits:
-    "🎖️ **Rôles de rank automatiques** en 1v1 & 2v2\n" +
+    "🎖️ **Rôles de rank automatiques** en 1v1, 2v2 & 3v3\n" +
     "🔄 **Mise à jour auto** de tes rôles à chaque changement de rang\n" +
     "🌍 **Rôle de région** (EU, US, BRZ...)\n" +
     "🏆 **Classement du serveur** + rôle « 👑 N°1 du serveur »\n" +

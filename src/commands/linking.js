@@ -27,6 +27,7 @@ function tierSummary(tiers) {
   const parts = [];
   if (tiers?.["1v1"]) parts.push(`1v1 ${tierEmoji(tiers["1v1"])} **${tiers["1v1"]}**`);
   if (tiers?.["2v2"]) parts.push(`2v2 ${tierEmoji(tiers["2v2"])} **${tiers["2v2"]}**`);
+  if (tiers?.["3v3"]) parts.push(`3v3 ${tierEmoji(tiers["3v3"])} **${tiers["3v3"]}**`);
   return parts.length ? parts.join(" · ") : "aucun rank classé";
 }
 
@@ -67,6 +68,7 @@ function buildConfirmPayload(ownerId, brawlhallaId, data) {
       { name: "Brawlhalla ID", value: `\`${brawlhallaId}\``, inline: true },
       { name: "1v1", value: data.tiers?.["1v1"] ? `${tierEmoji(data.tiers["1v1"])} ${data.tiers["1v1"]} (${data.ratings?.["1v1"] ?? 0})` : "—", inline: true },
       { name: "2v2", value: data.tiers?.["2v2"] ? `${tierEmoji(data.tiers["2v2"])} ${data.tiers["2v2"]} (${data.ratings?.["2v2"] ?? 0})` : "—", inline: true },
+      { name: "3v3", value: data.tiers?.["3v3"] ? `${tierEmoji(data.tiers["3v3"])} ${data.tiers["3v3"]} (${data.ratings?.["3v3"] ?? 0})` : "—", inline: true },
       { name: "Niveau / Peak", value: `niv. ${data.level ?? 0} · peak ${data.peak1v1 ?? 0}`, inline: true },
     )
     .setFooter({ text: "Lie uniquement TON compte. En cas d'erreur, clique « Ce n'est pas le bon »." });
@@ -498,6 +500,7 @@ function buildReviewEmbed(user, brawlhallaId, data) {
       { name: "Brawlhalla ID", value: `\`${brawlhallaId}\``, inline: true },
       { name: "1v1", value: `${data.tiers["1v1"] ? `${tierEmoji(data.tiers["1v1"])} ${data.tiers["1v1"]}` : "—"} (${data.ratings["1v1"]})`, inline: true },
       { name: "2v2", value: `${data.tiers["2v2"] ? `${tierEmoji(data.tiers["2v2"])} ${data.tiers["2v2"]}` : "—"} (${data.ratings["2v2"]})`, inline: true },
+      { name: "3v3", value: `${data.tiers["3v3"] ? `${tierEmoji(data.tiers["3v3"])} ${data.tiers["3v3"]}` : "—"} (${data.ratings["3v3"] ?? 0})`, inline: true },
       { name: "Région / Peak / Rang", value: `${data.region} · peak ${data.peak1v1} · #${data.globalRank}`, inline: true },
     )
     .setFooter({ text: "Valide uniquement si ce compte appartient bien à ce membre." })

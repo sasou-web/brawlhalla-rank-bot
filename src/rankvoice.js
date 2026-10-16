@@ -1,5 +1,5 @@
 import { ChannelType, PermissionFlagsBits } from "discord.js";
-import { TIERS, tierIndex, roleName, TOP_ROLE_NAME } from "./config.js";
+import { TIERS, tierIndex, roleName, ROLE_PREFIX, TOP_ROLE_NAME } from "./config.js";
 
 // Emojis unicode pour les NOMS de salons (les emojis custom ne s'affichent pas dans un nom de salon).
 const VOICE_TIER_EMOJI = {
@@ -45,10 +45,10 @@ export async function setupRankVoiceChannels(guild, { categoryId, rangMin = "Bro
   for (let i = minIdx; i < TIERS.length; i++) {
     const tier = TIERS[i];
 
-    // Roles autorises a se connecter : tous les rangs >= ce tier (1v1 ET 2v2) + Top 100.
+    // Roles autorises a se connecter : tous les rangs >= ce tier (1v1, 2v2 et 3v3) + Top 100.
     const allowRoleIds = [];
     for (let j = i; j < TIERS.length; j++) {
-      for (const mode of ["1v1", "2v2"]) {
+      for (const mode of Object.keys(ROLE_PREFIX)) {
         const r = roleByName(roleName(mode, TIERS[j]));
         if (r) allowRoleIds.push(r.id);
       }

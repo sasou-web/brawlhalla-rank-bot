@@ -26,7 +26,7 @@ async function resyncRoles() {
   const ok = await confirmDialog({
     title: "Resynchroniser les rôles de rank ?",
     message:
-      "Le bot revérifie chaque membre lié auprès de l'API Brawlhalla et corrige ses rôles 1v1, 2v2 et « N°1 du serveur ». " +
+      "Le bot revérifie chaque membre lié auprès de l'API Brawlhalla et corrige ses rôles 1v1, 2v2, 3v3 et « N°1 du serveur ». " +
       "Le traitement tourne en arrière-plan pendant quelques minutes ; le bilan est posté dans le salon d'audit.",
     confirmLabel: "Lancer la resynchronisation",
   });
