@@ -9,13 +9,20 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # 20 = version du serveur de prod (fin de vie le 30/04/2026) ; 24 = LTS active, cible
+    # de la prochaine migration du serveur. fail-fast: false : un echec sur 24 ne masque
+    # pas le resultat sur 20 (et inversement).
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "24"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
           cache: "npm"
 
       - name: Install dependencies

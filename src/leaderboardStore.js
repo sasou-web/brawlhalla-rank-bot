@@ -79,37 +79,42 @@ function toRow(p, now) {
 // ---------- Migration unique : ancien data/leaderboard.json -> table leaderboard ----------
 migrateFromJson();
 function migrateFromJson() {
-  if (!runOnce("leaderboardTable")) return;
   const p = resolve(DATA_DIR, "leaderboard.json");
-  if (!existsSync(p)) return;
-  let migrated = 0;
+  let migrated = null;
   try {
-    const old = JSON.parse(readFileSync(p, "utf-8"));
-    const players = old?.players && typeof old.players === "object" ? Object.values(old.players) : [];
-    const now = Date.now();
-    const rows = players
-      .filter((pl) => pl?.id != null)
-      .map((pl) => ({
-        id: String(pl.id),
-        username: pl.username ?? "?",
-        norm: normalize(pl.username ?? "?"),
-        tier: pl.tier ?? null,
-        rating: Math.floor(pl.rating ?? 0),
-        region: pl.region ?? "?",
-        ts: Number(pl.ts) || now,
-      }));
-    upsertMany(rows);
-    migrated = rows.length;
-    if (Number(old?.syncedAt)) saveDoc(SYNCED_KEY, Number(old.syncedAt));
-    try {
-      renameSync(p, `${p}.migrated`);
-    } catch {
-      /* best-effort */
-    }
-    console.log(`Migration leaderboard.json -> table leaderboard (${migrated} joueur(s)).`);
+    // Un échec annule tout, drapeau compris (voir runOnce) : nouvel essai au prochain démarrage.
+    runOnce("leaderboardTable", () => {
+      if (!existsSync(p)) return;
+      const old = JSON.parse(readFileSync(p, "utf-8"));
+      const players = old?.players && typeof old.players === "object" ? Object.values(old.players) : [];
+      const now = Date.now();
+      const rows = players
+        .filter((pl) => pl?.id != null)
+        .map((pl) => ({
+          id: String(pl.id),
+          username: pl.username ?? "?",
+          norm: normalize(pl.username ?? "?"),
+          tier: pl.tier ?? null,
+          rating: Math.floor(pl.rating ?? 0),
+          region: pl.region ?? "?",
+          ts: Number(pl.ts) || now,
+        }));
+      upsertMany(rows);
+      if (Number(old?.syncedAt)) saveDoc(SYNCED_KEY, Number(old.syncedAt));
+      migrated = rows.length;
+    });
   } catch (e) {
-    console.warn(`Migration de leaderboard.json échouée (laissée en JSON) : ${e.message}`);
+    console.warn(`Migration de leaderboard.json échouée (laissée en JSON, nouvel essai au prochain démarrage) : ${e.message}`);
+    return;
   }
+  if (migrated === null) return;
+  // Après la validation de la transaction seulement : le JSON reste en place tant que rien n'est en base.
+  try {
+    renameSync(p, `${p}.migrated`);
+  } catch {
+    /* best-effort */
+  }
+  console.log(`Migration leaderboard.json -> table leaderboard (${migrated} joueur(s)).`);
 }
 
 /**

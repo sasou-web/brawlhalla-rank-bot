@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { getComboVideo, refreshRejection } from "../src/combos.js";
+import { getComboVideo, refreshRejection, pickDataset } from "../src/combos.js";
 import { sendVideoBuffer } from "../src/web/comboLab.js";
 
 // fetch simulé : aucune requête vers BrawlDatabase. Chaque appel est journalisé.
@@ -105,4 +105,19 @@ test("refreshRejection : refuse un jeu vide ou amputé de plus de 20 %, accepte 
   assert.equal(refreshRejection(214, 172), "");
   assert.equal(refreshRejection(214, 230), "");
   assert.equal(refreshRejection(0, 12), "", "première récupération : pas de référence");
+});
+
+// ---------- Choix du jeu de données : dashboard (live) vs graine versionnée ----------
+
+test("pickDataset : la version du dashboard prime, sauf graine scrapée plus récemment", () => {
+  const seed = { combos: [1], scrapedAt: "2026-06-10T04:11:00Z" };
+  const liveNewer = { combos: [1, 2], scrapedAt: "2026-07-01T10:00:00Z" };
+  const liveOlder = { combos: [3], scrapedAt: "2026-05-01T10:00:00Z" };
+  assert.equal(pickDataset(liveNewer, seed), liveNewer); // update.sh ne l'écrase plus
+  assert.equal(pickDataset(liveOlder, seed), seed); // graine re-scrapée et poussée depuis
+  assert.equal(pickDataset({ combos: [4], scrapedAt: seed.scrapedAt }, seed).combos[0], 4); // égalité : live
+  assert.equal(pickDataset({ combos: [5], scrapedAt: null }, { combos: [6], scrapedAt: null }).combos[0], 5);
+  assert.equal(pickDataset(null, seed), seed); // pas de version dashboard
+  assert.equal(pickDataset(liveNewer, null), liveNewer);
+  assert.equal(pickDataset(null, null), null);
 });

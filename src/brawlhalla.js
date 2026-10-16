@@ -1,4 +1,4 @@
-import { config, TIERS, RANKED_TIERS, BH_API_BASE } from "./config.js";
+import { config, TIERS, RANKED_TIERS, BH_API_BASE, envNumber } from "./config.js";
 import { getProfileEntry, setProfileEntry, getWarmIds } from "./profileStore.js";
 import { getSearchEntry, setSearchEntry } from "./searchStore.js";
 import { upsertPlayers, searchLocalPlayers, markSynced, getIndexStats, getLocalPlayer } from "./leaderboardStore.js";
@@ -21,7 +21,7 @@ import { getAllLinks } from "./store.js";
 // NOTE : l'origine Brawlhalla rate-limite/502 desormais quand on l'inonde (teste : des
 // rafales font tomber le taux de succes a ~10%). On garde donc une concurrence FAIBLE
 // pour ne pas aggraver, et on s'appuie sur le retry par fenetres + l'index local.
-const MAX_CONCURRENCY = Number(process.env.API_MAX_CONCURRENCY || 3);
+const MAX_CONCURRENCY = envNumber("API_MAX_CONCURRENCY", 3);
 let _active = 0;
 const _waiters = [];
 
@@ -150,7 +150,7 @@ async function throttledFetch(url, timeoutMs = FETCH_TIMEOUT_MS) {
 
 // Budget de temps total pour decrocher un 200 malgre les 429/502 intermittents.
 // On retape avec un BACKOFF EXPONENTIEL + jitter tant que la fenetre n'est pas ecoulee.
-const RETRY_BUDGET_MS = Number(process.env.API_RETRY_BUDGET_MS || 30000);
+const RETRY_BUDGET_MS = envNumber("API_RETRY_BUDGET_MS", 30000);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

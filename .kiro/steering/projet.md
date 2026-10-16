@@ -60,7 +60,8 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 
 ## Données (dossier `data/`, NE JAMAIS écraser en prod)
 
-- **Tout est dans SQLite `data/bot.db`** (via `src/db.js`, mode WAL). Le seul fichier de `data/` versionné dans git est `combos.json` (données publiques scrapées) ; tout le reste est gitignoré.
+- **Tout est dans SQLite `data/bot.db`** (via `src/db.js`, mode WAL). Le seul fichier de `data/` versionné dans git est `combos.json` (données publiques scrapées, graine régénérée par `scripts/scrape-combos.js`) ; tout le reste est gitignoré, dont `combos.live.json` (écrit par « Mettre à jour la base de combos » du dashboard, prioritaire sauf si la graine a un `scrapedAt` plus récent).
+- **Évolution du schéma** : `CREATE TABLE IF NOT EXISTS` ne modifie jamais une table existante. Ajouter une colonne = mettre à jour le CREATE **et** ajouter une étape à la fin de `SCHEMA_STEPS` (`db.js`, pilotée par `PRAGMA user_version`, helper `addColumn` idempotent). Migrations de données : `runOnce(nom, fn)` (fn synchrone, drapeau posé dans la même transaction que le travail).
 - Migration auto au démarrage : les anciens `data/*.json` sont importés dans `bot.db` puis renommés `.migrated` (backup). `db.js` : `loadDoc(key, fallback)` / `saveDoc(key, value)` (synchrones).
 - Tables, et ce qui est **irremplaçable** vs **reconstructible** — distinction utilisée par `backup-data.sh` :
 

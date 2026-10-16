@@ -31,13 +31,14 @@ const warmStmt = db.prepare(
 // ---------- Migration unique : ancien data/profiles.json -> table profiles ----------
 migrateFromJson();
 function migrateFromJson() {
-  if (!runOnce("profilesTable")) return;
   const p = resolve(DATA_DIR, "profiles.json");
-  if (!existsSync(p)) return;
-  let migrated = 0;
+  let migrated = null;
   try {
-    const old = JSON.parse(readFileSync(p, "utf-8"));
-    const tx = db.transaction(() => {
+    // Un échec annule tout, drapeau compris (voir runOnce) : nouvel essai au prochain démarrage.
+    runOnce("profilesTable", () => {
+      if (!existsSync(p)) return;
+      const old = JSON.parse(readFileSync(p, "utf-8"));
+      let n = 0;
       for (const [id, entry] of Object.entries(old || {})) {
         if (!entry || typeof entry !== "object" || entry.data === undefined) continue;
         const ts = Number(entry.ts) || Date.now();
@@ -47,19 +48,21 @@ function migrateFromJson() {
           lastAccess: Number(entry.lastAccess) || ts,
           data: JSON.stringify(entry.data),
         });
-        migrated++;
+        n++;
       }
+      migrated = n;
     });
-    tx();
-    try {
-      renameSync(p, `${p}.migrated`);
-    } catch {
-      /* best-effort : la donnée est déjà en base */
-    }
-    console.log(`Migration profiles.json -> table profiles (${migrated} profil(s)).`);
   } catch (e) {
-    console.warn(`Migration de profiles.json échouée (laissée en JSON) : ${e.message}`);
+    console.warn(`Migration de profiles.json échouée (laissée en JSON, nouvel essai au prochain démarrage) : ${e.message}`);
+    return;
   }
+  if (migrated === null) return;
+  try {
+    renameSync(p, `${p}.migrated`);
+  } catch {
+    /* best-effort : la donnée est déjà en base */
+  }
+  console.log(`Migration profiles.json -> table profiles (${migrated} profil(s)).`);
 }
 
 export async function getProfileEntry(brawlhallaId) {

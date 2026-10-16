@@ -12,14 +12,16 @@
 #  nombre de membres, plus la taille du ladder Brawlhalla (l'upload Discord
 #  est limite a 25 Mo : on ne risque plus de le depasser silencieusement).
 #
-#  data/combos.json n'est pas sauvegarde : il est versionne dans git.
+#  data/combos.json n'est pas sauvegarde : il est versionne dans git (et
+#  data/combos.live.json, rafraichi depuis le dashboard, se re-scrape a volonte).
 #
 #  Etapes :
 #    1. VACUUM INTO  -> instantane atomique et coherent, SANS arreter le bot
 #    2. integrity_check sur la copie (on ne sauvegarde pas une base corrompue)
-#    3. purge des tables reconstructibles + VACUUM (compaction)
-#    4. gzip -> backups/bot_<horodatage>.db.gz
-#    5. rotation (14 archives) + export offsite
+#    3. purge des tables reconstructibles + retrait du jeton start.gg + VACUUM
+#       puis compteurs de lignes (alerte si base quasi vide, sans bloquer)
+#    4. gzip -> backups/bot_<horodatage>.db.gz, relu par gzip -t (alerte sans bloquer)
+#    5. rotation (14 archives) + export offsite (alerte si aucune cible n'a reussi)
 #
 #  Lancer manuellement :  sudo bash backup-data.sh
 #  Automatiser (cron quotidien a 4h), avec `sudo crontab -e` :
@@ -53,7 +55,8 @@
 #    BACKUP_SCP_DEST      : destination scp, ex: "user@autreserveur:/backups/xk-bot"
 #
 #  NOTE : .env (token Discord) n'est volontairement JAMAIS sauvegarde ici --
-#  garde-le dans un gestionnaire de mots de passe.
+#  garde-le dans un gestionnaire de mots de passe. Le jeton start.gg (kv.settings)
+#  est retire de la copie : a ressaisir dans le dashboard apres une restauration.
 # ============================================================================
 
 set -euo pipefail
@@ -88,6 +91,17 @@ notify_failure() {
 }
 trap 'notify_failure "erreur inattendue ligne $LINENO"' ERR
 
+# Alerte NON bloquante : l'archive est quand meme produite et envoyee (une sauvegarde
+# douteuse vaut mieux que pas de sauvegarde), mais on previent sur le webhook.
+notify_warning() {
+  echo "[$(date '+%F %T')] [backup] ALERTE : $1"
+  if [ -n "${BACKUP_WEBHOOK_URL:-}" ]; then
+    curl -sf -X POST -H "Content-Type: application/json" \
+      -d "{\"content\":\"⚠️ **Sauvegarde suspecte** \`${STAMP}\` — $1\"}" \
+      "$BACKUP_WEBHOOK_URL" >/dev/null 2>&1 || true
+  fi
+}
+
 mkdir -p backups
 
 # --- Prerequis ---
@@ -119,19 +133,48 @@ fi
 for t in $DISPOSABLE_TABLES; do
   sqlite3 "$SNAPSHOT" "DELETE FROM ${t};" 2>/dev/null || true
 done
+# Secret retire de la COPIE (la base live n'est pas touchee) : le jeton start.gg vit dans
+# kv.settings et partirait sinon en clair sur le webhook. A ressaisir dans le dashboard
+# apres une restauration. Place AVANT le VACUUM, qui reecrit le fichier sans l'ancienne page.
+sqlite3 "$SNAPSHOT" "UPDATE kv SET value = json_remove(value, '\$.startggToken') WHERE key = 'settings';" 2>/dev/null \
+  || echo "[backup] ⚠️ Retrait du jeton start.gg impossible : il reste present dans l'archive."
 sqlite3 "$SNAPSHOT" "VACUUM;"
 
-# --- 4. Compression ---
+# --- 3 bis. Controle du contenu (ALERTE seulement, ne bloque jamais l'archivage) ---
+# integrity_check ne voit pas une base valide mais VIDE (bot relance sur une base neuve
+# apres une fausse manipulation) : archivee chaque nuit, elle evincerait les bonnes
+# archives en 14 jours. On compte donc les lignes des tables irremplacables.
+count_rows() { sqlite3 "$SNAPSHOT" "SELECT COUNT(*) FROM $1;" 2>/dev/null || echo "?"; }
+KV_N="$(count_rows kv)"
+XP_N="$(count_rows xp)"
+RH_N="$(count_rows rating_history)"
+# Un compteur illisible ("?") fait echouer le test numerique, donc declenche aussi l'alerte.
+if ! [ "$KV_N" -ge 5 ] 2>/dev/null || ! [ "$XP_N" -gt 0 ] 2>/dev/null; then
+  notify_warning "base quasi vide (kv=${KV_N}, xp=${XP_N}) : mauvaise base sauvegardee ? A verifier avant que la rotation n'evince les bonnes archives."
+fi
+
+# --- 4. Compression, puis relecture de l'archive ---
 gzip -c "$SNAPSHOT" > "$ARCHIVE"
+if ! gzip -t "$ARCHIVE" 2>/dev/null; then
+  notify_warning "archive illisible (gzip -t en echec) : ${ARCHIVE}"
+fi
 RAW_H="$(du -h "$SNAPSHOT" | cut -f1)"
 GZ_H="$(du -h "$ARCHIVE" | cut -f1)"
-echo "[$(date '+%F %T')] Sauvegarde creee : ${ARCHIVE} (${GZ_H} compresse, ${RAW_H} decompresse)"
+echo "[$(date '+%F %T')] Sauvegarde creee : ${ARCHIVE} (${GZ_H} compresse, ${RAW_H} decompresse ; kv=${KV_N}, xp=${XP_N}, ratings=${RH_N})"
 
 # --- 5. Rotation : 14 archives les plus recentes de chaque format ---
 # Le motif `data_*.tar.gz` couvre les archives de l'ancien format (data/ brut),
 # encore presentes le temps qu'elles vieillissent.
-ls -1t backups/bot_*.db.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
-ls -1t backups/data_*.tar.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+# `find` et non `ls backups/motif` : sans aucune archive du motif, ls sort en erreur et,
+# avec pipefail + set -e, le script s'arretait ICI, avant l'export offsite. Ne PAS
+# remplacer par `shopt -s nullglob` : un `ls -1t` sans argument listerait le dossier
+# courant et xargs rm supprimerait des fichiers du projet.
+rotate() {
+  find backups -maxdepth 1 -type f -name "$1" -printf '%T@ %p\n' \
+    | sort -rn | tail -n +15 | cut -d' ' -f2- | xargs -r rm -f
+}
+rotate 'bot_*.db.gz' || echo "[backup] ⚠️ Rotation des archives bot_*.db.gz en echec."
+rotate 'data_*.tar.gz' || echo "[backup] ⚠️ Rotation des archives data_*.tar.gz en echec."
 
 # A partir d'ici, un echec d'export NE DOIT PAS faire echouer le script : la
 # copie locale est deja faite. On desactive l'arret sur erreur et le piege ERR.
@@ -139,6 +182,8 @@ set +e
 trap - ERR
 
 SIZE_BYTES=$(stat -c%s "$ARCHIVE" 2>/dev/null || echo 0)
+# Passe a 1 des qu'une cible externe a recu l'archive (controle final ci-dessous).
+OFFSITE_OK=0
 
 # ---------- 1) Webhook Discord (offsite, sans infra) ----------
 if [ -n "${BACKUP_WEBHOOK_URL:-}" ]; then
@@ -153,6 +198,7 @@ if [ -n "${BACKUP_WEBHOOK_URL:-}" ]; then
         -F "file1=@${ARCHIVE}" \
         "$BACKUP_WEBHOOK_URL" >/dev/null; then
       echo "[backup] Envoye au webhook Discord ✅"
+      OFFSITE_OK=1
     else
       echo "[backup] ⚠️ Echec de l'envoi au webhook Discord."
     fi
@@ -164,6 +210,7 @@ if [ -n "${BACKUP_RCLONE_REMOTE:-}" ]; then
   if command -v rclone >/dev/null 2>&1; then
     if rclone copy "$ARCHIVE" "$BACKUP_RCLONE_REMOTE" >/dev/null 2>&1; then
       echo "[backup] Copie vers rclone (${BACKUP_RCLONE_REMOTE}) ✅"
+      OFFSITE_OK=1
     else
       echo "[backup] ⚠️ Echec rclone vers ${BACKUP_RCLONE_REMOTE}."
     fi
@@ -176,6 +223,7 @@ fi
 if [ -n "${BACKUP_SCP_DEST:-}" ]; then
   if scp -q -o BatchMode=yes "$ARCHIVE" "$BACKUP_SCP_DEST" 2>/dev/null; then
     echo "[backup] Copie scp vers ${BACKUP_SCP_DEST} ✅"
+    OFFSITE_OK=1
   else
     echo "[backup] ⚠️ Echec scp vers ${BACKUP_SCP_DEST} (cle SSH configuree ?)."
   fi
@@ -183,4 +231,8 @@ fi
 
 if [ -z "${BACKUP_WEBHOOK_URL:-}${BACKUP_RCLONE_REMOTE:-}${BACKUP_SCP_DEST:-}" ]; then
   echo "[backup] ⚠️ Aucune cible externe configuree (backup.env) — sauvegarde LOCALE uniquement."
+elif [ "$OFFSITE_OK" -eq 0 ]; then
+  # Les echecs ci-dessus ne sont que dans backup.log : sans alerte, on decouvrirait
+  # l'absence de copie externe le jour ou le disque du serveur lache.
+  notify_failure "aucune cible externe n'a recu l'archive (copie LOCALE uniquement : ${ARCHIVE})"
 fi

@@ -1,14 +1,14 @@
 /**
  * True combos Brawlhalla — données BrawlDatabase (https://www.brawldatabase.com).
  * - loadCombos / combosFor / comboById / weaponsWithCombos : lecture du dataset
- * - refreshCombos : (re)scrape depuis BrawlDB et écrit data/combos.json
+ * - refreshCombos : (re)scrape depuis BrawlDB et écrit data/combos.live.json (ou la graine data/combos.json)
  * - getComboVideo / getSlowComboVideo : vidéo d'origine (cache LRU) et ralenti x0.25 (ffmpeg)
  * - buildPanelMessage / buildComboViewer : payloads Discord (Components V2)
  *
  * Aucun accès à la base ici : la progression (combos maîtrisés) est fournie par l'appelant,
  * pour que scripts/scrape-combos.js et deploy-commands n'ouvrent jamais data/bot.db.
  */
-import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink, rename } from "node:fs/promises";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -33,7 +33,11 @@ import { WEAPON_META, weaponLabel, weaponEmoji } from "./comboData.js";
 export { WEAPON_META, weaponLabel, weaponEmoji };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA = resolve(__dirname, "..", "data", "combos.json");
+// Graine versionnée dans git (/combos marche dès le premier déploiement, régénérée par
+// scripts/scrape-combos.js) et version rafraîchie depuis le dashboard, gitignorée (data/*) :
+// update.sh remet la graine du dépôt, il n'écrase donc plus les combos scrapés entre-temps.
+const SEED_FILE = resolve(__dirname, "..", "data", "combos.json");
+const LIVE_FILE = resolve(__dirname, "..", "data", "combos.live.json");
 const BASE = "https://www.brawldatabase.com";
 const MAX_ID = 240;
 const CONCURRENCY = 10;
@@ -42,15 +46,32 @@ const HEADERS = { "HX-Request": "true", "User-Agent": "Mozilla/5.0 (combo-fetche
 let cache = null;
 let meta = { scrapedAt: null };
 
+// { combos, scrapedAt } d'un fichier de combos, ou null s'il est absent ou illisible.
+async function readDataset(file) {
+  try {
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    return Array.isArray(raw.combos) ? { combos: raw.combos, scrapedAt: raw.scrapedAt || null } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Jeu de combos à servir : la version du dashboard (`live`) en priorité, sauf si la graine
+ * versionnée (`seed`) a été scrapée plus récemment : une graine re-scrapée et poussée après
+ * un rafraîchissement depuis le dashboard reprend ainsi la main au déploiement suivant.
+ */
+export function pickDataset(live, seed) {
+  if (!live || !seed) return live || seed || null;
+  const time = (d) => Date.parse(d.scrapedAt) || 0;
+  return time(seed) > time(live) ? seed : live;
+}
+
 export async function loadCombos() {
   if (cache) return cache;
-  try {
-    const raw = JSON.parse(await readFile(DATA, "utf8"));
-    cache = Array.isArray(raw.combos) ? raw.combos : [];
-    meta.scrapedAt = raw.scrapedAt || null;
-  } catch {
-    cache = [];
-  }
+  const ds = pickDataset(await readDataset(LIVE_FILE), await readDataset(SEED_FILE));
+  cache = ds ? ds.combos : [];
+  meta.scrapedAt = ds ? ds.scrapedAt : null;
   return cache;
 }
 
@@ -130,9 +151,24 @@ export function refreshRejection(previousCount, nextCount) {
   return "";
 }
 
-// Re-scrape BrawlDB et réécrit data/combos.json. Renvoie { count, byWeapon }.
+// Écriture atomique (convention du projet) : un arrêt en pleine écriture laisse l'ancien
+// fichier intact au lieu d'un JSON tronqué, qui viderait /combos et le Combo Lab.
+// Nom temporaire unique : deux rafraîchissements simultanés n'écrivent pas le même fichier.
+async function writeFileAtomic(file, data) {
+  const tmp = `${file}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, data);
+    await rename(tmp, file);
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    throw e;
+  }
+}
+
+// Re-scrape BrawlDB et réécrit data/combos.live.json (dashboard), ou la graine versionnée
+// data/combos.json avec { seed: true } (scripts/scrape-combos.js). Renvoie { count, byWeapon }.
 // Lève (sans rien écrire) si le résultat est suspect : voir refreshRejection.
-export async function refreshCombos() {
+export async function refreshCombos({ seed = false } = {}) {
   const ids = Array.from({ length: MAX_ID }, (_, i) => i + 1);
   const combos = [];
   for (let i = 0; i < ids.length; i += CONCURRENCY) {
@@ -144,8 +180,9 @@ export async function refreshCombos() {
   if (why) throw new Error(`${why} (BrawlDatabase indisponible ou modifié ?) : base actuelle conservée.`);
   combos.sort((a, b) => a.weapon.localeCompare(b.weapon) || b.usability - a.usability || a.id - b.id);
   const scrapedAt = new Date().toISOString();
-  await mkdir(dirname(DATA), { recursive: true });
-  await writeFile(DATA, JSON.stringify({ source: BASE, scrapedAt, combos }, null, 2));
+  const file = seed ? SEED_FILE : LIVE_FILE;
+  await mkdir(dirname(file), { recursive: true });
+  await writeFileAtomic(file, JSON.stringify({ source: BASE, scrapedAt, combos }, null, 2));
   cache = combos; // recharge le cache à chaud
   meta.scrapedAt = scrapedAt;
   const byWeapon = {};

@@ -8,19 +8,34 @@ function required(name) {
   return value;
 }
 
+/**
+ * Nombre lu dans l'environnement, `def` si absent. Une valeur qui n'est pas un nombre fini
+ * ("180m", "1h", "Infinity") retombe sur `def` avec un avertissement, sans bloquer le
+ * demarrage : Number("1h") vaut NaN, et un setInterval de NaN ms tourne toutes les 1 ms
+ * (API martelee, logs qui remplissent le disque).
+ */
+export function envNumber(name, def, env = process.env) {
+  const raw = String(env[name] ?? "").trim();
+  if (!raw) return def;
+  const n = Number(raw);
+  if (Number.isFinite(n)) return n;
+  console.warn(`${name}="${raw}" n'est pas un nombre : valeur par defaut ${def} utilisee. Corrige ton fichier .env.`);
+  return def;
+}
+
 export const config = {
   token: required("DISCORD_TOKEN"),
   clientId: required("CLIENT_ID"),
   guildId: required("GUILD_ID"),
-  refreshIntervalMinutes: Number(process.env.REFRESH_INTERVAL_MINUTES || 60),
+  refreshIntervalMinutes: envNumber("REFRESH_INTERVAL_MINUTES", 60),
   // Synchro de l'index local du leaderboard (recherche instantanee facon Raybot).
   // Pages de 50 joueurs : 500 pages = top ~25 000 classes 1v1. Mets 0 pour desactiver.
-  leaderboardSyncPages: Number(process.env.LEADERBOARD_SYNC_PAGES || 500),
-  leaderboardSyncIntervalMinutes: Number(process.env.LEADERBOARD_SYNC_INTERVAL_MINUTES || 180),
+  leaderboardSyncPages: envNumber("LEADERBOARD_SYNC_PAGES", 500),
+  leaderboardSyncIntervalMinutes: envNumber("LEADERBOARD_SYNC_INTERVAL_MINUTES", 180),
   // Sync incrementale : pages "chaudes" (haut du classement) resynchronisees a CHAQUE cycle,
   // + un bloc de pages "profondes" balayees par rotation entre cycles (doux pour l'API).
-  leaderboardSyncShallowPages: Number(process.env.LEADERBOARD_SYNC_SHALLOW_PAGES || 20),
-  leaderboardSyncDeepChunk: Number(process.env.LEADERBOARD_SYNC_DEEP_CHUNK || 80),
+  leaderboardSyncShallowPages: envNumber("LEADERBOARD_SYNC_SHALLOW_PAGES", 20),
+  leaderboardSyncDeepChunk: envNumber("LEADERBOARD_SYNC_DEEP_CHUNK", 80),
   // Salon ou sont envoyees les demandes de validation (vide = liaison directe sans modo).
   reviewChannelId: process.env.REVIEW_CHANNEL_ID || "",
   // Role autorise a valider/refuser (vide = permission "Manage Guild" requise a la place).

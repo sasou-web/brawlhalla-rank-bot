@@ -88,7 +88,13 @@ Le dossier de prod est un clone git sous `/root/xray-kaya-bot`. Pour déployer u
 sudo bash -c "cd /root/xray-kaya-bot && bash update.sh"
 ```
 
-`update.sh` enchaîne : `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart xk-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
+`update.sh` enchaîne : instantané de la base → `git pull` → `npm install` → lint + tests → `npm run deploy` → `pm2 restart xk-bot`. Les données (`data/`, `.env`, `bot.db`) sont gitignorées et ne sont jamais touchées.
+
+L'instantané (`backups/pre-update_<date>_<commit>.db`, les 5 derniers sont gardés) est le
+point de retour si une mise à jour abîme les données : `<commit>` est la version du code qui
+tournait avec cette base. Il se restaure comme une sauvegarde (voir « Restaurer une
+sauvegarde »), en remplaçant la ligne `gunzip` par un `cp` du fichier `.db`. S'il n'a pas
+pu être pris, `update.sh` l'affiche et continue.
 
 ### ffmpeg (ralenti des combos)
 
@@ -152,10 +158,14 @@ limite d'upload de 25 Mo de Discord.
 L'instantané est produit par `VACUUM INTO`, qui lit la base **sans arrêter le bot** et garantit
 un fichier cohérent. Un `PRAGMA integrity_check` est fait avant archivage : une base corrompue
 n'est jamais sauvegardée. En cas d'échec, une alerte est postée sur le webhook (un cron cassé
-ne passe plus inaperçu).
+ne passe plus inaperçu). Le script alerte aussi, **sans bloquer l'archivage**, si la copie
+paraît quasi vide (moins de 5 documents `kv` ou aucune ligne `xp`), si l'archive ne se relit
+pas (`gzip -t`), ou si aucune cible externe configurée n'a reçu l'archive.
 
 `.env` n'est **jamais** sauvegardé (il contient le token du bot) — garde-le dans un
-gestionnaire de mots de passe.
+gestionnaire de mots de passe. Le jeton start.gg (réglé dans le dashboard, stocké dans
+`kv.settings`) est **retiré de la copie** avant archivage : il est à ressaisir dans le
+dashboard après une restauration.
 
 ### Vérifier une archive (sans rien restaurer)
 
