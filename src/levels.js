@@ -33,6 +33,12 @@ const DEFAULT_CONFIG = {
   boosterMultiplier: 2, // multiplicateur applique au role bonus
   noXpChannels: [], // salons (texte/vocal) ou aucune XP n'est gagnee
   dailyXpCap: 0, // plafond d'XP par membre et par jour (0 = illimite)
+  // ---- XP des parties ranked (src/rankedXp.js) ----
+  gameXpEnabled: false,
+  xpPerRankedGame: 5, // XP par partie classee jouee depuis la derniere synchro
+  xpPerRankedWin: 10, // XP en plus par partie gagnee
+  gameXpDailyCap: 300, // plafond propre a l'XP de jeu, par membre et par jour (0 = illimite)
+  gameXpModes: ["1v1", "2v2", "3v3"], // modes ranked qui rapportent de l'XP
 };
 
 // ---------- Persistance de la CONFIG (kv JSON) ----------

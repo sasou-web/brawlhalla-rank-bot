@@ -334,6 +334,27 @@ function renderGuild(ctx) {
 }
 
 // ═══════════════════ Niveaux ═══════════════════
+const GAME_XP_MODE_LABELS = [
+  ["1v1", "Ranked 1v1"],
+  ["2v2", "Ranked 2v2"],
+  ["3v3", "Ranked 3v3"],
+];
+
+// Interrupteur « ce mode compte » branché sur la liste gameXpModes (ordre fixe gardé).
+function gameXpModeToggle(c, mode) {
+  return {
+    get on() {
+      return Array.isArray(c.gameXpModes) && c.gameXpModes.includes(mode);
+    },
+    set on(v) {
+      const set = new Set(Array.isArray(c.gameXpModes) ? c.gameXpModes : []);
+      if (v) set.add(mode);
+      else set.delete(mode);
+      c.gameXpModes = GAME_XP_MODE_LABELS.map(([m]) => m).filter((m) => set.has(m));
+    },
+  };
+}
+
 function renderLevels(ctx) {
   const f = configForm("levels");
   const c = f.data;
@@ -363,6 +384,19 @@ function renderLevels(ctx) {
         null,
         switchField("Gagner de l'XP en vocal", c, "voiceEnabled"),
         showWhen(field("XP par minute", numberInput(c, "voiceXpPerMin", { min: 0 })), () => !!c.voiceEnabled),
+      ),
+      settingsGroup(
+        "XP de jeu",
+        "Les parties ranked jouées par les membres liés rapportent de l'XP, relevées à chaque synchro du profil. Les bonus du week-end et de rôle ne s'appliquent pas.",
+        switchField("Gagner de l'XP en jouant", c, "gameXpEnabled", { help: "Sans appel API en plus : on compare les parties du profil Brawlhalla entre deux synchros." }),
+        ...[
+          fieldRow(
+            field("XP par partie", numberInput(c, "xpPerRankedGame", { min: 0 })),
+            field("Bonus par victoire", numberInput(c, "xpPerRankedWin", { min: 0 }), { help: "En plus de l'XP de la partie." }),
+          ),
+          field("Plafond quotidien", numberInput(c, "gameXpDailyCap", { min: 0, suffix: "XP", size: "md" }), { help: "XP de jeu maximale par membre et par jour. 0 : illimité. Le plafond général s'applique aussi." }),
+          ...GAME_XP_MODE_LABELS.map(([mode, label]) => switchField(label, gameXpModeToggle(c, mode), "on")),
+        ].map((node) => showWhen(node, () => !!c.gameXpEnabled)),
       ),
       settingsGroup(
         "Bonus",

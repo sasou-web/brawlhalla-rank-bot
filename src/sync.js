@@ -5,6 +5,7 @@ import { getSettings } from "./settings.js";
 import { tierIndex, ROLE_PREFIX, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
 import { recordRating } from "./ratingStore.js";
 import { getCounter, grantAndAnnounce } from "./achievements.js";
+import { planRankedXp, awardRankedXp } from "./rankedXp.js";
 
 // Durée pendant laquelle un 404 sur ranked laisse le rang mondial connu en place.
 const RANK_CARRY_MS = 24 * 60 * 60 * 1000;
@@ -84,6 +85,9 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
 
   const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
 
+  // XP des parties ranked : delta des compteurs games/wins depuis la dernière synchro.
+  const rankedXp = await planRankedXp(member, brawlhallaId, profile, previous);
+
   await setLink(member.id, brawlhallaId, profile.name ?? member.user.username, {
     tiers,
     peakTiers,
@@ -95,7 +99,9 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     region,
     rankedSeenAt: profile.ranked1v1Available ? new Date().toISOString() : previous?.rankedSeenAt ?? null,
     ranked3v3SeenAt: profile.ranked3v3Available ? new Date().toISOString() : previous?.ranked3v3SeenAt ?? null,
+    rankedCounters: rankedXp.counters ?? undefined,
   });
+  await awardRankedXp(member, rankedXp);
 
   // Historique de rating (pour la courbe /progression). Best-effort : ne bloque pas la synchro.
   // On n'enregistre pas sur un profil partiel (donnees ratings non fiables).
