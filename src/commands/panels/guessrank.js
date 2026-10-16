@@ -17,7 +17,7 @@ import { EPHEMERAL } from "../shared.js";
 // Panneau interactif /setup-guessrank  (réactions emojis de rank)
 // ====================================================================
 
-const TRUTH_LABELS = { "1v1": "rang 1v1 actuel", peak: "pic 1v1 de la saison", highest: "meilleur mode (1v1/2v2)" };
+const TRUTH_LABELS = { "1v1": "rang 1v1 actuel", peak: "pic 1v1 de la saison", highest: "meilleur mode ranked" };
 
 async function buildGuessRankPanel(guildId) {
   const cfg = await getGuessRankConfig(guildId);

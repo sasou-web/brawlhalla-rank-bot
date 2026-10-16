@@ -632,7 +632,7 @@ function clipsTab(host, c, guess) {
               selectInput(c, "truthMode", [
                 { value: "1v1", label: "Rang 1v1 actuel" },
                 { value: "peak", label: "Pic 1v1 de la saison" },
-                { value: "highest", label: "Meilleur mode (1v1 ou 2v2)" },
+                { value: "highest", label: "Meilleur mode ranked (1v1, 2v2, 3v3)" },
               ]),
               { help: "Figé au moment du clip. Jeu sur l'honneur : le rang reste visible sur le profil." },
             ),
