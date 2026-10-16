@@ -15,13 +15,18 @@ import { db, DATA_DIR, runOnce } from "./db.js";
 
 const getStmt = db.prepare("SELECT ts, last_access AS lastAccess, data FROM profiles WHERE brawlhalla_id = ?");
 const touchStmt = db.prepare("UPDATE profiles SET last_access = ? WHERE brawlhalla_id = ?");
+// Une mise à jour du cache (refresh, warm, file de récupération) ne compte PAS comme un
+// accès : `last_access` n'est posé qu'à la création puis par getProfileEntry. Sinon chaque
+// warm « réchauffait » le profil et il restait chaud pour toujours.
 const upsertStmt = db.prepare(`
   INSERT INTO profiles (brawlhalla_id, ts, last_access, data)
   VALUES (@id, @ts, @lastAccess, @data)
   ON CONFLICT(brawlhalla_id) DO UPDATE SET
-    ts = excluded.ts, last_access = excluded.last_access, data = excluded.data
+    ts = excluded.ts, data = excluded.data
 `);
-const warmStmt = db.prepare("SELECT brawlhalla_id AS id FROM profiles WHERE last_access >= ?");
+const warmStmt = db.prepare(
+  "SELECT brawlhalla_id AS id FROM profiles WHERE last_access >= ? ORDER BY last_access DESC LIMIT ?",
+);
 
 // ---------- Migration unique : ancien data/profiles.json -> table profiles ----------
 migrateFromJson();
@@ -79,8 +84,9 @@ export async function setProfileEntry(brawlhallaId, data) {
   });
 }
 
-// Renvoie les ids des profils a garder chauds (accedes recemment).
-export async function getWarmIds(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+// Renvoie les ids des profils a garder chauds (accedes recemment), les plus recents d'abord.
+// `limit` < 0 = sans limite.
+export async function getWarmIds(maxAgeMs = 7 * 24 * 60 * 60 * 1000, limit = -1) {
   const cutoff = Date.now() - maxAgeMs;
-  return warmStmt.all(cutoff).map((r) => r.id);
+  return warmStmt.all(cutoff, Math.floor(limit)).map((r) => r.id);
 }

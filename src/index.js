@@ -16,9 +16,9 @@ process.on("uncaughtException", (err) => {
   console.error("uncaughtException :", err?.message || err);
   notifyAdmin(`🛑 **Erreur non gérée** : ${err?.message || err}. Le process va probablement redémarrer (pm2).`);
 });
-import { ensureRoles, ensureValidatorRole, ensureServerLevelRoles, updateTopServerRole } from "./roles.js";
+import { refreshRankRoles, ensureValidatorRole, ensureServerLevelRoles } from "./roles.js";
 import { handleChatInput, handleButton, handleSelect, handleModal } from "./commands.js";
-import { syncMember } from "./sync.js";
+import { syncAllMembers, isSyncingAll } from "./sync.js";
 import { getAllLinks } from "./store.js";
 import { closeDb } from "./db.js";
 import { setSetting } from "./settings.js";
@@ -50,7 +50,8 @@ const client = new Client({
   ],
 });
 
-// Etat partage : map nom_de_role -> Role, rafraichie au demarrage.
+// Etat partage : map nom_de_role -> Role, remplie au demarrage puis rafraichie EN PLACE a
+// chaque refresh global (refreshRankRoles) : ne jamais la reassigner.
 const ctx = { rolesByName: new Map() };
 
 // Suivi des boucles périodiques pour pouvoir les arrêter proprement à l'extinction.
@@ -61,48 +62,50 @@ function every(fn, ms) {
   return h;
 }
 
-// Garde anti-chevauchement : un refresh est séquentiel (await par membre) et peut, sur
-// beaucoup de liaisons, dépasser l'intervalle. On évite qu'un second cycle se superpose.
-let refreshing = false;
-
+// Refresh automatique : même point d'entrée, donc même verrou anti-chevauchement, que
+// /refresh, le bouton « Actualiser les rôles » et le dashboard (syncAllMembers). Avec deux
+// verrous distincts, deux passes lisaient le même état précédent et annonçaient deux fois
+// chaque promotion. Revérifie aussi les rôles gérés et le rôle « n°1 du serveur ».
 async function refreshAllMembers(guild) {
-  if (refreshing) {
-    console.log("Refresh auto ignoré : un cycle est déjà en cours.");
+  const total = Object.keys(await getAllLinks()).length;
+  if (total === 0) return;
+  if (isSyncingAll()) {
+    console.log("Refresh auto ignoré : une actualisation est déjà en cours.");
     return;
   }
-  refreshing = true;
+  console.log(`Refresh auto : ${total} membre(s) lie(s)...`);
+  const r = await syncAllMembers(guild, ctx.rolesByName);
+  console.log(`Refresh auto termine : ${r.ok}/${r.total} mis a jour.`);
+  if (r.top) console.log(`Role n°1 du serveur : <@${r.top.topId}> (${r.top.rating}).`);
+}
+
+// Rôles de rank : (re)crée les rôles gérés et met à jour ctx.rolesByName. Vrai si réussi.
+async function prepareRankRoles(guild) {
   try {
-    const links = await getAllLinks();
-    const entries = Object.entries(links);
-    if (entries.length === 0) return;
-
-    console.log(`Refresh auto : ${entries.length} membre(s) lie(s)...`);
-    let ok = 0;
-    for (const [discordId, { brawlhallaId }] of entries) {
-      try {
-        const member = await guild.members.fetch(discordId).catch(() => null);
-        if (!member) continue;
-        await syncMember(member, brawlhallaId, ctx.rolesByName);
-        ok++;
-      } catch (err) {
-        console.warn(`  refresh echoue pour ${discordId} : ${err.message}`);
-      }
-    }
-    console.log(`Refresh auto termine : ${ok}/${entries.length} mis a jour.`);
-
-    // Met a jour le role "n°1 du serveur" (plus haut rating 1v1 parmi les membres lies).
-    try {
-      const top = await updateTopServerRole(guild);
-      if (top) console.log(`Role n°1 du serveur : <@${top.topId}> (${top.rating}).`);
-    } catch (err) {
-      console.warn("Maj role n°1 du serveur echouee :", err.message);
-    }
-  } finally {
-    refreshing = false;
+    await refreshRankRoles(guild, ctx.rolesByName);
+    console.log(`${ctx.rolesByName.size} role(s) de rank prets.`);
+    return true;
+  } catch (err) {
+    console.error("Roles de rank non prets :", err.message);
+    return false;
   }
 }
 
 client.once(Events.ClientReady, async (c) => {
+  // Filet de sécurité : sans lui, une erreur Discord au démarrage était avalée par
+  // unhandledRejection et laissait un bot « online » mais sans aucune boucle, sans alerte.
+  try {
+    await onReady(c);
+  } catch (err) {
+    console.error("Demarrage incomplet :", err);
+    notifyAdmin(
+      `🛑 **Démarrage incomplet** : ${err?.message || err}. Certaines tâches de fond ne tournent pas : ` +
+        "redémarre le bot (`pm2 restart`) une fois le problème réglé.",
+    );
+  }
+});
+
+async function onReady(c) {
   console.log(`Connecte en tant que ${c.user.tag}`);
 
   // Surveillance : écouteurs de connexion Discord + boucle healthcheck API + alerte de démarrage.
@@ -110,8 +113,21 @@ client.once(Events.ClientReady, async (c) => {
   notifyAdmin(`🟢 **Bot démarré/redémarré** — connecté en tant que ${c.user.tag}.`);
 
   const guild = await client.guilds.fetch(config.guildId);
-  ctx.rolesByName = await ensureRoles(guild);
-  console.log(`${ctx.rolesByName.size} role(s) de rank prets.`);
+
+  // Une erreur Discord ici (5xx, permission manquante, limite de rôles atteinte) ne bloque
+  // plus le démarrage : les boucles partent quand même, et on retente toutes les 5 min (le
+  // refresh global revérifie aussi les rôles à chaque cycle).
+  if (!(await prepareRankRoles(guild))) {
+    notifyAdmin(
+      "⚠️ **Rôles de rank non prêts** (erreur Discord au démarrage) : les rôles ne sont pas attribués " +
+        "pour l'instant. Nouvel essai automatique toutes les 5 min.",
+    );
+    const retryRoles = every(async () => {
+      if (!(await prepareRankRoles(guild))) return;
+      clearInterval(retryRoles);
+      notifyAdmin("✅ **Rôles de rank prêts.**");
+    }, 5 * 60 * 1000);
+  }
 
   // Cree le role validateur s'il manque et le memorise comme validateur par defaut.
   try {
@@ -141,14 +157,14 @@ client.once(Events.ClientReady, async (c) => {
   // durer plusieurs minutes quand l'API Brawlhalla est lente). Le panel n'a besoin que du
   // client : les données sont récupérées à la demande. Évite l'attente au démarrage.
   try {
-    startWebServer(client);
+    startWebServer(client, ctx);
   } catch (err) {
     console.warn("Dashboard web non démarré :", err.message);
   }
 
   // Premier refresh EN ARRIÈRE-PLAN (non bloquant) : il peut durer plusieurs minutes si
-  // l'API est lente, mais ne doit pas retarder la mise en place des autres tâches. La garde
-  // anti-chevauchement (refreshing) empêche l'intervalle de se superposer au premier cycle.
+  // l'API est lente, mais ne doit pas retarder la mise en place des autres tâches. Le verrou
+  // de syncAllMembers empêche l'intervalle (ou un refresh admin) de se superposer au cycle.
   refreshAllMembers(guild).catch(console.error);
   const intervalMs = Math.max(5, config.refreshIntervalMinutes) * 60 * 1000;
   every(() => refreshAllMembers(guild).catch(console.error), intervalMs);
@@ -175,7 +191,8 @@ client.once(Events.ClientReady, async (c) => {
 
   // Recuperation en arriere-plan des profils/recherches qui ont echoue (API capricieuse) :
   // reessaie regulierement jusqu'a reussir, pour que la commande relancee marche a coup sur.
-  // Garde anti-chevauchement : un cycle peut durer jusqu'a ~25 s (budget de retry).
+  // Garde anti-chevauchement : en panne, un cycle peut durer plusieurs minutes (budget de
+  // retry de 30 s PAR élément, jusqu'à 5 profils + 5 recherches par cycle).
   let retrying = false;
   every(async () => {
     if (retrying) return;
@@ -183,6 +200,7 @@ client.once(Events.ClientReady, async (c) => {
     try {
       const r = await retryPending();
       if (r.recovered) console.log(`Récupération API : ${r.recovered} élément(s) chargé(s) en base.`);
+      if (r.abandoned) console.log(`Récupération API : ${r.abandoned} élément(s) introuvable(s) abandonné(s).`);
     } catch {
       /* best-effort */
     } finally {
@@ -227,7 +245,7 @@ client.once(Events.ClientReady, async (c) => {
     tickTikTok(client, guild.id, { notify: notifyAdmin }).catch((err) => console.warn("Poll TikTok échoué :", err.message));
   every(tiktokTick, 30 * 1000);
   tiktokTick();
-});
+}
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {

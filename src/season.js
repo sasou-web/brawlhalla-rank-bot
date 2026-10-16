@@ -9,15 +9,17 @@ import { ensureRole } from "./roles.js";
  */
 
 /**
- * Tier de récompense d'un membre (fonction PURE) : le plus haut tier entre 1v1 et 2v2,
- * ou null si aucun rank. `tiers` = { "1v1": "Gold"|null, "2v2": "Diamond"|null }.
+ * Tier de récompense d'un membre (fonction PURE) : le plus haut tier entre 1v1 et 2v2, pic
+ * de la saison (`peakTiers`, enregistré à chaque synchro) ou tier courant (`tiers`, qui sert
+ * seul de repli tant qu'aucun pic n'est connu). null si aucun rank.
+ * `tiers` / `peakTiers` = { "1v1": "Gold"|null, "2v2": "Diamond"|null }.
  */
-export function seasonRewardTier(tiers) {
-  return highestTier(tiers || {});
+export function seasonRewardTier(tiers, peakTiers = null) {
+  return highestTier([...Object.values(tiers || {}), ...Object.values(peakTiers || {})]);
 }
 
 /**
- * Attribue à chaque membre lié son badge de saison selon son plus haut tier enregistré.
+ * Attribue à chaque membre lié son badge de saison selon son meilleur tier de la saison.
  * Crée les rôles à la demande. Best-effort. Renvoie { awarded, byTier, season }.
  */
 export async function awardSeasonRewards(guild, season) {
@@ -25,7 +27,7 @@ export async function awardSeasonRewards(guild, season) {
   let awarded = 0;
   const byTier = {};
   for (const [discordId, link] of Object.entries(links)) {
-    const tier = seasonRewardTier(link.tiers);
+    const tier = seasonRewardTier(link.tiers, link.peakTiers);
     if (!tier) continue;
     const member = await guild.members.fetch(discordId).catch(() => null);
     if (!member) continue;

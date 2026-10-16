@@ -5,6 +5,7 @@ import {
   gloryFromBestRating,
   estimateGlory,
   planLeaderboardSync,
+  nextKnownMaxPage,
 } from "../src/brawlhalla.js";
 
 test("gloryFromWins : 20/victoire jusqu'à 150, puis formule log", () => {
@@ -61,9 +62,57 @@ test("planLeaderboardSync : sans bloc profond, seulement les pages chaudes", () 
   assert.deepEqual(r.pages, [1, 2]);
 });
 
-test("planLeaderboardSync : knownMaxPage borne la zone profonde", () => {
+test("planLeaderboardSync : knownMaxPage borne la zone profonde, + une page sonde", () => {
   const r = planLeaderboardSync({ maxPages: 500, shallowPages: 2, deepChunk: 10, knownMaxPage: 3, deepCursor: 0 });
-  assert.deepEqual(r.pages, [1, 2, 3]); // cap=3 -> une seule page profonde
+  assert.deepEqual(r.pages, [1, 2, 3, 4]); // cap=3 -> une seule page profonde, puis la sonde 4
+  // Borne = maxPages : pas de sonde au-delà de la limite configurée.
+  const full = planLeaderboardSync({ maxPages: 3, shallowPages: 2, deepChunk: 10, knownMaxPage: 3, deepCursor: 0 });
+  assert.deepEqual(full.pages, [1, 2, 3]);
+});
+
+// Simule `cycles` synchros contre un classement factice dont la page `p` est peuplée si
+// p <= realMax(cycle) (et pas dans hiccups(cycle)). Renvoie les pages peuplées lues et l'état.
+function simulateLeaderboardSync(cycles, { maxPages = 500, shallowPages = 20, deepChunk = 80, realMax, hiccups = () => [] }) {
+  let state = { knownMaxPage: 0, deepCursor: 0 };
+  const seen = new Set();
+  for (let c = 0; c < cycles; c++) {
+    const max = realMax(c);
+    const glitch = new Set(hiccups(c));
+    const { pages, nextCursor } = planLeaderboardSync({ maxPages, shallowPages, deepChunk, ...state });
+    const results = pages.map((p) => [p, p <= max && !glitch.has(p)]);
+    for (const [p, ok] of results) if (ok) seen.add(p);
+    state = { deepCursor: nextCursor, knownMaxPage: nextKnownMaxPage(state.knownMaxPage, results) };
+  }
+  return { seen, state };
+}
+
+test("synchro leaderboard (non-régression) : réglages par défaut, les 500 pages sont couvertes", () => {
+  // Avant : la borne valait la dernière page lue (100) et la rotation restait sur 21..100.
+  const { seen, state } = simulateLeaderboardSync(6, { realMax: () => 10_000 });
+  assert.equal(seen.size, 500);
+  assert.equal(state.knownMaxPage, 0); // aucune fin de classement constatée
+});
+
+test("synchro leaderboard : début de saison, la borne remonte quand le classement grandit", () => {
+  // 40 pages peuplées les 2 premiers cycles, puis 300.
+  const realMax = (c) => (c < 2 ? 40 : 300);
+  const early = simulateLeaderboardSync(2, { realMax });
+  assert.equal(early.state.knownMaxPage, 40); // fin constatée (pages 41 et 42 vides)
+
+  const { seen, state } = simulateLeaderboardSync(14, { realMax });
+  assert.equal(state.knownMaxPage, 300);
+  for (let p = 1; p <= 300; p++) assert.ok(seen.has(p), `page ${p} jamais synchronisée`);
+});
+
+test("synchro leaderboard : une page vide isolée (hoquet API) ne réduit pas la borne", () => {
+  const { seen, state } = simulateLeaderboardSync(6, { realMax: () => 10_000, hiccups: (c) => (c === 0 ? [3] : []) });
+  assert.equal(state.knownMaxPage, 0);
+  assert.equal(seen.size, 500);
+
+  // Deux pages vides d'affilée à cause d'un hoquet : la borne baisse, puis se répare d'elle-même.
+  const r = nextKnownMaxPage(0, [[1, true], [2, true], [3, false], [4, false]]);
+  assert.equal(r, 2);
+  assert.equal(nextKnownMaxPage(r, [[1, true], [2, true], [3, true]]), 0); // la sonde 3 est peuplée
 });
 
 test("planLeaderboardSync : shallow >= total => pas de zone profonde", () => {

@@ -78,6 +78,19 @@ export async function ensureRoles(guild) {
 }
 
 /**
+ * Recrée les rôles gérés manquants (ensureRoles) et met à jour EN PLACE la map `target`
+ * (ctx.rolesByName, partagée par /lier, /refresh, le dashboard…). Un rôle supprimé par un
+ * admin y laisserait sinon un ID fantôme : tous les `roles.add` de ce tier échoueraient
+ * jusqu'au redémarrage. Lève si Discord refuse : la map n'est alors pas modifiée.
+ */
+export async function refreshRankRoles(guild, target) {
+  const fresh = await ensureRoles(guild);
+  target.clear();
+  for (const [name, role] of fresh) target.set(name, role);
+  return target;
+}
+
+/**
  * S'assure que le role validateur existe. Renvoie son id.
  */
 export async function ensureValidatorRole(guild) {
@@ -121,17 +134,29 @@ export async function applyMainLegendRole(member, legendName) {
 }
 
 /**
- * Attribue le role "n°1 du serveur" au membre lie ayant le plus haut rating 1v1,
- * et le retire de tous les autres. Best-effort, base sur les ratings stockes (aucun
- * appel API). A appeler apres un refresh global. Renvoie { topId, rating } ou null.
+ * Attribue le role "n°1 du serveur" au membre lie ayant le plus haut rating 1v1 PARMI CEUX
+ * ENCORE SUR LE SERVEUR, et le retire de tous les autres. Best-effort, base sur les ratings
+ * stockes (aucun appel API Brawlhalla). A appeler apres un refresh global.
+ * Renvoie { topId, rating, roleId } ou null.
  */
 export async function updateTopServerRole(guild) {
   const links = await getAllLinks();
-  const entries = Object.entries(links).filter(([, l]) => (l.rating1v1 || 0) > 0);
-  if (!entries.length) return null;
+  const entries = Object.entries(links)
+    .filter(([, l]) => (l.rating1v1 || 0) > 0)
+    .sort((a, b) => (b[1].rating1v1 || 0) - (a[1].rating1v1 || 0));
 
-  let top = entries[0];
-  for (const e of entries) if ((e[1].rating1v1 || 0) > (top[1].rating1v1 || 0)) top = e;
+  // Un membre parti garde sa liaison (unicité anti-vol de compte) : s'il etait le meilleur,
+  // la couronne etait retiree au vrai n°1 et donnee a personne. On prend le premier present.
+  let top = null;
+  let topMember = null;
+  for (const entry of entries) {
+    topMember = guild.members.cache.get(entry[0]) ?? (await guild.members.fetch(entry[0]).catch(() => null));
+    if (topMember) {
+      top = entry;
+      break;
+    }
+  }
+  if (!top) return null;
   const topId = top[0];
 
   const role = await ensureTopServerRole(guild);
@@ -141,8 +166,7 @@ export async function updateTopServerRole(guild) {
     if (m.id !== topId) await m.roles.remove(role, "N'est plus n°1 du serveur").catch(() => {});
   }
   // Donne-le au n°1 s'il ne l'a pas deja.
-  const topMember = await guild.members.fetch(topId).catch(() => null);
-  if (topMember && !topMember.roles.cache.has(role.id)) {
+  if (!topMember.roles.cache.has(role.id)) {
     await topMember.roles.add(role, "N°1 elo 1v1 du serveur").catch(() => {});
   }
 

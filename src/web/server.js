@@ -154,7 +154,9 @@ function rateLimiter({ windowMs, max }) {
   };
 }
 
-export function startWebServer(client) {
+// `ctx` = contexte partagé du bot (ctx.rolesByName) : l'actualisation des rôles lancée du
+// dashboard met ainsi à jour la même map que /refresh et le refresh automatique.
+export function startWebServer(client, ctx = null) {
   if (!webConfig.enabled()) {
     console.log("Dashboard web desactive (CLIENT_SECRET / PUBLIC_URL / SESSION_SECRET manquants).");
     return;
@@ -782,7 +784,7 @@ export function startWebServer(client) {
       // Lancement en arrière-plan : on n'attend pas la fin de la boucle pour répondre.
       (async () => {
         try {
-          const { ok, fail } = await syncAllMembers(guild);
+          const { ok, fail } = await syncAllMembers(guild, ctx?.rolesByName ?? null);
           await logAudit(
             guild,
             `🔄 <@${req.session.id}> (dashboard) a actualisé les rôles : ${ok} ok, ${fail} échec(s) sur ${total} lié(s).`,
