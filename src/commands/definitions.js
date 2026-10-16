@@ -34,6 +34,11 @@ export const commandsData = [
     .addUserOption((o) => o.setName("membre").setDescription("Membre à inspecter (defaut : toi).").setRequired(false))
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("devine-top")
+    .setDescription("Classement « Devine ton rang » : les meilleurs devins du serveur.")
+    .addBooleanOption((o) => o.setName("moi").setDescription("Afficher plutôt tes points, parties et précision.").setRequired(false))
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("combos")
     .setDescription("Parcours les true combos Brawlhalla par arme (vidéos via BrawlDatabase).")
     .addStringOption((o) =>

@@ -27,7 +27,7 @@ import { getLevelConfig, setLevelConfig, setReward } from "./levels.js";
 import { tickTikTok } from "./tiktok.js";
 import { handleClipMessage } from "./clips.js";
 import { handleWordFilter } from "./wordfilter.js";
-import { handleGuessRankMessage } from "./guessrank.js";
+import { handleGuessRankMessage, tickGuessReveals } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
 import { handleLolRole } from "./lol.js";
@@ -234,6 +234,15 @@ async function onReady(c) {
         .then((r) => r.ended && console.log(`Giveaways clôturés : ${r.ended}.`))
         .catch(() => {}),
     60 * 1000,
+  );
+
+  // Devine ton rang noté : révèle le vrai rang des clips échus et compte les points (5 min).
+  every(
+    () =>
+      tickGuessReveals(client)
+        .then((n) => n && console.log(`Devine ton rang : ${n} révélation(s).`))
+        .catch(() => {}),
+    5 * 60 * 1000,
   );
 
   // Récap hebdo de progression : vérifié toutes les heures, posté une fois par semaine.

@@ -121,6 +121,19 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_leaderboard_norm ON leaderboard(norm);
   CREATE INDEX IF NOT EXISTS idx_leaderboard_rating ON leaderboard(rating DESC);
+
+  -- Devine ton rang noté : révélations en attente (une ligne par clip, vérité figée au post).
+  -- 'attempts' = échecs Discord temporaires avant abandon (voir guessrank.js).
+  CREATE TABLE IF NOT EXISTS guess_pending (
+    message_id TEXT PRIMARY KEY,
+    guild_id   TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    author_id  TEXT NOT NULL,
+    truth_tier TEXT NOT NULL,
+    reveal_at  INTEGER NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_guess_pending_reveal ON guess_pending(reveal_at);
 `);
 
 // ---------- Évolution du schéma (PRAGMA user_version) ----------

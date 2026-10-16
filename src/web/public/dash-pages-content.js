@@ -620,7 +620,23 @@ function clipsTab(host, c, guess) {
         switchField("Ignorer les réponses", c, "ignoreReplies"),
       ),
       guess
-        ? null
+        ? settingsGroup(
+            "Score",
+            "Le vrai rang de l'auteur (compte lié) est révélé après le délai ; les bons devins marquent des points (classement /devine-top).",
+            switchField("Compter les points", c, "scoringEnabled"),
+            field("Révélation après", numberInput(c, "revealDelayHours", { min: 1, max: 168, suffix: "h", size: "md" })),
+            field("Rang exact", numberInput(c, "pointsExact", { min: 1, max: 100, suffix: "pts", size: "md" })),
+            field("À un rang près", numberInput(c, "pointsNear", { min: 0, max: 100, suffix: "pts", size: "md" }), { help: "0 : seul le rang exact rapporte." }),
+            field(
+              "Vrai rang",
+              selectInput(c, "truthMode", [
+                { value: "1v1", label: "Rang 1v1 actuel" },
+                { value: "peak", label: "Pic 1v1 de la saison" },
+                { value: "highest", label: "Meilleur mode (1v1 ou 2v2)" },
+              ]),
+              { help: "Figé au moment du clip. Jeu sur l'honneur : le rang reste visible sur le profil." },
+            ),
+          )
         : settingsGroup(
             "Épinglage",
             null,
