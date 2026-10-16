@@ -43,6 +43,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 - **tournament.js / tournamentUI.js** — système de tournois (inscriptions, matchs, salons). Cast gate (`castFromTopN`, matchs verrouillés), podium/MVP (`tournamentPodium`), Hall of Fame.
 - **bracketImage.js** — rendu visuel du bracket en image PNG via `@napi-rs/canvas` (commande `/bracket`).
 - **tempvoice.js** — salons vocaux temporaires ("rejoindre pour créer").
+- **guild.js** — guilde Brawlhalla du serveur (`kv.guild`) : `syncGuild` appelé à la fin de chaque refresh des membres (rôle aux membres liés présents dans la guilde, annonces arrivées/départs par diff avec une baseline), snapshot TTL 10 min pour `/guilde` (`commands/guild.js`, bouton staff `gld_unlinked`) et la page dashboard Communauté › Guilde, bloc « Guilde » du récap hebdo. Aucun retrait de rôle sur lecture API échouée ou liste vide. `diffGuildMembers` / `guildRolePlan` / `computeGuildWeek` = fonctions pures testées.
 - **rankvoice.js** — salons vocaux par rank (accès restreint selon le tier).
 - **tiktok.js** — notifications TikTok. Config (`kv.tiktok`, clés whitelistées) séparée de l'état (`kv.tiktokState` : IDs vidéo déjà vus, santé des sources) : le dashboard ne peut plus écraser l'état. Tick 30 s, lecture à `pollIntervalMin` (défaut 2), amorçage silencieux à la 1ʳᵉ lecture d'une source, plusieurs nouveautés = un seul message, pause progressive + alerte (`notifyAdmin`) après 1 h d'échec. `planPost` = décision pure (testée).
 - **wordfilterEngine.js** — moteur PUR du filtre de mots (aucun import Discord/base/config, importé aussi par `scripts/dash-mock.js`) : normalisation (casse, accents, leet, homoglyphes, lettres répétées/espacées, ponctuation interne), jokers `mot*` / `*mot` / `*mot*`, expressions, termes autorisés, positions d'origine pour masquer. `STARTER_TERMS` = liste de base proposée par le dashboard.
@@ -67,7 +68,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 
 | Irremplaçable (sauvegardé) | Reconstructible depuis l'API (exclu des sauvegardes) |
 |---|---|
-| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`, `wordfilter`, `wordfilterState`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
+| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`, `wordfilter`, `wordfilterState`, `guild`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
 | `xp`, `rating_history`, `achievements`, `counters`, `combo_mastery`, `guess_pending` | `profiles`, `searches` (caches API, TTL 15 min) |
 | `giveaways`, `giveaway_entries` | `pending` (file de récupération, 7 j) |
 

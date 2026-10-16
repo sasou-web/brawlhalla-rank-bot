@@ -141,6 +141,7 @@ function baseConfig() {
     roletimeout: { enabled: scenario !== "empty", allowedRoleIds: scenario === "empty" ? [] : [roleId("Staff")], cooldownSec: 300 },
     clips: { enabled: true, channelIds: [byName(text, "clips")], reactions: ["🔥", "👍", "<:xk:1>"], requireVideo: true, deleteNonVideo: false, ignoreBots: true, ignoreReplies: true, pinThreshold: 10, extraDomains: ["catbox.moe"] },
     guessrank: { enabled: false, channelIds: [], reactions: [], ignoreBots: true, ignoreReplies: true, requireVideo: true, deleteNonVideo: false, extraDomains: [], singleVote: true, scoringEnabled: false, revealDelayHours: 24, pointsExact: 3, pointsNear: 1, truthMode: "1v1" },
+    guild: { brawlhallaGuildId: scenario === "empty" ? "" : "48213", roleId: scenario === "empty" ? "" : roleId("Staff"), announceChannelId: byName(text, "annonces"), announceJoins: true },
     tempvoice: { enabled: true, categoryId: "", hubs: { [byName(voice, "Créer un vocal")]: { nameTemplate: "{user}", userLimit: 0 } } },
     reminders: { enabled: false, channelId: byName(text, "rappels"), intervalMinutes: 120, mode: "rotate", messages: ["Vocaux privés : rejoins « Créer un vocal ».", "Lie ton compte Brawlhalla avec /lier pour obtenir tes rôles de rank."] },
     linkpanel: {
@@ -516,7 +517,7 @@ app.use("/api", async (req, res, next) => {
   if (req.path === "/me") return next();
   if (loggedOut || scenario === "loggedout" || scenario === "expired") return res.status(401).json({ error: "non authentifié" });
   if (scenario === "bootfail" && req.path === "/guild") return res.status(500).json({ error: "Discord API: Service Unavailable" });
-  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose"].includes(req.path)) {
+  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose", "/guilde/status"].includes(req.path)) {
     return res.status(500).json({ error: "Erreur interne simulée" });
   }
   next();
@@ -633,6 +634,33 @@ app.post("/api/tiktok/diagnose", (req, res) => {
   }
   if (req.body?.feedUrl) results.push({ source: "rss", ok: false, count: 0, latest: null, profile: null, ms: 180, error: "HTTP 404 sur le flux" });
   setTimeout(() => res.json({ account, results }), 500);
+});
+
+// Guilde Brawlhalla : instantané fictif (statut calculé depuis la config simulée).
+const mockGuildMembers = ["Nox", "Kaya", "Sasou", "Ryū", "Bodvar_Main", "Mirage", "Zeph", "Lune", "Tetsu", "Orion", "Vex", "Ash"].map((name, i) => ({
+  id: String(9000 + i),
+  name,
+  rank: i === 0 ? "Leader" : i < 3 ? "Officer" : "Member",
+  joinDate: Math.floor(Date.now() / 1000) - (i + 1) * 9 * 86400,
+  xp: 52000 - i * 3900,
+  points: i % 4 === 3 ? 0 : 1800 - i * 120,
+  discordId: i % 3 === 2 ? null : String(5000 + i),
+}));
+function mockGuildStatus() {
+  const configured = Boolean(state.config.guild.brawlhallaGuildId);
+  return {
+    configured,
+    lastSyncAt: configured ? Date.now() - 4 * 60000 : null,
+    lastError: null,
+    snapshot: configured
+      ? { at: Date.now() - 4 * 60000, stats: { id: state.config.guild.brawlhallaGuildId, name: "Xray Kaya", xp: 486000, legacyXp: 0, points: 14880, rank: 214, memberCount: mockGuildMembers.length, createDate: 0, recruiting: true }, members: mockGuildMembers }
+      : null,
+  };
+}
+app.get("/api/guilde/status", (req, res) => res.json(mockGuildStatus()));
+app.post("/api/guilde/sync", (req, res) => {
+  if (!state.config.guild.brawlhallaGuildId) return fail(res, "Indique d'abord l'ID de la guilde.");
+  setTimeout(() => ok(res, { added: 1, removed: 0, joined: 1, left: 0, status: mockGuildStatus() }), 600);
 });
 
 app.get("/api/lol/greeted", (req, res) => res.json({ count: state.greeted }));

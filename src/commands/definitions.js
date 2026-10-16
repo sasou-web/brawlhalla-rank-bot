@@ -1,6 +1,17 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChannelType } from "discord.js";
+import { ContextMenuCommandBuilder, ApplicationCommandType, InteractionContextType } from "discord.js";
 import { TIERS } from "../config.js";
 import { WEAPON_META } from "../combos.js";
+
+// Noms des menus contextuels (clic droit). Majuscules et espaces autorisés, 32 caractères max.
+export const CONTEXT_MENU_NAMES = {
+  profile: "Profil Brawlhalla",
+  level: "Niveau & XP",
+  report: "Signaler au staff",
+};
+
+const contextMenu = (name, type) =>
+  new ContextMenuCommandBuilder().setName(name).setType(type).setContexts(InteractionContextType.Guild).toJSON();
 
 // Definitions (JSON) de toutes les slash commands du bot.
 // Donnees pures : aucune logique de handler ici. Le routage est dans commands.js,
@@ -34,6 +45,10 @@ export const commandsData = [
     .setName("help")
     .setDescription("Liste les commandes les plus utiles du bot.")
     .toJSON(),
+  // Menus contextuels : routés par handleContextMenu (commands/contextMenus.js).
+  contextMenu(CONTEXT_MENU_NAMES.profile, ApplicationCommandType.User),
+  contextMenu(CONTEXT_MENU_NAMES.level, ApplicationCommandType.User),
+  contextMenu(CONTEXT_MENU_NAMES.report, ApplicationCommandType.Message),
   new SlashCommandBuilder()
     .setName("achievements")
     .setDescription("Affiche tes succès débloqués (ou ceux d'un membre).")
@@ -376,5 +391,9 @@ export const commandsData = [
         )
         .setRequired(false),
     )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("guilde")
+    .setDescription("Guilde Brawlhalla du serveur : stats et meilleurs contributeurs.")
     .toJSON(),
 ];

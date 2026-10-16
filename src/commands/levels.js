@@ -51,6 +51,20 @@ export async function handleNiveau(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "niveau", 4000))) return;
   await interaction.deferReply();
   const targetUser = interaction.options.getUser("membre") ?? interaction.user;
+  return replyLevel(interaction, targetUser);
+}
+
+// Menu contextuel « Niveau & XP » (clic droit sur un membre) : même carte, en éphémère.
+export async function handleNiveauContext(interaction) {
+  const targetUser = interaction.targetUser;
+  if (targetUser.bot) return interaction.reply({ content: "Les bots ne gagnent pas d'XP. 🤖", flags: EPHEMERAL });
+  if (!(await enforceCooldown(interaction, "niveau", 4000))) return;
+  await interaction.deferReply({ flags: EPHEMERAL });
+  return replyLevel(interaction, targetUser);
+}
+
+// Carte de niveau d'un membre, sur une interaction déjà différée.
+async function replyLevel(interaction, targetUser) {
   if (targetUser.bot) return interaction.editReply("Les bots ne gagnent pas d'XP. 🤖");
 
   const s = await getUserStats(interaction.guild.id, targetUser.id);

@@ -599,6 +599,23 @@ async function showProfile(interaction, view, brawlhallaId) {
   });
 }
 
+// Menu contextuel « Profil Brawlhalla » (clic droit sur un membre) : fiche du compte lié,
+// en éphémère, avec les onglets habituels (les boutons `prof:` restent fonctionnels).
+export async function handleProfileContext(interaction) {
+  const target = interaction.targetUser;
+  if (target.bot) return interaction.reply({ content: "Les bots n'ont pas de compte Brawlhalla. 🤖", flags: EPHEMERAL });
+  if (!(await enforceCooldown(interaction, "profile", 4000))) return;
+  await interaction.deferReply({ flags: EPHEMERAL | V2 });
+  const link = await getLink(target.id);
+  if (!link) {
+    const text = target.id === interaction.user.id
+      ? await notLinkedMessage(interaction.guildId)
+      : `<@${target.id}> n'a pas lié de compte Brawlhalla.`;
+    return interaction.editReply({ components: [tdc(text)], flags: V2, allowedMentions: NO_MENTIONS });
+  }
+  return showProfile(interaction, "overview", link.brawlhallaId);
+}
+
 export const handleStats = (interaction) => respondProfile(interaction, "overview");
 export const handleRank = (interaction) => respondProfile(interaction, "ranked");
 export const handleLegendes = (interaction) => respondProfile(interaction, "legends");
@@ -722,10 +739,15 @@ export async function handleHelp(interaction, ctx) {
     "### 🏆 Classements\n" +
       "`/top` — classement des **membres liés**\n" +
       "`/leaderboard` — le **top 10 officiel** Brawlhalla\n" +
+      "`/guilde` — la **guilde** Brawlhalla du serveur\n" +
       "`/niveau` · `/classement-niveaux` — ton **XP** et le top serveur\n" +
       "`/devine-top` — les meilleurs devins de **Devine ton rang**",
     SEP,
     "### 🎟️ Tournoi\n`/bracket` — affiche le **bracket** du tournoi en cours",
+    SEP,
+    "### 🖱️ Clic droit\n" +
+      "Sur un **membre** → *Applications* : **Profil Brawlhalla** · **Niveau & XP**\n" +
+      "Sur un **message** → *Applications* : **Signaler au staff**",
     "-# Astuce : commence par /lier pour débloquer tes rôles et tes stats.",
   );
   return interaction.reply({ components: [card], flags: EPHEMERAL | V2 });

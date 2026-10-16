@@ -239,7 +239,7 @@ async function apiGet(path, params = {}, deadline = null, attempt = 0) {
  * Comme apiGet, mais renvoie null sur un 404 (donnee absente, ex. pas d'equipe 2v2)
  * au lieu de lever une erreur. Les autres erreurs (502, etc.) sont propagees.
  */
-async function apiGetOrNull(path, params = {}) {
+export async function apiGetOrNull(path, params = {}) {
   try {
     return await apiGet(path, params);
   } catch (err) {
