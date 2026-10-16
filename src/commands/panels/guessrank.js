@@ -9,13 +9,15 @@ import {
   TextInputStyle,
   ChannelType,
 } from "discord.js";
-import { getGuessRankConfig, setGuessRankConfig } from "../../guessrank.js";
+import { getGuessRankConfig, setGuessRankConfig, TRUTH_MODES, SCORING_LIMITS } from "../../guessrank.js";
 import { parseReactions, parseDomains } from "../../clips.js";
 import { EPHEMERAL } from "../shared.js";
 
 // ====================================================================
 // Panneau interactif /setup-guessrank  (réactions emojis de rank)
 // ====================================================================
+
+const TRUTH_LABELS = { "1v1": "rang 1v1 actuel", peak: "pic 1v1 de la saison", highest: "meilleur mode ranked" };
 
 async function buildGuessRankPanel(guildId) {
   const cfg = await getGuessRankConfig(guildId);
@@ -38,6 +40,14 @@ async function buildGuessRankPanel(guildId) {
       { name: "Un seul vote / membre", value: cfg.singleVote ? "✅ oui" : "non", inline: true },
       { name: "Emojis de rank", value: reacts, inline: false },
       { name: "Salons surveillés", value: chans, inline: false },
+      {
+        name: "Score",
+        value: cfg.scoringEnabled
+          ? `🟢 Révélation **${cfg.revealDelayHours} h** après le clip · exact **+${cfg.pointsExact}** · à un rang près **+${cfg.pointsNear}**\n` +
+            `Vrai rang : ${TRUTH_LABELS[cfg.truthMode]} (auteur lié uniquement) · classement \`/devine-top\``
+          : "🔴 Désactivé (les votes ne rapportent rien)",
+        inline: false,
+      },
       {
         name: "Domaines vidéo perso",
         value: cfg.extraDomains?.length ? cfg.extraDomains.join(", ") : "*(hébergeurs par défaut)*",
@@ -91,7 +101,21 @@ async function buildGuessRankPanel(guildId) {
       .setStyle(cfg.singleVote ? ButtonStyle.Success : ButtonStyle.Secondary),
   );
 
-  return { embeds: [embed], components: [rowChannels, rowButtons, rowButtons2] };
+  const rowScoring = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("gr_toggle_scoring")
+      .setLabel(cfg.scoringEnabled ? "Score: activé" : "Score: désactivé")
+      .setEmoji("🎯")
+      .setStyle(cfg.scoringEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("gr_set_scoring").setLabel("Délai & points").setEmoji("⏱️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("gr_cycle_truth")
+      .setLabel(`Vrai rang: ${cfg.truthMode}`)
+      .setEmoji("🔎")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [rowChannels, rowButtons, rowButtons2, rowScoring] };
 }
 
 export async function handleSetupGuessRank(interaction, ctx) {
@@ -132,6 +156,36 @@ export async function handleGuessRankPanelButton(interaction, ctx) {
   if (id === "gr_toggle_single") {
     await setGuessRankConfig(interaction.guild.id, { singleVote: !cfg.singleVote });
     return refreshGuessRankPanel(interaction);
+  }
+  if (id === "gr_toggle_scoring") {
+    await setGuessRankConfig(interaction.guild.id, { scoringEnabled: !cfg.scoringEnabled });
+    return refreshGuessRankPanel(interaction);
+  }
+  if (id === "gr_cycle_truth") {
+    const next = TRUTH_MODES[(TRUTH_MODES.indexOf(cfg.truthMode) + 1) % TRUTH_MODES.length];
+    await setGuessRankConfig(interaction.guild.id, { truthMode: next });
+    return refreshGuessRankPanel(interaction);
+  }
+  if (id === "gr_set_scoring") {
+    const input = (customId, label, value, [min, max]) =>
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId(customId)
+          .setLabel(`${label} (${min} à ${max})`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(3)
+          .setValue(String(value)),
+      );
+    const modal = new ModalBuilder()
+      .setCustomId("gr_scoring_modal")
+      .setTitle("Score : délai et points")
+      .addComponents(
+        input("delay", "Révélation après (heures)", cfg.revealDelayHours, SCORING_LIMITS.revealDelayHours),
+        input("exact", "Points pour le rang exact", cfg.pointsExact, SCORING_LIMITS.pointsExact),
+        input("near", "Points à un rang près", cfg.pointsNear, SCORING_LIMITS.pointsNear),
+      );
+    return interaction.showModal(modal);
   }
   if (id === "gr_set_reactions") {
     const modal = new ModalBuilder().setCustomId("gr_reactions_modal").setTitle("Emojis de rank").addComponents(
@@ -179,6 +233,19 @@ export async function handleGuessRankPanelModal(interaction, ctx) {
     await setGuessRankConfig(interaction.guild.id, { reactions });
     if (interaction.isFromMessage()) return refreshGuessRankPanel(interaction);
     return interaction.reply({ content: `Emojis de rank définis : ${reactions.join(" ")} ✅`, flags: EPHEMERAL });
+  }
+  if (interaction.customId === "gr_scoring_modal") {
+    const read = (k) => Number(interaction.fields.getTextInputValue(k).trim());
+    const values = { revealDelayHours: read("delay"), pointsExact: read("exact"), pointsNear: read("near") };
+    const bad = Object.entries(values).find(([k, v]) => !Number.isInteger(v) || v < SCORING_LIMITS[k][0] || v > SCORING_LIMITS[k][1]);
+    if (bad) {
+      const [min, max] = SCORING_LIMITS[bad[0]];
+      const what = { revealDelayHours: "Délai", pointsExact: "Points exact", pointsNear: "Points à un rang près" }[bad[0]];
+      return interaction.reply({ content: `${what} invalide : indique un nombre entier entre ${min} et ${max}.`, flags: EPHEMERAL });
+    }
+    await setGuessRankConfig(interaction.guild.id, values);
+    if (interaction.isFromMessage()) return refreshGuessRankPanel(interaction);
+    return interaction.reply({ content: "Score mis à jour ✅", flags: EPHEMERAL });
   }
   if (interaction.customId === "gr_domains_modal") {
     const domains = parseDomains(interaction.fields.getTextInputValue("domains"));

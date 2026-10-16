@@ -740,7 +740,8 @@ export async function handleHelp(interaction, ctx) {
       "`/top` — classement des **membres liés**\n" +
       "`/leaderboard` — le **top 10 officiel** Brawlhalla\n" +
       "`/guilde` — la **guilde** Brawlhalla du serveur\n" +
-      "`/niveau` · `/classement-niveaux` — ton **XP** et le top serveur",
+      "`/niveau` · `/classement-niveaux` — ton **XP** et le top serveur\n" +
+      "`/devine-top` — les meilleurs devins de **Devine ton rang**",
     SEP,
     "### 🎟️ Tournoi\n`/bracket` — affiche le **bracket** du tournoi en cours",
     SEP,

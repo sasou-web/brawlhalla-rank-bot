@@ -33,6 +33,10 @@ export const ACHIEVEMENTS = [
   { id: "combos10", name: "Technicien", emoji: "🧠", desc: "Maîtriser 10 combos", test: (s) => (s.combos || 0) >= 10 },
   { id: "combos50", name: "Maître des combos", emoji: "🥷", desc: "Maîtriser 50 combos", test: (s) => (s.combos || 0) >= 50 },
   { id: "weaponmaster", name: "Maître d'arme", emoji: "⚔️", desc: "Maîtriser tous les combos d'une arme", test: (s) => (s.weaponsCompleted || 0) >= 1 },
+  // Devine ton rang noté (stats passées par la révélation, guessrank.js).
+  { id: "guess10", name: "Devin", emoji: "🔮", desc: "Participer à 10 « Devine ton rang »", test: (s) => (s.guessGames || 0) >= 10 },
+  { id: "guess50", name: "Œil de lynx", emoji: "👁️", desc: "Participer à 50 « Devine ton rang »", test: (s) => (s.guessGames || 0) >= 50 },
+  { id: "guessmaster", name: "Maître devin", emoji: "🎯", desc: "Marquer 100 points à « Devine ton rang »", test: (s) => (s.guessPoints || 0) >= 100 },
 ];
 
 const BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
@@ -101,6 +105,15 @@ export function getCounter(guildId, userId, key) {
 export function incrCounter(guildId, userId, key, by = 1) {
   incrCounterStmt.run({ g: String(guildId), u: String(userId), k: key, by });
   return getCounter(guildId, userId, key);
+}
+
+const topCountersStmt = db.prepare(
+  "SELECT user_id AS userId, val FROM counters WHERE guild_id = ? AND key = ? AND val > 0 ORDER BY val DESC, user_id LIMIT ?",
+);
+
+/** Top `limit` des membres sur un compteur (valeurs > 0), du plus haut au plus bas. */
+export function topCounters(guildId, key, limit = 10) {
+  return topCountersStmt.all(String(guildId), key, limit);
 }
 
 // ---------- Annonce (salon dédié, sans ping) ----------

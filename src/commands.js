@@ -107,6 +107,7 @@ import {
   handleCombosMaster,
 } from "./commands/combos.js";
 import { handleTimeout } from "./commands/moderation.js";
+import { handleDevineTop } from "./commands/guesstop.js";
 import { handleGuilde, handleGuildButton } from "./commands/guild.js";
 import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
@@ -179,6 +180,7 @@ export async function handleChatInput(interaction, ctx) {
     case "ping": return handlePing(interaction, ctx);
     case "help": return handleHelp(interaction, ctx);
     case "achievements": return handleAchievements(interaction, ctx);
+    case "devine-top": return handleDevineTop(interaction, ctx);
     case "combos": return handleCombos(interaction, ctx);
     case "stats": return handleStats(interaction, ctx);
     case "rank": return handleRank(interaction, ctx);

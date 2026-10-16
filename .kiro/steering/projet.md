@@ -50,7 +50,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 - **wordfilter.js** — filtre de mots : config `kv.wordfilter` (désactivé par défaut) séparée de l'état `kv.wordfilterState` (historique plafonné à 300, compteur de récidives). `handleWordFilter(message, { edited })` est appelé EN PREMIER dans `MessageCreate` (s'il renvoie true, pas d'XP ni de traitement clip) et sur `MessageUpdate`. Actions delete / mask (webhook « XK Filtre », repli sur delete) / flag, avertissement, exclusion temporaire, journal. Tout est best-effort.
 - **tiktokSource.js** — lecture des sources TikTok sans dépendance : embed officiel `tiktok.com/embed/@compte` (principal, ~10 dernières vidéos + épinglées) et flux RSS de secours (dépôt `sasou-web/tiktok-rss-flat`). `videoIdTime` = heure d'**upload** encodée dans l'ID (≠ publication pour une vidéo programmée).
 - **clips.js** — réactions auto + modération des clips.
-- **guessrank.js** — jeu "devine le rang".
+- **guessrank.js** — jeu "devine le rang". Score optionnel (`scoringEnabled`) : vrai rang de l'auteur lié figé dans la table `guess_pending` au post, révélé après `revealDelayHours` par `tickGuessReveals` (boucle 5 min d'index.js) ; points dans `counters` (`guess_points`, `guess_games`, `guess_exact`), classement `/devine-top` (`commands/guesstop.js`). Jeu « sur l'honneur » (rang visible sur le profil).
 - **welcome.js** — messages de bienvenue/au revoir + auto-rôles. Exporte `applyVars`, réutilisé par `lol.js`.
 - **lol.js** — section League of Legends. 1ʳᵉ brique : accueil auto quand un membre reçoit le rôle LoL (écoute `GuildMemberUpdate` + `GuildMemberAdd`, donc marche quelle que soit la source du rôle : onboarding Discord, reaction-role, staff). Le bot ne configure PAS l'onboarding lui-même.
 - **health.js** — alertes Discord (déconnexion, API down) + `healthSnapshot()` consommé par l'endpoint public `/health`.
@@ -69,7 +69,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 | Irremplaçable (sauvegardé) | Reconstructible depuis l'API (exclu des sauvegardes) |
 |---|---|
 | `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`, `wordfilter`, `wordfilterState`, `guild`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
-| `xp`, `rating_history`, `achievements`, `counters`, `combo_mastery` | `profiles`, `searches` (caches API, TTL 15 min) |
+| `xp`, `rating_history`, `achievements`, `counters`, `combo_mastery`, `guess_pending` | `profiles`, `searches` (caches API, TTL 15 min) |
 | `giveaways`, `giveaway_entries` | `pending` (file de récupération, 7 j) |
 
 - Backup : `backup-data.sh` ne tarre PAS `data/` brut. Il produit un instantané allégé de `bot.db` (`VACUUM INTO` → `integrity_check` → purge des tables reconstructibles → `VACUUM` → gzip), ce qui donne ~330 Ko au lieu de ~6,7 Mo, puis l'envoie offsite. Restauration documentée dans `DEPLOY.md` (⚠️ supprimer `bot.db-wal`/`-shm` avant de remettre la base).
