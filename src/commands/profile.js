@@ -749,7 +749,10 @@ export async function handleHelp(interaction, ctx) {
     SEP,
     "### 🤝 Coéquipiers\n`/lfg` — cherche un **partenaire 2v2** ou une **équipe 3v3** avec ton rank vérifié",
     SEP,
-    "### 🎟️ Tournoi\n`/bracket` — affiche le **bracket** du tournoi en cours",
+    "### 🎟️ Tournoi & ladder\n" +
+      "`/bracket` — affiche le **bracket** du tournoi en cours\n" +
+      "`/defi` — **défie un membre** en 1v1 pour le ladder du serveur\n" +
+      "`/ladder` — le **classement Elo** du ladder (et `moi:True` pour tes stats)",
     SEP,
     "### 🖱️ Clic droit\n" +
       "Sur un **membre** → *Applications* : **Profil Brawlhalla** · **Niveau & XP**\n" +

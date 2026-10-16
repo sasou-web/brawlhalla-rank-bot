@@ -49,6 +49,8 @@ import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welc
 import { getLolConfig, setLolConfig, buildLolWelcomePayload, resetGreeted, greetedCount } from "../lol.js";
 import { getGuildConfig, setGuildConfig, getGuildStatus, syncGuild } from "../guild.js";
 import { getLfgConfig, setLfgConfig } from "../lfg.js";
+import { getLadderConfig, setLadderConfig } from "../ladder.js";
+import { mountLadderApi } from "./ladderApi.js";
 import { buildAnnouncePayload, dataUrlToAttachment } from "../announce.js";
 import {
   getTournament,
@@ -130,6 +132,7 @@ function buildSections(guildId, client) {
     wordfilter: { get: () => getWordFilterConfig(guildId), set: (b) => setWordFilterConfig(guildId, b) },
     guild: { get: () => getGuildConfig(guildId), set: (b) => setGuildConfig(guildId, b) },
     lfg: { get: () => getLfgConfig(guildId), set: (b) => setLfgConfig(guildId, b) },
+    ladder: { get: () => getLadderConfig(guildId), set: (b) => setLadderConfig(guildId, b) },
     // Rôles autorisés vérifiés auprès de Discord (uniquement quand la liste change).
     roletimeout: roleTimeoutSection(guildId, async () => {
       const guild = await client.guilds.fetch(guildId);
@@ -837,6 +840,9 @@ export function startWebServer(client, ctx = null) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ---- Ladder (défis 1v1) : état, décisions staff, nouvelle saison (voir ladderApi.js) ----
+  mountLadderApi(app, { client, guildId: config.guildId, requireAdmin });
 
   // ---- Tournoi ----
   const G = config.guildId;
