@@ -48,6 +48,7 @@ npm start              # demarre le bot
 - `/niveau` · `/classement-niveaux` · `/leaderboard-xp` — XP et niveaux du serveur
 - `/achievements [membre]` — succès débloqués (lié, rank, niveau, clips…)
 - `/combos [arme]` — true combos par arme (ralenti, progression, Combo Lab : voir plus bas) · `/help` — aide · `/ping` — état de l'API + fiabilité
+- **Clic droit** (menu *Applications*) : sur un membre → **Profil Brawlhalla**, **Niveau & XP** (réponses visibles par toi seul) ; sur un message → **Signaler au staff** (raison obligatoire, 1 signalement par minute, envoyé dans le salon d'alertes, sinon d'audit ; boutons staff « Pris en charge » / « Supprimer le message », permission « Gérer les messages »)
 
 **Staff / Admin**
 - `/setup` — config : salon de validation, rôle validateur, salon d'audit, salon d'annonces, seuil d'auto-validation

@@ -46,6 +46,14 @@ export function checkCooldown(key, userId, ms) {
   return { ok: true, remainingMs: 0 };
 }
 
+// Temps restant (ms) du cooldown (key, userId), sans l'armer. 0 = action autorisée.
+// Utile avant un `showModal` : on n'arme le cooldown qu'à l'envoi du modal.
+export function peekCooldown(key, userId, ms) {
+  if (!ms || ms <= 0) return 0;
+  const last = buckets.get(key)?.get(userId) ?? 0;
+  return Math.max(0, ms - (Date.now() - last));
+}
+
 /**
  * Applique un cooldown à une interaction de commande. À appeler AVANT deferReply().
  * Si le membre est en cooldown, répond un message éphémère et renvoie false

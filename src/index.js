@@ -18,6 +18,7 @@ process.on("uncaughtException", (err) => {
 });
 import { refreshRankRoles, ensureValidatorRole, ensureServerLevelRoles } from "./roles.js";
 import { handleChatInput, handleButton, handleSelect, handleModal } from "./commands.js";
+import { handleContextMenu } from "./commands/contextMenus.js";
 import { syncAllMembers, isSyncingAll } from "./sync.js";
 import { getAllLinks } from "./store.js";
 import { closeDb } from "./db.js";
@@ -263,6 +264,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleSelect(interaction, ctx);
     } else if (interaction.isModalSubmit()) {
       await handleModal(interaction, ctx);
+    } else if (interaction.isContextMenuCommand()) {
+      await handleContextMenu(interaction, ctx);
     }
   } catch (err) {
     console.error("Erreur d'interaction :", err);
