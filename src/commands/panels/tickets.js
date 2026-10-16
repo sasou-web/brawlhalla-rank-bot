@@ -12,6 +12,8 @@ import {
   ChannelType,
   PermissionFlagsBits,
   TextDisplayBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
 } from "discord.js";
 import * as discordTranscripts from "discord-html-transcripts";
@@ -31,6 +33,9 @@ import {
   buildTicketContainer,
 } from "../../tickets.js";
 import { EPHEMERAL, logAudit } from "../shared.js";
+import { collectProofFiles, showUploadModal, textLabel, uploadLabel, uploadModal } from "../../proofUpload.js";
+
+const TICKET_MAX_FILES = 3;
 
 // ====================================================================
 // Panneau interactif /setup-tickets (configuration admin)
@@ -299,21 +304,33 @@ async function openTicket(interaction, topicId) {
   }
 
   const topic = topicId ? await getTopic(interaction.guild.id, topicId) : null;
-  const modal = new ModalBuilder()
-    .setCustomId(`tck_create_modal:${topicId || ""}`)
-    .setTitle(topic ? `Ticket — ${topic.label}`.slice(0, 45) : "Ouvrir un ticket")
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("subject")
-          .setLabel("Décris brièvement ta demande")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setMaxLength(300)
-          .setPlaceholder("Explique ton problème / ta question en quelques mots."),
-      ),
-    );
-  return interaction.showModal(modal);
+  return showUploadModal(interaction, buildTicketOpenModal(topicId, topic));
+}
+
+// Formulaire d'ouverture : sujet + pièces jointes facultatives (re-postées dans le ticket).
+export function buildTicketOpenModal(topicId, topic) {
+  return uploadModal({
+    customId: `tck_create_modal:${topicId || ""}`,
+    title: topic ? `Ticket — ${topic.label}` : "Ouvrir un ticket",
+    components: [
+      textLabel({
+        label: "Décris brièvement ta demande",
+        customId: "subject",
+        paragraph: true,
+        required: true,
+        maxLength: 300,
+        placeholder: "Explique ton problème / ta question en quelques mots.",
+      }),
+      uploadLabel({
+        label: "Pièces jointes (facultatif)",
+        description: "Captures ou courte vidéo, 3 fichiers max.",
+        min: 0,
+        max: TICKET_MAX_FILES,
+        required: false,
+        allowVideo: true,
+      }),
+    ],
+  });
 }
 
 // Slug court et propre à partir du libellé d'un motif (sans accents, minuscules).
@@ -357,6 +374,11 @@ async function createTicketChannel(interaction, topicId, subject) {
   }
 
   await interaction.deferReply({ flags: EPHEMERAL });
+
+  // Pièces jointes du formulaire : validées et téléchargées avant de créer le salon. Un
+  // fichier refusé n'empêche pas l'ouverture du ticket (le membre pourra le poster dedans).
+  const collected = await collectProofFiles(interaction, { maxFiles: TICKET_MAX_FILES, allowVideo: true, required: false });
+  const files = collected.ok ? collected.files : [];
 
   const topic = topicId ? await getTopic(guild.id, topicId) : null;
   const number = await nextTicketNumber(guild.id);
@@ -424,20 +446,30 @@ async function createTicketChannel(interaction, topicId, subject) {
     new ButtonBuilder().setCustomId("tck_close").setLabel("Fermer").setEmoji("🔒").setStyle(ButtonStyle.Danger),
   );
 
-  const sent = await channel
-    .send({
-      components: [
-        new TextDisplayBuilder().setContent(`<@${interaction.user.id}> <@&${cfg.staffRoleId}>`),
-        container,
-        controls,
-      ],
-      flags: MessageFlags.IsComponentsV2,
-      allowedMentions: { users: [interaction.user.id], roles: [cfg.staffRoleId] },
-    })
-    .catch((err) => {
-      console.warn(`Tickets : message de contrôle du ticket #${number} refusé :`, err.message);
-      return null;
-    });
+  const sendControl = (withFiles) => {
+    const components = [new TextDisplayBuilder().setContent(`<@${interaction.user.id}> <@&${cfg.staffRoleId}>`), container];
+    // Components V2 : une pièce jointe n'est visible que si un composant y fait référence.
+    if (withFiles) components.push(attachmentsGallery(files));
+    components.push(controls);
+    return channel
+      .send({
+        components,
+        ...(withFiles ? { files } : {}),
+        flags: MessageFlags.IsComponentsV2,
+        allowedMentions: { users: [interaction.user.id], roles: [cfg.staffRoleId] },
+      })
+      .catch((err) => {
+        console.warn(`Tickets : message de contrôle du ticket #${number} refusé${withFiles ? " (avec pièces jointes)" : ""} :`, err.message);
+        return null;
+      });
+  };
+  let sent = await sendControl(files.length > 0);
+  // Pièces jointes refusées (trop lourdes, etc.) : le ticket s'ouvre quand même, sans elles.
+  let filesLost = false;
+  if (!sent && files.length) {
+    sent = await sendControl(false);
+    filesLost = Boolean(sent);
+  }
 
   // Sans ce message, le salon n'aurait aucun bouton (impossible à fermer) et l'entrée resterait
   // « ouverte », bloquant le membre (« Tu as déjà un ticket ouvert »). On annule proprement.
@@ -448,7 +480,16 @@ async function createTicketChannel(interaction, topicId, subject) {
   }
 
   await logAudit(guild, `🎫 <@${interaction.user.id}> a ouvert le **ticket #${number}** (${topic ? topic.label : "Général"}) → <#${channel.id}>`);
-  return interaction.editReply(`Ton ticket a été créé : <#${channel.id}> ✅`);
+  const lines = [`Ton ticket a été créé : <#${channel.id}> ✅`];
+  if (!collected.ok) lines.push(`📎 Pièces jointes non ajoutées : ${collected.error} Poste-les directement dans le ticket.`);
+  else if (filesLost) lines.push("📎 Tes pièces jointes n'ont pas pu être ajoutées : poste-les directement dans le ticket.");
+  return interaction.editReply(lines.join("\n"));
+}
+
+function attachmentsGallery(files) {
+  return new MediaGalleryBuilder().addItems(
+    files.map((f) => new MediaGalleryItemBuilder().setURL(`attachment://${f.name}`).setDescription("Pièce jointe du membre")),
+  );
 }
 
 // Vérifie que l'interaction se déroule bien dans un salon de ticket.

@@ -16,6 +16,17 @@ import { getSettings } from "../settings.js";
 import { managedRoleNames } from "../roles.js";
 import { highestTier, tierIndex, tierEmojiResolvable, REGION_LABELS } from "../config.js";
 import { EPHEMERAL, logAudit, dmUser, tierEmoji, doSync } from "./shared.js";
+import {
+  PROOF_COMMENT_ID,
+  collectProofFiles,
+  isImageFile,
+  readTextField,
+  sendWithFilesFallback,
+  showUploadModal,
+  textLabel,
+  uploadLabel,
+  uploadModal,
+} from "../proofUpload.js";
 
 // Cooldown anti-spam de /lier (par utilisateur).
 const LIER_COOLDOWN_MS = 30_000;
@@ -318,7 +329,7 @@ export async function handleLinkPanelModal(interaction, ctx) {
  * Logique commune de liaison d'un compte choisi (par bouton de sélection OU par /lier id:).
  * L'interaction doit déjà être différée (deferReply ou deferUpdate) : tout passe par editReply.
  * - auto-validation si rang ≤ seuil ;
- * - sinon validation staff, avec preuve (fil privé + screenshot) pour les hauts rangs.
+ * - sinon validation staff, avec preuve (capture par formulaire, ou fil privé) pour les hauts rangs.
  */
 async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data }) {
   const userId = member.id;
@@ -345,46 +356,83 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
   const aboveAuto = tierIndex(top) > tierIndex(settings.autoApproveTier);
   const needsProof = settings.requireProofScreenshot && tierIndex(top) >= tierIndex(settings.proofTier);
 
-  // Auto-liaison (réutilisée aussi quand aucun salon de validation n'est configuré).
-  const autoLink = async () => {
-    try {
-      const result = await doSync(member, brawlhallaId, ctx, data);
-      await logAudit(
-        interaction.guild,
-        `✅ Auto-liaison : <@${userId}> → \`${data.name}\` (${tierSummary(result.tiers)})`,
-      );
-      const note = data.partial
-        ? "\n⚠️ API Brawlhalla indisponible : seul ton rank 1v1 a pu être appliqué. Le reste se mettra à jour automatiquement plus tard."
-        : "\nTes rôles seront mis à jour automatiquement.";
-      return interaction.editReply({
-        content: `<@${userId}> compte lié ! ${tierSummary(result.tiers)}.${note}`,
-        components: [],
-        embeds: [],
-        allowedMentions: { users: [userId] },
-      });
-    } catch (err) {
-      return interaction.editReply({ content: `Échec de la liaison : ${err.message}`, components: [], embeds: [] });
-    }
-  };
-
   // Sous le seuil d'auto-validation : liaison directe.
-  if (!aboveAuto) return autoLink();
+  if (!aboveAuto) return autoLinkMember(interaction, { member, brawlhallaId, data, ctx });
 
-  // Hauts rangs avec preuve requise : fil privé dans le salon de preuve. INDÉPENDANT du salon
-  // de validation classique (on ne doit pas exiger reviewChannelId pour ce chemin).
+  // Hauts rangs avec preuve requise : un modal ne peut pas s'ouvrir ici (l'interaction est
+  // déjà différée). On propose un bouton qui ouvre le formulaire d'upload (capture
+  // obligatoire), ou le fil privé historique pour qui préfère poster la capture à la main.
+  if (needsProof) {
+    return interaction.editReply({
+      content:
+        `<@${userId}> ton rang **${top}** demande une **capture** avant validation.\n` +
+        `📎 Clique sur **Envoyer ma capture** et joins une capture de ta **page de profil en jeu** ` +
+        `avec ton **pseudo** et ton **ID \`${brawlhallaId}\`** visibles.`,
+      components: [buildProofButtons(userId, brawlhallaId)],
+      embeds: [],
+      allowedMentions: { users: [userId] },
+    });
+  }
+
+  return sendToReview(interaction, { member, brawlhallaId, data, settings, ctx, needsProof: false });
+}
+
+// Liaison immédiate (sous le seuil, ou aucun salon de validation configuré).
+async function autoLinkMember(interaction, { member, brawlhallaId, data, ctx }) {
+  const userId = member.id;
+  try {
+    const result = await doSync(member, brawlhallaId, ctx, data);
+    await logAudit(
+      interaction.guild,
+      `✅ Auto-liaison : <@${userId}> → \`${data.name}\` (${tierSummary(result.tiers)})`,
+    );
+    const note = data.partial
+      ? "\n⚠️ API Brawlhalla indisponible : seul ton rank 1v1 a pu être appliqué. Le reste se mettra à jour automatiquement plus tard."
+      : "\nTes rôles seront mis à jour automatiquement.";
+    return interaction.editReply({
+      content: `<@${userId}> compte lié ! ${tierSummary(result.tiers)}.${note}`,
+      components: [],
+      embeds: [],
+      allowedMentions: { users: [userId] },
+    });
+  } catch (err) {
+    return interaction.editReply({ content: `Échec de la liaison : ${err.message}`, components: [], embeds: [] });
+  }
+}
+
+function buildProofButtons(ownerId, brawlhallaId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`lnkproof:${ownerId}:${brawlhallaId}`).setLabel("Envoyer ma capture").setEmoji("📎").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`lnkthread:${ownerId}:${brawlhallaId}`).setLabel("Je préfère un fil privé").setStyle(ButtonStyle.Secondary),
+  );
+}
+
+/**
+ * Envoie la demande au staff. Avec `needsProof` : fil privé de preuve (avec les fichiers
+ * déjà reçus s'il y en a), sinon/en repli : embed + boutons dans le salon de validation.
+ * `notice` (optionnel) est affiché en tête de la réponse au membre. Passe par editReply.
+ */
+async function sendToReview(interaction, { member, brawlhallaId, data, settings, ctx, needsProof, files = [], comment = "", notice = "" }) {
+  const userId = member.id;
+  const top = highestTier(data.tiers);
+  const prefix = notice ? `${notice}\n` : "";
+
+  // Fil privé dans le salon de preuve. INDÉPENDANT du salon de validation classique (on ne
+  // doit pas exiger reviewChannelId pour ce chemin).
   if (needsProof) {
     const proofParent = await resolveProofParent(interaction, settings);
-    const res = await openProofThread(interaction, proofParent, { userId, brawlhallaId, data, settings });
+    const res = await openProofThread(interaction, proofParent, { userId, brawlhallaId, data, settings, files, comment });
     if (res.ok) {
-      return interaction.editReply({
-        content:
-          `<@${userId}> ton rang **${top}** demande une **preuve** avant validation.\n` +
+      if (res.filesPosted) {
+        await logAudit(interaction.guild, `📎 Preuve de liaison reçue par formulaire : <@${userId}> → \`${data.name}\` (${files.length} fichier(s)).`);
+      }
+      const lostFiles = files.length && !res.filesPosted ? "⚠️ Ta capture n'a pas pu être jointe.\n" : "";
+      const content = res.filesPosted
+        ? `<@${userId}> capture reçue ✅ Un validateur va la vérifier. Suivi dans ton **[fil privé](${res.url})**.`
+        : `${lostFiles}<@${userId}> ton rang **${top}** demande une **preuve** avant validation.\n` +
           `📸 Tu as été ajouté à un **fil privé** : **[clique ici pour l'ouvrir](${res.url})**. ` +
-          `Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`,
-        components: [],
-        embeds: [],
-        allowedMentions: { users: [userId] },
-      });
+          `Poste-y une **capture de ta page de profil en jeu** avec ton **ID \`${brawlhallaId}\`** visible. Le staff validera ensuite.`;
+      return interaction.editReply({ content: prefix + content, components: [], embeds: [], allowedMentions: { users: [userId] } });
     }
     // Échec de création du fil (permissions, membre non ajoutable…) : repli sur la review classique.
     await logAudit(interaction.guild, `⚠️ Fil de preuve impossible (${res.error}). Repli sur validation classique.`);
@@ -392,7 +440,7 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
 
   // Validation classique : embed + boutons dans le salon de validation.
   // Pas de salon de validation configuré : on auto-valide (comportement historique).
-  if (!settings.reviewChannelId) return autoLink();
+  if (!settings.reviewChannelId) return autoLinkMember(interaction, { member, brawlhallaId, data, ctx });
   const channel = await interaction.guild.channels.fetch(settings.reviewChannelId).catch(() => null);
   if (!channel?.isTextBased?.()) {
     return interaction.editReply({
@@ -402,22 +450,132 @@ async function linkChosenAccount(interaction, { brawlhallaId, member, ctx, data 
     });
   }
 
-  // Validation classique : embed + boutons dans le salon de validation.
   const embed = buildReviewEmbed({ id: userId }, brawlhallaId, data);
+  addProofDetails(embed, { files, comment });
   const actions = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`ap:${userId}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`rj:${userId}:${brawlhallaId}`).setLabel("Refuser").setStyle(ButtonStyle.Danger),
   );
 
   try {
-    await channel.send({ embeds: [embed], components: [actions] });
+    await sendWithFilesFallback(channel, { embeds: [embed], components: [actions] }, files);
   } catch (err) {
     return interaction.editReply({ content: `Impossible d'envoyer la demande : ${err.message}`, components: [] });
   }
   return interaction.editReply({
-    content: `<@${userId}> ta demande a été envoyée au staff ✅. Tu recevras tes rôles une fois validée.`,
+    content: `${prefix}<@${userId}> ta demande a été envoyée au staff ✅. Tu recevras tes rôles une fois validée.`,
     components: [],
+    embeds: [],
     allowedMentions: { users: [userId] },
+  });
+}
+
+// Ajoute à l'embed de revue la capture (image de l'embed) et le commentaire du joueur.
+function addProofDetails(embed, { files = [], comment = "" }) {
+  if (files.length) {
+    embed.addFields({ name: "Preuve", value: `📎 ${files.length} fichier(s) envoyé(s) via le formulaire`, inline: false });
+    if (isImageFile(files[0].name)) embed.setImage(`attachment://${files[0].name}`);
+  }
+  if (comment) embed.addFields({ name: "Commentaire du joueur", value: comment.slice(0, 1024), inline: false });
+  return embed;
+}
+
+// ---------- Preuve par formulaire (bouton -> modal d'upload) ----------
+
+// Bouton « Envoyer ma capture » : ouvre le modal (première réponse de l'interaction).
+export async function handleLinkProofButton(interaction) {
+  const [, ownerId, bhId] = interaction.customId.split(":");
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "Ce bouton ne t'appartient pas. Lance ta propre commande `/lier`.", flags: EPHEMERAL });
+  }
+  const settings = await getSettings();
+  return showUploadModal(interaction, buildLinkProofModal(bhId, settings));
+}
+
+export function buildLinkProofModal(brawlhallaId, settings) {
+  return uploadModal({
+    customId: `lnkproof_modal:${brawlhallaId}`,
+    title: "Capture de ton rank",
+    components: [
+      uploadLabel({
+        label: "Capture de ton profil en jeu",
+        description: `Pseudo et ID ${brawlhallaId} visibles.`,
+        min: 1,
+        max: settings.proofMaxFiles,
+        required: true,
+        allowVideo: settings.proofAllowVideo,
+      }),
+      textLabel({ label: "Commentaire (facultatif)", customId: PROOF_COMMENT_ID, paragraph: true, required: false, maxLength: 300 }),
+    ],
+  });
+}
+
+// Bouton « Je préfère un fil privé » : chemin historique (le joueur poste dans le fil).
+export async function handleLinkThreadButton(interaction, ctx) {
+  const [, ownerId, bhId] = interaction.customId.split(":");
+  if (interaction.user.id !== ownerId) {
+    return interaction.reply({ content: "Ce bouton ne t'appartient pas. Lance ta propre commande `/lier`.", flags: EPHEMERAL });
+  }
+  await interaction.deferUpdate();
+  return submitProof(interaction, ctx, { brawlhallaId: Number(bhId), files: [], comment: "" });
+}
+
+// Soumission du modal : valide, télécharge et re-poste les fichiers dans le fil de preuve.
+// En cas d'échec (fichier refusé, trop lourd, erreur réseau) : message d'erreur + fil privé
+// ouvert comme avant, où le joueur peut poster sa capture à la main.
+export async function handleLinkProofModal(interaction, ctx) {
+  const brawlhallaId = Number(interaction.customId.split(":")[1]);
+  if (!brawlhallaId) return interaction.reply({ content: "Demande invalide : relance `/lier`.", flags: EPHEMERAL });
+  // Ouvert depuis le message de /lier : on remplace ce message (les boutons disparaissent).
+  if (interaction.isFromMessage?.()) await interaction.deferUpdate();
+  else await interaction.deferReply({ flags: EPHEMERAL });
+
+  const settings = await getSettings();
+  const collected = await collectProofFiles(interaction, {
+    maxFiles: settings.proofMaxFiles,
+    allowVideo: settings.proofAllowVideo,
+    required: true,
+  });
+  const comment = readTextField(interaction, PROOF_COMMENT_ID).slice(0, 300);
+  return submitProof(interaction, ctx, {
+    brawlhallaId,
+    files: collected.ok ? collected.files : [],
+    comment,
+    notice: collected.ok ? "" : `⚠️ ${collected.error} Poste ta capture dans le fil privé à la place.`,
+    settings,
+  });
+}
+
+async function submitProof(interaction, ctx, { brawlhallaId, files, comment, notice = "", settings }) {
+  const userId = interaction.user.id;
+  const owner = await findUserByBrawlhallaId(brawlhallaId);
+  if (owner && owner !== userId) {
+    return interaction.editReply({
+      content: `<@${userId}> ce compte est **déjà lié** par <@${owner}>. Si c'est le tien, contacte le staff.`,
+      components: [],
+      embeds: [],
+      allowedMentions: { users: [userId] },
+    });
+  }
+  let data;
+  try {
+    data = await getPlayerProfile(brawlhallaId);
+  } catch (err) {
+    const msg = err.pending ? err.message : `Erreur API : ${err.message}`;
+    return interaction.editReply({ content: `<@${userId}> ${msg}`, components: [], embeds: [], allowedMentions: { users: [userId] } });
+  }
+  const member = interaction.member ?? (await interaction.guild.members.fetch(userId).catch(() => null));
+  if (!member) return interaction.editReply({ content: "Membre introuvable.", components: [], embeds: [] });
+  return sendToReview(interaction, {
+    member,
+    brawlhallaId,
+    data,
+    settings: settings ?? (await getSettings()),
+    ctx,
+    needsProof: true,
+    files,
+    comment,
+    notice,
   });
 }
 
@@ -437,12 +595,13 @@ async function resolveProofParent(interaction, settings) {
 }
 
 /**
- * Crée un fil PRIVÉ de validation (mod + joueur), y ajoute le joueur, demande la capture
- * d'écran et propose les boutons Valider/Refuser. Le joueur poste sa preuve directement dans
- * le fil (upload natif Discord). Si l'ajout du membre échoue (salon parent non visible par
- * lui), on supprime le fil et on renvoie ok:false pour repli. Renvoie { ok, url?, error? }.
+ * Crée un fil PRIVÉ de validation (mod + joueur), y ajoute le joueur et propose les boutons
+ * Valider/Refuser. Avec `files` (capture reçue par le formulaire), les fichiers sont re-postés
+ * dans le message de revue ; sans, le joueur est invité à poster sa capture dans le fil. Si
+ * l'ajout du membre échoue (salon parent non visible par lui), on supprime le fil et on
+ * renvoie ok:false pour repli. Renvoie { ok, url?, filesPosted?, error? }.
  */
-async function openProofThread(interaction, channel, { userId, brawlhallaId, data, settings }) {
+async function openProofThread(interaction, channel, { userId, brawlhallaId, data, settings, files = [], comment = "" }) {
   if (!channel?.threads?.create) return { ok: false, error: "salon hôte invalide" };
   let thread;
   try {
@@ -466,24 +625,33 @@ async function openProofThread(interaction, channel, { userId, brawlhallaId, dat
   }
 
   try {
-    const embed = buildReviewEmbed({ id: userId }, brawlhallaId, data);
+    const embed = addProofDetails(buildReviewEmbed({ id: userId }, brawlhallaId, data), { files, comment });
     const actions = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`ap:${userId}:${brawlhallaId}`).setLabel("Valider").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`rj:${userId}:${brawlhallaId}`).setLabel("Refuser").setStyle(ButtonStyle.Danger),
     );
     const staffPing = settings.reviewerRoleId ? `<@&${settings.reviewerRoleId}> ` : "";
-    await thread.send({
-      content:
-        `${staffPing}Nouvelle demande de liaison à vérifier.\n` +
-        `📸 <@${userId}>, envoie **ici** une **capture d'écran de ta page de profil en jeu** ` +
-        `avec ton **pseudo** et ton **ID \`${brawlhallaId}\`** bien visibles.\n` +
-        `Le staff vérifiera la capture puis cliquera **Valider** ✅.`,
-      embeds: [embed],
-      components: [actions],
-      allowedMentions: { users: [userId], roles: settings.reviewerRoleId ? [settings.reviewerRoleId] : [] },
-    });
+    const askForProof =
+      `📸 <@${userId}>, envoie **ici** une **capture d'écran de ta page de profil en jeu** ` +
+      `avec ton **pseudo** et ton **ID \`${brawlhallaId}\`** bien visibles.\n` +
+      `Le staff vérifiera la capture puis cliquera **Valider** ✅.`;
+    const content = files.length
+      ? `${staffPing}Nouvelle demande de liaison à vérifier.\n` +
+        `📎 Capture envoyée par <@${userId}> ci-dessous : vérifie le **pseudo** et l'**ID \`${brawlhallaId}\`**, puis clique **Valider** ✅.`
+      : `${staffPing}Nouvelle demande de liaison à vérifier.\n${askForProof}`;
+    const { filesPosted } = await sendWithFilesFallback(
+      thread,
+      {
+        content,
+        embeds: [embed],
+        components: [actions],
+        allowedMentions: { users: [userId], roles: settings.reviewerRoleId ? [settings.reviewerRoleId] : [] },
+      },
+      files,
+      { fallbackContent: `${staffPing}Nouvelle demande de liaison à vérifier.\n⚠️ La capture envoyée par formulaire n'a pas pu être jointe.\n${askForProof}` },
+    );
     const url = `https://discord.com/channels/${interaction.guild.id}/${thread.id}`;
-    return { ok: true, threadId: thread.id, url };
+    return { ok: true, threadId: thread.id, url, filesPosted };
   } catch (err) {
     await thread.delete("Échec d'envoi du message de preuve").catch(() => {});
     return { ok: false, error: err.message };

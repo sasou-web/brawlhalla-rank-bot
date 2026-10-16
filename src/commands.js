@@ -120,6 +120,9 @@ import {
   handleLinkCancel,
   handleLinkPanelButton,
   handleLinkPanelModal,
+  handleLinkProofButton,
+  handleLinkThreadButton,
+  handleLinkProofModal,
   handleApprove,
   handleReject,
   handleForcelink,
@@ -226,6 +229,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("gw")) return handleGiveawayModal(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
   if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
+  if (interaction.customId.startsWith("lnkproof_modal:")) return handleLinkProofModal(interaction, ctx);
   if (!interaction.customId.startsWith("rm:")) return;
   // Refus de liaison : revérifié à l'envoi (validateur destitué entre-temps, customId forgé).
   if (!(await isReviewer(interaction))) {
@@ -668,6 +672,8 @@ async function routeButton(interaction, ctx) {
   if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);
   if (id.startsWith("lnkok:")) return handleLinkConfirm(interaction, ctx);
   if (id.startsWith("lnkno:")) return handleLinkCancel(interaction, ctx);
+  if (id.startsWith("lnkproof:")) return handleLinkProofButton(interaction, ctx);
+  if (id.startsWith("lnkthread:")) return handleLinkThreadButton(interaction, ctx);
   if (id.startsWith("profpick:")) return handleProfilePick(interaction);
   if (id.startsWith("prof:")) return handleProfileNav(interaction);
   if (id.startsWith("ap:")) return handleApprove(interaction, ctx);
