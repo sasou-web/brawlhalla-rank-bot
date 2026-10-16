@@ -107,6 +107,7 @@ import {
   handleCombosMaster,
 } from "./commands/combos.js";
 import { handleTimeout } from "./commands/moderation.js";
+import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
@@ -226,6 +227,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("gw")) return handleGiveawayModal(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
   if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
+  if (interaction.customId.startsWith("rep_modal:")) return handleReportModal(interaction);
   if (!interaction.customId.startsWith("rm:")) return;
   // Refus de liaison : revérifié à l'envoi (validateur destitué entre-temps, customId forgé).
   if (!(await isReviewer(interaction))) {
@@ -674,4 +676,5 @@ async function routeButton(interaction, ctx) {
   if (id === "admin_refresh_roles") return handleAdminRefreshButton(interaction, ctx);
   if (id === "levels_reset_all") return handleLevelsResetAllConfirm(interaction, ctx);
   if (id.startsWith("xplb:")) return handleLeaderboardXpPage(interaction, ctx);
+  if (id.startsWith("rep_ok:") || id.startsWith("rep_del:")) return handleReportButton(interaction);
 }
