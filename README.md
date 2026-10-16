@@ -44,6 +44,7 @@ npm start              # demarre le bot
 - `/equipe [membre|pseudo]` — équipes 2v2 et coéquipiers
 - `/leaderboard [mode] [région]` — top 10 du classement
 - `/top` — classement 1v1 des membres liés du serveur
+- `/guilde` — guilde Brawlhalla du serveur : stats, meilleurs contributeurs (configurée dans le dashboard › Communauté › Guilde)
 - `/versus` — compare deux joueurs · `/progression` — courbe du rating · `/carte` — carte profil image
 - `/niveau` · `/classement-niveaux` · `/leaderboard-xp` — XP et niveaux du serveur
 - `/achievements [membre]` — succès débloqués (lié, rank, niveau, clips…)

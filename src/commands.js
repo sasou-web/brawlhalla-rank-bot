@@ -107,6 +107,7 @@ import {
   handleCombosMaster,
 } from "./commands/combos.js";
 import { handleTimeout } from "./commands/moderation.js";
+import { handleGuilde, handleGuildButton } from "./commands/guild.js";
 import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
@@ -157,7 +158,7 @@ export const MANAGE_MESSAGES_COMMANDS = new Set(["clear"]);
 // resté ouvert après un retrait de droits, ou un customId forgé, ne modifie plus rien.
 // Les composants publics `tck*` / `gw*` (ouvrir un ticket, participer à un giveaway) ne sont
 // pas concernés : seuls `tckcfg_` / `gwcfg_` le sont.
-export const ADMIN_COMPONENT_PREFIXES = ["lvl_", "tt_", "clp_", "gr_", "tv_", "tckcfg_", "gwcfg_", "setup_"];
+export const ADMIN_COMPONENT_PREFIXES = ["lvl_", "tt_", "clp_", "gr_", "tv_", "tckcfg_", "gwcfg_", "setup_", "gld_"];
 
 export function isAdminComponent(customId) {
   return ADMIN_COMPONENT_PREFIXES.some((prefix) => customId.startsWith(prefix));
@@ -215,6 +216,7 @@ export async function handleChatInput(interaction, ctx) {
     case "tournoi-panneau": return handleTournoiPanneau(interaction, ctx);
     case "bracket": return handleBracket(interaction, ctx);
     case "caster": return handleCaster(interaction, ctx);
+    case "guilde": return handleGuilde(interaction, ctx);
   }
 }
 
@@ -669,6 +671,7 @@ async function routeButton(interaction, ctx) {
   if (id.startsWith("tck")) return handleTicketsButton(interaction, ctx);
   if (id.startsWith("gw")) return handleGiveawayButton(interaction, ctx);
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
+  if (id.startsWith("gld_")) return handleGuildButton(interaction, ctx);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);
   if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);

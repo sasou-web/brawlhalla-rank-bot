@@ -1,6 +1,6 @@
 /* ════════════════════════════════════════════════════════════════════════
    Xray Kaya (XK) Bot — Dashboard · communauté
-   Liaison & rangs, niveaux, accueil, League of Legends, tickets, vocaux.
+   Liaison & rangs, guilde, niveaux, accueil, League of Legends, tickets, vocaux.
    ────────────────────────────────────────────────────────────────────────
    Script classique (voir l'en-tête de dash-core.js).
    ════════════════════════════════════════════════════════════════════════ */
@@ -206,6 +206,131 @@ function linkPanelTab(host, c) {
     ),
   );
   host.append(splitLayout(form, preview));
+}
+
+// ═══════════════════ Guilde Brawlhalla ═══════════════════
+function renderGuild(ctx) {
+  const f = configForm("guild");
+  const c = f.data;
+  const st = { status: null, error: null, syncing: false };
+  const statusHost = el("div", { class: "section", "aria-live": "polite" });
+
+  const syncBtn = button("Synchroniser maintenant", {
+    icon: "refresh",
+    onClick: async () => {
+      if (formDirty(f)) return toast("Enregistre d'abord les réglages.", "err");
+      if (!c.brawlhallaGuildId) return toast("Indique d'abord l'ID de la guilde.", "err");
+      syncBtn.disabled = true;
+      try {
+        const r = await api("/api/guilde/sync", "POST", {});
+        st.status = r.status;
+        st.error = null;
+        const parts = [];
+        if (r.joined || r.left) parts.push(`${r.joined} arrivée(s), ${r.left} départ(s)`);
+        if (r.added || r.removed) parts.push(`rôle : +${r.added} / -${r.removed}`);
+        toast(r.roleError || (parts.length ? `Guilde synchronisée (${parts.join(", ")}).` : "Guilde synchronisée, rien à changer."), r.roleError ? "err" : "ok");
+        draw();
+      } finally {
+        syncBtn.disabled = false;
+      }
+    },
+  });
+
+  ctx.root.append(
+    pageHeader({
+      title: "Guilde",
+      description: "Relie la guilde Brawlhalla du serveur à Discord : rôle automatique, annonces d'arrivées et de départs, commande /guilde.",
+      actions: [syncBtn],
+    }),
+    groups(
+      settingsGroup(
+        "Guilde suivie",
+        "Le bot relit la guilde à chaque actualisation des rangs. Les membres sans compte lié ne sont jamais touchés.",
+        field("ID de la guilde Brawlhalla", textInput(c, "brawlhallaGuildId", { placeholder: "Ex. 123456", maxLength: 12, mono: true, trim: true }), {
+          help: "Changer d'ID efface l'historique de l'ancienne guilde. Vide : module inactif.",
+        }),
+        field("Rôle des membres de la guilde", rolePicker(c, "roleId"), {
+          help: "Ajouté aux membres liés présents dans la guilde, retiré quand ils la quittent. Jamais retiré si l'API ne répond pas.",
+          optional: true,
+        }),
+      ),
+      settingsGroup(
+        "Annonces",
+        "Un message par actualisation, qui regroupe les arrivées et les départs.",
+        switchField("Annoncer les arrivées et les départs", c, "announceJoins"),
+        showWhen(field("Salon d'annonce", channelPicker(c, "announceChannelId", "text")), () => !!c.announceJoins),
+      ),
+    ),
+    statusHost,
+  );
+
+  function draw() {
+    clearNode(statusHost);
+    const s = st.status;
+    if (st.error) return statusHost.append(panel(inlineError("État de la guilde indisponible : " + st.error, load)));
+    if (!s) return statusHost.append(panel(skelLines(3)));
+    if (!s.configured) {
+      return statusHost.append(
+        panel(emptyState({ icon: "shield", title: "Aucune guilde suivie", text: "Renseigne l'ID de la guilde puis enregistre : le bot la lira à la prochaine actualisation.", compact: true })),
+      );
+    }
+    if (s.lastError) statusHost.append(el("div", { style: "margin-bottom:16px" }, callout("warn", s.lastError.message, { title: `Dernière lecture échouée ${fmtRelative(s.lastError.at)}` })));
+    const snap = s.snapshot;
+    if (!snap) {
+      statusHost.append(panel(emptyState({ icon: "clock", title: "Première lecture en attente", text: "Lance « Synchroniser maintenant » ou attends la prochaine actualisation.", compact: true })));
+      return;
+    }
+    const linked = snap.members.filter((m) => m.discordId).length;
+    statusHost.append(
+      sectionBlock(
+        snap.stats.name,
+        { description: `Instantané ${fmtRelative(snap.at)}${s.lastSyncAt ? ` · dernière synchro ${fmtRelative(s.lastSyncAt)}` : ""}` },
+        statGrid([
+          { label: "Membres", value: fmtNum(snap.stats.memberCount ?? snap.members.length) },
+          { label: "Comptes liés", value: fmtNum(linked), hint: snap.members.length ? fmtPct(linked / snap.members.length) : null },
+          { label: "XP de guilde", value: fmtCompact(snap.stats.xp), title: fmtNum(snap.stats.xp) },
+          { label: "Points cette semaine", value: fmtNum(snap.stats.points), hint: snap.stats.rank ? `Rang #${fmtNum(snap.stats.rank)}` : null },
+        ]),
+        el("div", { style: "margin-top:16px" }, dataTable({
+          label: "Membres de la guilde",
+          rows: snap.members,
+          searchable: snap.members.length > 10,
+          searchPlaceholder: "Rechercher un membre",
+          searchText: (r) => `${r.name} ${r.rank}`,
+          initialSort: { key: "xp", dir: "desc" },
+          empty: emptyState({ icon: "users", title: "Guilde vide", compact: true }),
+          columns: [
+            { key: "name", label: "Membre", primary: true, sortable: true, render: (r) => cellTitle(r.name, r.rank || null) },
+            { key: "xp", label: "XP", align: "right", sortable: true, meta: true, render: (r) => fmtNum(r.xp) },
+            { key: "points", label: "Points", align: "right", sortable: true, meta: true, render: (r) => fmtNum(r.points) },
+            { key: "joinDate", label: "Arrivée", sortable: true, meta: true, hideSm: true, render: (r) => (r.joinDate ? fmtDate(r.joinDate * 1000) : "—") },
+            {
+              key: "discordId",
+              label: "Discord",
+              sortable: true,
+              meta: true,
+              sortValue: (r) => (r.discordId ? 1 : 0),
+              render: (r) => (r.discordId ? statusDot("ok", "Lié") : statusDot("neutral", "Non lié")),
+            },
+          ],
+        })),
+      ),
+    );
+  }
+
+  async function load() {
+    try {
+      st.status = await api("/api/guilde/status");
+      st.error = null;
+    } catch (e) {
+      st.error = e.message;
+    }
+    if (!ctx.alive()) return;
+    draw();
+  }
+  draw();
+  load();
+  ctx.interval(load, 60000);
 }
 
 // ═══════════════════ Niveaux ═══════════════════
