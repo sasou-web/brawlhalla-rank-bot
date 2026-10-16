@@ -290,8 +290,10 @@ async function openTicket(interaction, topicId) {
   if (!cfg.enabled) {
     return interaction.reply({ content: "Le système de tickets est désactivé.", flags: EPHEMERAL });
   }
-  // Anti-spam : un seul ticket ouvert par membre à la fois.
-  const already = await countOpenByOwner(interaction.guild.id, interaction.user.id);
+  // Anti-spam : un seul ticket ouvert par membre à la fois (salons disparus ignorés).
+  const already = await countOpenByOwner(interaction.guild.id, interaction.user.id, {
+    channels: interaction.guild.channels?.cache,
+  });
   if (already >= 1) {
     return interaction.reply({ content: "Tu as déjà un ticket ouvert. Ferme-le avant d'en ouvrir un autre.", flags: EPHEMERAL });
   }
@@ -350,7 +352,7 @@ async function createTicketChannel(interaction, topicId, subject) {
     return interaction.reply({ content: "Le système de tickets n'est pas configuré.", flags: EPHEMERAL });
   }
   // Re-vérifie l'unicité (course possible entre l'ouverture du modal et l'envoi).
-  if ((await countOpenByOwner(guild.id, interaction.user.id)) >= 1) {
+  if ((await countOpenByOwner(guild.id, interaction.user.id, { channels: guild.channels?.cache })) >= 1) {
     return interaction.reply({ content: "Tu as déjà un ticket ouvert.", flags: EPHEMERAL });
   }
 
@@ -530,6 +532,10 @@ async function askCloseTicket(interaction) {
 // serveur (10 Mo sans boost) : au-delà de ce seuil, ou si l'envoi est refusé, on se replie
 // sur un transcript sans images intégrées (elles restent en liens vers le CDN Discord).
 const TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
+// Bornes de génération (le bouton est accessible à l'auteur du ticket) : au-delà, chaque clic
+// rechargerait tout le salon et téléchargerait toutes les images en mémoire (base64).
+export const TRANSCRIPT_MAX_MESSAGES = 1000; // les plus récents
+export const TRANSCRIPT_MAX_IMAGES_BYTES = 25 * 1024 * 1024; // pièces jointes cumulées
 
 function transcriptBytes(file) {
   const data = file?.attachment;
@@ -548,46 +554,60 @@ async function tryDeliver(deliver, file) {
 
 // Génère le transcript et le remet via `deliver(file)` (renvoie le message envoyé).
 // Renvoie { ok, light } : `light` = repli sans images intégrées. Ne lève jamais.
+// Les messages ne sont récupérés qu'une fois, même en cas de repli.
 async function deliverTranscript(channel, ticket, deliver) {
-  const full = await buildTranscript(channel, ticket).catch(() => null);
-  if (full && transcriptBytes(full) <= TRANSCRIPT_MAX_BYTES && (await tryDeliver(deliver, full))) {
-    return { ok: true, light: false };
+  // discord-html-transcripts 3.2.0 ne sait PAS rendre les Components V2 (conteneurs, text
+  // displays, séparateurs) : son renderer fait `row.components.map(...)` sur chaque composant
+  // de haut niveau et plante (« Cannot read properties of undefined (reading 'map') ») dès
+  // qu'un de ces composants n'a pas de `.components`. On récupère donc les messages nous-mêmes
+  // et on ne conserve que les action rows classiques avant de générer le transcript.
+  const messages = await fetchAllChannelMessages(channel).catch(() => null);
+  if (!messages) return { ok: false, light: false };
+  for (const m of messages) sanitizeMessageComponents(m);
+
+  // Images intégrées seulement si leur poids cumulé reste raisonnable.
+  if (attachmentsBytes(messages) <= TRANSCRIPT_MAX_IMAGES_BYTES) {
+    const full = await buildTranscript(messages, channel, ticket).catch(() => null);
+    if (full && transcriptBytes(full) <= TRANSCRIPT_MAX_BYTES && (await tryDeliver(deliver, full))) {
+      return { ok: true, light: false };
+    }
   }
-  const light = await buildTranscript(channel, ticket, { saveImages: false }).catch(() => null);
+  const light = await buildTranscript(messages, channel, ticket, { saveImages: false }).catch(() => null);
   return { ok: Boolean(light) && (await tryDeliver(deliver, light)), light: true };
 }
 
-// Génère un transcript HTML du salon de ticket via discord-html-transcripts.
+// Poids cumulé des pièces jointes : borne ce que `saveImages` téléchargerait.
+export function attachmentsBytes(messages) {
+  let total = 0;
+  for (const m of messages) for (const a of m.attachments?.values?.() ?? []) total += a.size || 0;
+  return total;
+}
+
+// Génère un transcript HTML (discord-html-transcripts) à partir des messages déjà récupérés.
 // Retourne un AttachmentBuilder (fichier .html) prêt à être envoyé.
-async function buildTranscript(channel, ticket, { saveImages = true } = {}) {
+function buildTranscript(messages, channel, ticket, { saveImages = true } = {}) {
   const options = {
     filename: `ticket-${String(ticket.number).padStart(4, "0")}.html`,
     saveImages, // true : intègre les images dans le fichier
     poweredBy: false,
     footerText: `Ticket #${ticket.number} • {number} message(s)`,
   };
-
-  // discord-html-transcripts 3.2.0 ne sait PAS rendre les Components V2 (conteneurs, text
-  // displays, séparateurs) : son renderer fait `row.components.map(...)` sur chaque composant
-  // de haut niveau et plante (« Cannot read properties of undefined (reading 'map') ») dès
-  // qu'un de ces composants n'a pas de `.components`. On récupère donc les messages nous-mêmes
-  // et on ne conserve que les action rows classiques avant de générer le transcript.
-  const messages = await fetchAllChannelMessages(channel);
-  for (const m of messages) sanitizeMessageComponents(m);
   return discordTranscripts.generateFromMessages(messages, channel, options);
 }
 
-// Récupère TOUS les messages d'un salon (pagination 100 par 100), du plus ancien au plus récent.
-async function fetchAllChannelMessages(channel) {
+// Récupère les messages d'un salon (pagination 100 par 100, au plus `max`, les plus récents),
+// du plus ancien au plus récent.
+export async function fetchAllChannelMessages(channel, max = TRANSCRIPT_MAX_MESSAGES) {
   const all = [];
   let before;
-  while (true) {
-    const opts = before ? { limit: 100, before } : { limit: 100 };
+  while (all.length < max) {
+    const limit = Math.min(100, max - all.length);
+    const opts = before ? { limit, before } : { limit };
     const batch = await channel.messages.fetch(opts).catch(() => null);
     if (!batch || batch.size === 0) break;
     all.push(...batch.values());
     before = batch.lastKey();
-    if (batch.size < 100) break;
+    if (batch.size < limit) break;
   }
   return all.reverse(); // ordre chronologique attendu par le générateur
 }

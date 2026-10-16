@@ -65,6 +65,7 @@ import {
   deleteHistoryEntry,
 } from "../tournament.js";
 import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
+import { teardownTournament } from "../tournamentAutomation.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
 import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos, loadCombos, getComboVideo } from "../combos.js";
@@ -830,10 +831,21 @@ export function startWebServer(client, ctx = null) {
     }
   });
 
+  // Fin de tournoi (suppression, archivage) : salons de match et rôle participant nettoyés en
+  // arrière-plan (des dizaines d'appels Discord : la réponse HTTP ne les attend pas).
+  function teardownInBackground(t) {
+    if (!t) return;
+    client.guilds
+      .fetch(G)
+      .then((guild) => teardownTournament(guild, t))
+      .catch((err) => console.warn("Tournoi : nettoyage de fin incomplet :", err.message));
+  }
+
   app.delete("/api/tournament", requireAdmin, async (req, res) => {
     const t = await getTournament(G);
     const signupChannelId = t?.signupChannelId || null;
     await deleteTournament(G);
+    teardownInBackground(t);
     await postNoTournamentPanel(client, signupChannelId);
     res.json({ ok: true });
   });
@@ -1165,11 +1177,10 @@ export function startWebServer(client, ctx = null) {
   // ---- Historique ----
   app.post("/api/tournament/archive", requireAdmin, async (req, res) => {
     try {
-      let signupChannelId = null;
+      const t = await getTournament(G);
+      const signupChannelId = t?.signupChannelId || null;
       // Recap "Hall of Fame" (podium + MVP) AVANT archivage (l'archivage supprime le tournoi courant).
       try {
-        const t = await getTournament(G);
-        signupChannelId = t?.signupChannelId || null;
         if (t && t.hallOfFameChannelId) {
           const ch = await guildTextChannel(t.hallOfFameChannelId);
           if (ch) await ch.send(buildHallOfFamePayload(t));
@@ -1178,6 +1189,7 @@ export function startWebServer(client, ctx = null) {
         /* recap best-effort */
       }
       await archiveTournament(G);
+      teardownInBackground(t);
       // Le salon d'inscription repasse en "aucun tournoi" pour ne pas perdre les membres.
       await postNoTournamentPanel(client, signupChannelId);
       res.json({ ok: true });

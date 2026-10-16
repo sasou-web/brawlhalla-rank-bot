@@ -188,10 +188,27 @@ export async function setTicketClaim(guildId, channelId, userId) {
   }
 }
 
-/** Nombre de tickets actuellement ouverts par un membre donne. */
-export async function countOpenByOwner(guildId, ownerId) {
+/**
+ * Nombre de tickets actuellement ouverts par un membre donne.
+ * `channels` (optionnel, ex. guild.channels.cache) : les tickets dont le salon n'existe plus
+ * (supprime a la main, bot redemarre pendant la fermeture) sont ignores et purges, sinon le
+ * membre resterait bloque sur « Tu as déjà un ticket ouvert ».
+ */
+export async function countOpenByOwner(guildId, ownerId, { channels } = {}) {
   const g = await getGuild(guildId);
-  return Object.values(g.open).filter((t) => t.ownerId === ownerId).length;
+  let count = 0;
+  let purged = false;
+  for (const [channelId, t] of Object.entries(g.open)) {
+    if (t.ownerId !== ownerId) continue;
+    if (channels && !channels.has(channelId)) {
+      delete g.open[channelId];
+      purged = true;
+      continue;
+    }
+    count++;
+  }
+  if (purged) await save();
+  return count;
 }
 
 // ====================================================================

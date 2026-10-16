@@ -5,7 +5,8 @@ import { compileFilter, findMatches, maskText, matchedTerms, termKey } from "./w
 /**
  * Filtre de mots : supprime (ou masque) les messages contenant un terme interdit.
  * La détection est dans wordfilterEngine.js (pur, testable) ; ce module applique les
- * actions sur Discord et tient l'historique.
+ * actions sur Discord et tient l'historique. Texte analysé : le message, le texte d'un
+ * message transféré, la question et les réponses d'un sondage, les noms de fichiers.
  *
  * Config (kv.wordfilter, modifiable par le staff via le dashboard) :
  *   { guilds: { [guildId]: { enabled, words, allowed, evasion, ignoreLinks, checkEdits,
@@ -18,7 +19,8 @@ import { compileFilter, findMatches, maskText, matchedTerms, termKey } from "./w
  * Actions :
  *   delete : le message est supprimé ;
  *   mask   : supprimé puis republié à l'identique (pseudo + avatar, via un webhook) avec
- *            les termes masqués. Repli sur « delete » si le webhook est impossible ;
+ *            les termes masqués. Repli sur « delete » si le webhook est impossible, ou si
+ *            un terme est hors du texte (transfert, sondage, nom de fichier) ;
  *   flag   : rien n'est supprimé, le message est seulement signalé au journal.
  * Tout est best-effort : une permission manquante n'interrompt jamais le bot.
  */
@@ -324,11 +326,11 @@ async function maybeTimeout(message, cfg, st, now) {
 
 const ACTION_LABEL = { delete: "supprimé", mask: "masqué", flag: "signalé", failed: "non supprimé (permission manquante)" };
 
-async function postLog(message, cfg, entry) {
+async function postLog(message, cfg, entry, scanned) {
   if (!cfg.logChannelId) return;
   const ch = await message.client.channels.fetch(cfg.logChannelId).catch(() => null);
   if (!ch?.isTextBased?.()) return;
-  const original = String(message.content || "").replace(/\|/g, "∣").slice(0, 1000);
+  const original = String(scanned || "").replace(/\|/g, "∣").slice(0, 1000);
   const lines = [`**Message ${ACTION_LABEL[entry.action] || entry.action}** dans <#${message.channel.id}>${entry.edited ? " (après modification)" : ""}`, `||${original}||`];
   if (entry.timeout) lines.push(`⏳ Exclu ${cfg.timeoutMinutes} min (infractions répétées).`);
   await ch
@@ -348,23 +350,44 @@ async function postLog(message, cfg, entry) {
     .catch(() => {});
 }
 
+// Texte affiché ailleurs que dans `content` : message transféré (son texte vit dans le
+// snapshot), question et réponses d'un sondage, noms des pièces jointes.
+const names = (attachments) => [...(attachments?.values?.() ?? [])].map((a) => a?.name);
+function extraTexts(message) {
+  const out = names(message.attachments);
+  for (const snap of message.messageSnapshots?.values?.() ?? []) out.push(snap?.content, ...names(snap?.attachments));
+  const poll = message.poll;
+  if (poll) out.push(poll.question?.text, ...[...(poll.answers?.values?.() ?? [])].map((a) => a?.text));
+  return out.filter((s) => typeof s === "string" && s.trim());
+}
+
 /**
  * À appeler pour chaque message (créé ou modifié). Renvoie true si le message a été
  * retiré : l'appelant ne doit alors plus le traiter (XP, clips…).
  */
 export async function handleWordFilter(message, { edited = false } = {}) {
-  if (!message.guild || message.author?.bot || message.webhookId || !message.content) return false;
+  if (!message.guild || message.author?.bot || message.webhookId) return false;
   const cfg = guildConfig(message.guild.id);
   if (!cfg.enabled || !cfg.words.length) return false;
   if (edited && !cfg.checkEdits) return false;
+  const content = message.content || "";
+  const extras = extraTexts(message);
+  if (!content && !extras.length) return false;
   if (isExempt(message, cfg)) return false;
 
-  const matches = findMatches(message.content, filterFor(message.guild.id, cfg));
-  if (!matches.length) return false;
+  const filter = filterFor(message.guild.id, cfg);
+  const matches = content ? findMatches(content, filter) : [];
+  const extraMatches = extras.flatMap((text) => findMatches(text, filter));
+  if (!matches.length && !extraMatches.length) return false;
 
   const now = Date.now();
-  const terms = matchedTerms(matches);
+  const terms = matchedTerms([...matches, ...extraMatches]);
+  // Texte montré au journal : tout ce qui a été analysé.
+  const scanned = [content, ...extras].filter(Boolean).join("\n");
   let action = cfg.action;
+  // « mask » ne sait masquer que `content` : un terme hors du texte (transfert, sondage, nom
+  // de fichier) serait republié tel quel, on supprime donc le message.
+  if (action === "mask" && extraMatches.length) action = "delete";
 
   if (action !== "flag") {
     const files = action === "mask" ? await downloadAttachments(message).catch(() => null) : [];
@@ -390,7 +413,9 @@ export async function handleWordFilter(message, { edited = false } = {}) {
     action,
     edited,
     timeout,
-    excerpt: maskText(message.content, matches).replace(/\s+/g, " ").slice(0, 180),
+    excerpt: maskText(scanned, scanned === content ? matches : findMatches(scanned, filter))
+      .replace(/\s+/g, " ")
+      .slice(0, 180),
   };
   st.total += 1;
   st.log.push(entry);
@@ -398,7 +423,7 @@ export async function handleWordFilter(message, { edited = false } = {}) {
   saveDoc(STATE_KEY, states());
 
   if (removed) warnAuthor(message, cfg).catch(() => {});
-  postLog(message, cfg, entry).catch(() => {});
+  postLog(message, cfg, entry, scanned).catch(() => {});
   console.log(`Filtre de mots : message de ${message.author.tag} ${ACTION_LABEL[action]} dans #${message.channel.name} (${terms.join(", ")})${timeout ? ", membre exclu temporairement" : ""}.`);
   return removed;
 }

@@ -141,6 +141,14 @@ async function giveParticipantRoles(guild, t, userIds) {
   }
 }
 
+async function removeParticipantRoles(guild, t, userIds) {
+  if (!t.participantRoleId) return;
+  for (const uid of userIds) {
+    const m = await guild.members.fetch(uid).catch(() => null);
+    if (m) await m.roles.remove(t.participantRoleId, "Désinscription tournoi").catch(() => {});
+  }
+}
+
 export async function handleTournamentButton(interaction, ctx) {
   const id = interaction.customId;
   const guildId = interaction.guild.id;
@@ -293,8 +301,9 @@ export async function handleTournamentButton(interaction, ctx) {
   if (id === "trn_leave") {
     try {
       await interaction.deferReply({ flags: EPHEMERAL });
-      await unregisterEntrant(guildId, interaction.user.id);
-      if (t.participantRoleId) await interaction.member.roles.remove(t.participantRoleId).catch(() => {});
+      const entry = await unregisterEntrant(guildId, interaction.user.id);
+      // En 2v2, c'est l'équipe entière qui est désinscrite : le rôle est retiré aux deux.
+      await removeParticipantRoles(interaction.guild, t, entry.members);
       await refreshSignupPanel(interaction.client, guildId);
       return interaction.editReply("🚪 Tu es désinscrit·e.");
     } catch (e) {

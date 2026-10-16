@@ -11,11 +11,13 @@
  *   deux mots  expression : les mots doivent se suivre
  *
  * ── Normalisation (texte et termes passent par la même) ───────────────────────────────
- *   Toujours : minuscules, accents retirés (é → e), ligatures (œ → oe), caractères
- *   invisibles supprimés. Mentions, emojis personnalisés et (option) liens ignorés.
+ *   Toujours : minuscules, accents retirés (é → e), ligatures (œ → oe), lettres « fancy »
+ *   ramenées aux lettres latines (𝐜, ｃ, ⓒ, ᶜ : décomposition NFKD), caractères invisibles
+ *   supprimés. Mentions, emojis personnalisés et (option) liens ignorés.
  *   Contournements (option `evasion`, active par défaut) :
  *     - chiffres et symboles à la place des lettres : c0nn4rd, $alope, t@pette ;
- *     - lettres d'autres alphabets qui ressemblent aux latines (а cyrillique…) ;
+ *     - lettres d'autres alphabets qui ressemblent aux latines (а cyrillique…), petites
+ *       capitales (ᴄᴏɴɴᴀʀᴅ) ;
  *     - lettres répétées : connnnnard ;
  *     - ponctuation au milieu d'un mot : con.nard, c-o-n-n-a-r-d ;
  *     - lettres espacées : c o n n a r d (au moins 3 lettres isolées à la suite).
@@ -25,13 +27,18 @@
  * Les positions renvoyées sont celles du texte d'origine (pour masquer / surligner).
  */
 
-const ZERO_WIDTH = new Set(["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "\u00AD"]);
+// Caractères invisibles (zéro largeur, trait d'union conditionnel, remplissage hangul U+3164…).
+const IGNORABLE = /^\p{Default_Ignorable_Code_Point}$/u;
 const LIGATURES = { "œ": "oe", "æ": "ae", "ß": "ss", "ﬁ": "fi", "ﬂ": "fl" };
-// Lettres cyrilliques / grecques visuellement identiques à des lettres latines.
+// Lettres cyrilliques / grecques visuellement identiques à des lettres latines, et petites
+// capitales (ᴄᴏɴɴᴀʀᴅ : sans décomposition Unicode, contrairement aux lettres « fancy »).
 const HOMOGLYPHS = {
   "а": "a", "в": "b", "е": "e", "ё": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t",
   "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ɡ": "g", "α": "a", "β": "b", "ε": "e", "ι": "i",
   "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "τ": "t", "υ": "u", "χ": "x",
+  "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f", "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k",
+  "ʟ": "l", "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ꞯ": "q", "ʀ": "r", "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v",
+  "ᴡ": "w", "ʏ": "y", "ᴢ": "z",
 };
 const LEET = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "€": "e" };
 // Ponctuation « molle » : sépare les mots, mais peut aussi servir à couper un mot pour
@@ -65,14 +72,19 @@ function units(text, { evasion, ignoreLinks }) {
   for (const ch of src) {
     const start = i;
     i += ch.length;
-    if (ZERO_WIDTH.has(ch)) continue; // invisible : ni lettre ni séparateur (c\u200Bon = con)
-    const lower = ch.toLowerCase();
-    let c = LIGATURES[lower] || (evasion && HOMOGLYPHS[lower]) || lower;
-    c = c.normalize("NFD").replace(MARKS, "");
-    if (evasion && LEET[c]) c = LEET[c];
-    if (!c) continue;
-    const kind = WORD_CHAR.test(c) ? "w" : SOFT_SEPARATORS.has(ch) ? "s" : "h";
-    out.push({ c, start, end: i, kind });
+    if (IGNORABLE.test(ch)) continue; // invisible : ni lettre ni séparateur (c\u200Bon = con)
+    // NFKD AVANT les minuscules : les lettres mathématiques, pleine chasse, cerclées ou en
+    // exposant (𝐂, ｃ, ⓒ, ᶜ) se décomposent en lettres latines, parfois en majuscules.
+    // Un caractère peut donner plusieurs unités (ﬁ → f i), toutes à la même position d'origine.
+    const norm = ch.normalize("NFKD").toLowerCase().replace(MARKS, "");
+    for (const d of norm) {
+      if (IGNORABLE.test(d)) continue;
+      let c = LIGATURES[d] || (evasion && HOMOGLYPHS[d]) || d;
+      if (evasion && LEET[c]) c = LEET[c];
+      // Séparateurs : classés d'après le caractère d'origine (… reste un séparateur dur).
+      const kind = WORD_CHAR.test(c) ? "w" : SOFT_SEPARATORS.has(ch) ? "s" : "h";
+      out.push({ c, start, end: i, kind });
+    }
   }
   return { src, list: out };
 }

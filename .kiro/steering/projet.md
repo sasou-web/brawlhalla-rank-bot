@@ -27,6 +27,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 ## Carte des fichiers `src/`
 
 - **index.js** — point d'entrée : client, events (ready, interactions, messages, vocal), boucles (refresh rank, XP vocal, TikTok poll), level-up.
+- **partialEvents.js** — handlers `MessageUpdate` (filtre sur modification), `GuildMemberUpdate` (accueil LoL), `MessageReactionAdd` (clips, devine ton rang). Le client active `Partials.Message/Reaction/GuildMember` : ces handlers rechargent les partiels (`fetch` + abandon si échec), ignorent un ancien membre partiel et ne refiltrent qu'une modification récente (`editedTimestamp`).
 - **config.js** — constantes : TIERS, seuils rating→tier, couleurs, emojis, rôles de région, `SERVER_LEVEL_TIERS` (paliers de niveau serveur), helpers (`roleName`, `tierIndex`...).
 - **commands.js** — définitions + handlers de TOUTES les slash commands, boutons, selects, modals.
 - **brawlhalla.js** — client API (recherche joueur, profil, rankings, légendes, Glory), index local du leaderboard.

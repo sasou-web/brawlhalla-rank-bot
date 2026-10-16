@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, MessageFlags } from "discord.js";
+import { Client, GatewayIntentBits, Events, MessageFlags, Partials } from "discord.js";
 import { config } from "./config.js";
 import { installLogCapture } from "./logBuffer.js";
 import { initHealth, notifyAdmin } from "./health.js";
@@ -25,12 +25,13 @@ import { setSetting } from "./settings.js";
 import { warmProfiles, syncLeaderboard, getIndexStats, retryPending } from "./brawlhalla.js";
 import { getLevelConfig, setLevelConfig, setReward } from "./levels.js";
 import { tickTikTok } from "./tiktok.js";
-import { handleClipMessage, handleClipReaction } from "./clips.js";
+import { handleClipMessage } from "./clips.js";
 import { handleWordFilter } from "./wordfilter.js";
-import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
+import { handleGuessRankMessage } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
 import { handleLolRole } from "./lol.js";
+import { onMessageUpdate, onGuildMemberUpdate, onMessageReactionAdd } from "./partialEvents.js";
 import { runWeeklyRecap } from "./progression.js";
 import { tournamentTick } from "./tournamentAutomation.js";
 import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
@@ -48,6 +49,10 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
+  // Sans partials, discord.js n'émet ni modification, ni réaction, ni départ pour un message
+  // ou un membre absent du cache (antérieur au dernier redémarrage, par exemple). Les
+  // handlers concernés rechargent ou ignorent ces objets partiels (./partialEvents.js).
+  partials: [Partials.Message, Partials.Reaction, Partials.GuildMember],
 });
 
 // Etat partage : map nom_de_role -> Role, remplie au demarrage puis rafraichie EN PLACE a
@@ -214,7 +219,8 @@ async function onReady(c) {
   // Nettoie les salons vocaux temporaires laisses vides apres un redemarrage.
   await cleanupTempChannels(guild);
 
-  // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
+  // Automatisation des matchs de tournoi chaque minute : création des salons, alerte staff
+  // (litige, aucune manche jouée après `alertMinutes`), nettoyage. Aucun forfait automatique.
   every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
 
   // Rappels automatiques (vocaux privés, règles...) postés dans un salon, chaque minute
@@ -303,18 +309,8 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 // Filtre de mots sur les messages modifiés (contournement « j'écris propre puis j'édite »).
-// Sans partials, discord.js n'émet cet événement que pour les messages en cache (récents).
-client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
-  try {
-    if (!newMessage.guild || newMessage.author?.bot) return;
-    // Mises à jour sans changement de texte (aperçu de lien ajouté par Discord…) : ignorées.
-    if (!oldMessage.partial && oldMessage.content === newMessage.content) return;
-    const msg = newMessage.partial ? await newMessage.fetch() : newMessage;
-    await handleWordFilter(msg, { edited: true });
-  } catch (err) {
-    console.warn("Filtre de mots (modification) :", err.message);
-  }
-});
+// Logique extraite dans ./partialEvents.js (messages hors cache = partiels).
+client.on(Events.MessageUpdate, (oldMessage, newMessage) => onMessageUpdate(oldMessage, newMessage));
 
 // ---------- Salons vocaux temporaires ("rejoindre pour creer") ----------
 // Logique extraite dans ./voiceManager.js (handleTempVoice, cleanupTempChannels).
@@ -360,23 +356,12 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 // ---------- Section LoL : accueil quand le rôle LoL est attribué ----------
-// Couvre toutes les sources d'attribution : onboarding Discord, reaction-role,
-// ou ajout manuel par le staff. On transmet les rôles d'avant la mise à jour :
-// lol.js compare avec le rôle configuré pour n'accueillir qu'au vrai ajout.
+// Logique extraite dans ./partialEvents.js (membre hors cache = partiel, ignoré).
 
-client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
-  try {
-    const before = oldMember?.roles?.cache;
-    if (!before) return; // membre partiel : on ne peut pas comparer, on ignore
-    const previousRoleIds = [...before.keys()];
-    // Rien à faire si aucun rôle n'a été ajouté (pseudo, timeout, boost…).
-    if (newMember.roles.cache.every((_r, id) => before.has(id))) return;
-    await handleLolRole(newMember, { previousRoleIds });
-  } catch (err) {
-    console.warn("Erreur accueil LoL :", err.message);
-  }
-});
+client.on(Events.GuildMemberUpdate, (oldMember, newMember) => onGuildMemberUpdate(oldMember, newMember));
 
+// Un membre hors cache arrive ici en partiel (Partials.GuildMember) : l'utilisateur est
+// connu, ce qui suffit au message d'au revoir.
 client.on(Events.GuildMemberRemove, async (member) => {
   try {
     const cfg = await getWelcomeConfig(member.guild.id);
@@ -389,48 +374,10 @@ client.on(Events.GuildMemberRemove, async (member) => {
   }
 });
 
-// ---------- Devine ton rang : un seul vote (emoji de rank) par membre ----------
+// ---------- Clips (épinglage auto) + Devine ton rang (un seul vote par membre) ----------
+// Logique extraite dans ./partialEvents.js (réaction sur un message hors cache = partielle).
 
-client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  try {
-    if (user.bot) return;
-    if (reaction.partial) await reaction.fetch().catch(() => {});
-    const message = reaction.message;
-    const guild = message.guild;
-    if (!guild) return;
-
-    // Épinglage auto du meilleur clip (seuil de réactions), indépendant du Guess Rank.
-    try {
-      if (message.partial) await message.fetch().catch(() => {});
-      await handleClipReaction(message);
-    } catch {
-      /* best-effort */
-    }
-
-    const cfg = await getGuessRankConfig(guild.id);
-    if (!cfg.enabled || !cfg.singleVote) return;
-    if (!cfg.channelIds.includes(message.channelId)) return;
-
-    const rankKeys = new Set(cfg.reactions.map(reactionStoredKey));
-    const addedKey = reaction.emoji.id || reaction.emoji.name;
-    if (!rankKeys.has(addedKey)) return; // pas un emoji de rank : on ignore
-
-    // Retire les autres votes de rank de ce membre sur ce message.
-    if (message.partial) await message.fetch().catch(() => {});
-    for (const r of message.reactions.cache.values()) {
-      const key = r.emoji.id || r.emoji.name;
-      if (!rankKeys.has(key) || key === addedKey) continue;
-      try {
-        await r.users.fetch();
-        if (r.users.cache.has(user.id)) await r.users.remove(user.id);
-      } catch {
-        /* best-effort */
-      }
-    }
-  } catch (err) {
-    console.warn("Erreur vote rank :", err.message);
-  }
-});
+client.on(Events.MessageReactionAdd, (reaction, user) => onMessageReactionAdd(reaction, user));
 
 // ---------- Automatisation des matchs de tournoi ----------
 // Extraite dans ./tournamentAutomation.js (tournamentTick).

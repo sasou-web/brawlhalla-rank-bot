@@ -22,7 +22,7 @@ const TOURNAMENT_STATUS = {
 const TOURNAMENT_KEYS = [
   "name", "format", "region", "maxParticipants", "startTime", "bestOf", "finalsBestOf", "rulesText", "prizeText", "mapPool",
   "checkInEnabled", "signupChannelId", "announceChannelId", "participantRoleId", "pingRoleId", "matchCategoryId", "modRoleId",
-  "modAlertChannelId", "alertMinutes", "forfeitMinutes", "createVoice", "castFromTopN", "hallOfFameChannelId",
+  "modAlertChannelId", "alertMinutes", "createVoice", "castFromTopN", "hallOfFameChannelId",
 ];
 
 const TOURNAMENT_DEFAULTS = {
@@ -45,7 +45,6 @@ const TOURNAMENT_DEFAULTS = {
   modRoleId: "",
   modAlertChannelId: "",
   alertMinutes: 7,
-  forfeitMinutes: 10,
   createVoice: false,
   castFromTopN: 0,
   hallOfFameChannelId: "",
@@ -481,10 +480,8 @@ function tournamentFormFields(cfg) {
           field("Catégorie des salons", channelPicker(cfg, "matchCategoryId", "category")),
           field("Rôle staff", rolePicker(cfg, "modRoleId"), { help: "Accès aux salons de match et alertes de litige." }),
           field("Salon des alertes", channelPicker(cfg, "modAlertChannelId", "text"), { help: "Litiges et joueurs inactifs." }),
-          fieldRow(
-            field("Alerte staff après", numberInput(cfg, "alertMinutes", { min: 1, max: 60, suffix: "min" })),
-            field("Forfait après", numberInput(cfg, "forfeitMinutes", { min: 1, max: 120, suffix: "min" })),
-          ),
+          // Pas de champ « Forfait après » : aucun forfait automatique n'est appliqué.
+          field("Alerte staff après", numberInput(cfg, "alertMinutes", { min: 1, max: 60, suffix: "min" })),
           switchField("Salon vocal par match", cfg, "createVoice", { help: "Crée aussi un vocal éphémère pour chaque match." }),
         ),
         settingsGroup(

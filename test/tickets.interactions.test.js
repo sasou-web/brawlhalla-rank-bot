@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { setTicketConfig, countOpenByOwner } from "../src/tickets.js";
+import { setTicketConfig, countOpenByOwner, addOpenTicket, getOpenTicket } from "../src/tickets.js";
 import { handleTicketsButton, handleTicketsModal } from "../src/commands/panels/tickets.js";
 
 /**
@@ -58,6 +58,28 @@ test("création : message de contrôle envoyé => ticket ouvert et succès annon
   assert.equal(channel.deleted, false);
   assert.equal(await countOpenByOwner(G, "t-user-ok"), 1);
   assert.match(it.calls.editReply.at(-1), /a été créé/);
+});
+
+test("ticket dont le salon a disparu : ignoré et purgé", async () => {
+  await addOpenTicket(G, "ch-gone", { ownerId: "t-user-gone", number: 98, topic: "Général", subject: "x" });
+  assert.equal(await countOpenByOwner(G, "t-user-gone"), 1, "sans liste de salons : compté");
+  assert.equal(await countOpenByOwner(G, "t-user-gone", { channels: new Map([["autre", {}]]) }), 0);
+  assert.equal(await getOpenTicket(G, "ch-gone"), null, "entrée purgée");
+});
+
+test("ouverture : un ticket orphelin ne bloque plus son auteur", async () => {
+  await addOpenTicket(G, "ch-gone2", { ownerId: "t-user-gone2", number: 99, topic: "Général", subject: "x" });
+  const it = {
+    ...recorder(),
+    customId: "tckopen_btn",
+    guild: { id: G, channels: { cache: new Map() } },
+    user: { id: "t-user-gone2" },
+    modal: null,
+    async showModal(m) { this.modal = m; },
+  };
+  await handleTicketsButton(it, {});
+  assert.equal(it.calls.reply.length, 0, "pas de « Tu as déjà un ticket ouvert »");
+  assert.ok(it.modal, "formulaire d'ouverture affiché");
 });
 
 test("publication du panneau refusée : pas de faux « publié ✅ »", async () => {
