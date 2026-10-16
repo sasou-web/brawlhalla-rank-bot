@@ -86,13 +86,13 @@ test("syncMember : enregistre le pic de saison par mode, conservé si l'API ne r
     await syncMember(fakeMember("i8-user"), 801, allRoles(), {
       profile: buildPlayerProfile(801, { ranked, teamsData, all: { level: 10 } }),
     });
-    assert.deepEqual((await getLink("i8-user")).peakTiers, { "1v1": "Diamond", "2v2": "Platinum" });
+    assert.deepEqual((await getLink("i8-user")).peakTiers, { "1v1": "Diamond", "2v2": "Platinum", "3v3": null });
 
     // 404 sur ranked et teams : les pics connus ne sont pas effacés.
     await syncMember(fakeMember("i8-user"), 801, allRoles(), {
       profile: buildPlayerProfile(801, { ranked: null, teamsData: null, all: { name: "Neo", level: 10 } }),
     });
-    assert.deepEqual((await getLink("i8-user")).peakTiers, { "1v1": "Diamond", "2v2": "Platinum" });
+    assert.deepEqual((await getLink("i8-user")).peakTiers, { "1v1": "Diamond", "2v2": "Platinum", "3v3": null });
   } finally {
     await removeLink("i8-user");
   }

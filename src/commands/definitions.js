@@ -29,7 +29,13 @@ export const commandsData = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName("top")
-    .setDescription("Classement 1v1 des membres lies du serveur.")
+    .setDescription("Classement des membres lies du serveur (1v1, 2v2 ou 3v3).")
+    .addStringOption((o) =>
+      o
+        .setName("mode")
+        .setDescription("Mode classé (defaut : 1v1)")
+        .addChoices({ name: "1v1", value: "1v1" }, { name: "2v2", value: "2v2" }, { name: "3v3", value: "3v3" }),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName("ping")
@@ -70,7 +76,7 @@ export const commandsData = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName("rank")
-    .setDescription("Fiche joueur, onglet Ranked (1v1 + 2v2 détaillés).")
+    .setDescription("Fiche joueur, onglet Ranked (1v1, 2v2 et 3v3 détaillés).")
     .addUserOption((o) => o.setName("membre").setDescription("Membre lié (defaut : toi).").setRequired(false))
     .addStringOption((o) => o.setName("pseudo").setDescription("Ou un pseudo Brawlhalla.").setMaxLength(64).setRequired(false))
     .addIntegerOption((o) => o.setName("id").setDescription("Ou un Brawlhalla ID (le plus fiable).").setMinValue(1).setRequired(false))
@@ -91,7 +97,7 @@ export const commandsData = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName("progression")
-    .setDescription("Courbe d'évolution du rating (1v1 et 2v2) au fil du temps.")
+    .setDescription("Courbe d'évolution du rating (1v1, 2v2 et 3v3) au fil du temps.")
     .addUserOption((o) => o.setName("membre").setDescription("Membre lié (defaut : toi).").setRequired(false))
     .addStringOption((o) => o.setName("pseudo").setDescription("Ou un pseudo Brawlhalla.").setMaxLength(64).setRequired(false))
     .addIntegerOption((o) => o.setName("id").setDescription("Ou un Brawlhalla ID (le plus fiable).").setMinValue(1).setRequired(false))
@@ -117,7 +123,10 @@ export const commandsData = [
     .setName("leaderboard")
     .setDescription("Top 10 du classement Brawlhalla.")
     .addStringOption((o) =>
-      o.setName("mode").setDescription("1v1 ou 2v2").addChoices({ name: "1v1", value: "1v1" }, { name: "2v2", value: "2v2" }),
+      o
+        .setName("mode")
+        .setDescription("1v1, 2v2 ou 3v3")
+        .addChoices({ name: "1v1", value: "1v1" }, { name: "2v2", value: "2v2" }, { name: "3v3", value: "3v3" }),
     )
     .addStringOption((o) =>
       o

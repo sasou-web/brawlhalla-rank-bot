@@ -583,13 +583,22 @@ export async function undoGame(guildId, matchId) {
   return t;
 }
 
-export async function disputeMatch(guildId, matchId) {
+// Passe le match en litige. `reason` / `by` (id Discord) / `byName` / `files` (nombre de
+// captures jointes) sont gardés dans `m.dispute` pour l'alerte staff et le dashboard.
+export async function disputeMatch(guildId, matchId, { reason = "", by = "", byName = "", files = 0 } = {}) {
   const t = await getTournament(guildId);
   if (!t) throw new Error("Aucun tournoi.");
   const m = t.matches[matchId];
   if (!m) throw new Error("Match introuvable.");
   if (m.status === "done") throw new Error("Match déjà terminé.");
   m.status = "dispute";
+  m.dispute = {
+    reason: String(reason || "").trim().slice(0, 500),
+    by: String(by || ""),
+    byName: String(byName || "").slice(0, 100),
+    files: Math.max(0, Math.trunc(Number(files)) || 0),
+    at: Date.now(),
+  };
   await setTournament(guildId, t);
   return t;
 }

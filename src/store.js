@@ -38,6 +38,24 @@ export async function setLink(discordUserId, brawlhallaId, name, extra = {}) {
   await enqueueWrite();
 }
 
+/**
+ * Fin de saison, ranked 3v3 : efface le pic 3v3 de la saison close et la date du dernier rank
+ * 3v3 vu (le rank 3v3 n'est donc plus reporté 24 h dans la nouvelle saison). Renvoie le
+ * nombre de liaisons modifiées.
+ */
+export async function clearSeason3v3() {
+  const data = load();
+  let changed = 0;
+  for (const link of Object.values(data)) {
+    if (!link.peakTiers?.["3v3"] && !link.ranked3v3SeenAt) continue;
+    if (link.peakTiers) link.peakTiers = { ...link.peakTiers, "3v3": null };
+    link.ranked3v3SeenAt = null;
+    changed++;
+  }
+  if (changed) await enqueueWrite();
+  return changed;
+}
+
 export async function removeLink(discordUserId) {
   const data = load();
   const existed = Boolean(data[discordUserId]);

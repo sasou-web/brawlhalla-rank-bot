@@ -2,7 +2,7 @@ import { getPlayerProfile, getLegends, baseTier, tierFromRating } from "./brawlh
 import { applyMemberRoles, applyMainLegendRole, refreshRankRoles, updateTopServerRole } from "./roles.js";
 import { setLink, getLink, getAllLinks } from "./store.js";
 import { getSettings } from "./settings.js";
-import { tierIndex, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
+import { tierIndex, ROLE_PREFIX, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
 import { recordRating } from "./ratingStore.js";
 import { getCounter, grantAndAnnounce } from "./achievements.js";
 
@@ -22,13 +22,14 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
 
   // Indisponibilité PONCTUELLE de l'API : on ne doit jamais retirer un rôle ni écraser une
   // donnée juste parce qu'elle manque temporairement (404/glitch/rejet réseau). On fusionne
-  // alors avec la dernière donnée connue du membre, MODE PAR MODE (1v1 / 2v2 indépendants).
+  // alors avec la dernière donnée connue du membre, MODE PAR MODE (1v1 / 2v2 / 3v3 indépendants).
   let tiers = { ...profile.tiers };
   let level = profile.level;
   let globalRank = profile.globalRank;
   let region = profile.region && profile.region !== "?" ? profile.region : null;
   let rating1v1 = profile.ratings?.["1v1"] ?? 0;
   let rating2v2 = profile.ratings?.["2v2"] ?? 0;
+  let rating3v3 = profile.ratings?.["3v3"] ?? 0;
 
   if (previous) {
     // 1v1 indisponible (l'endpoint ranked_1v1 a répondu 404/vide) : le tier null vient d'un
@@ -54,6 +55,15 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
       tiers["2v2"] = profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null;
       rating2v2 = rating2v2 || previous.rating2v2 || 0;
     }
+    // 3v3 sans données (404 = non classé ou glitch, indiscernables ; appel en échec ou sauté) :
+    // le dernier rank 3v3 est gardé s'il a été vu il y a moins de 24 h, puis il tombe (fin de
+    // saison, joueur qui ne joue plus le mode).
+    if (!profile.ranked3v3Available) {
+      const seen3At = Date.parse(previous.ranked3v3SeenAt || "");
+      const carry3 = Number.isFinite(seen3At) && Date.now() - seen3At < RANK_CARRY_MS;
+      tiers["3v3"] = profile.tiers?.["3v3"] ?? (carry3 ? previous.tiers?.["3v3"] ?? null : null);
+      rating3v3 = rating3v3 || (carry3 ? previous.rating3v3 || 0 : 0);
+    }
     // Profil globalement partiel (appel /all rejeté) : niveau/rang/région peuvent manquer.
     if (profile.partial) {
       level = profile.level || previous.level || 0;
@@ -69,6 +79,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   const peakTiers = {
     "1v1": profile.ranked1v1Available === true ? peakTier(profile.peak1v1) : previous?.peakTiers?.["1v1"] ?? null,
     "2v2": profile.teamsUnavailable === false ? peakTier(bestTeamPeak) : previous?.peakTiers?.["2v2"] ?? null,
+    "3v3": profile.ranked3v3Available === true ? peakTier(profile.peak3v3) : previous?.peakTiers?.["3v3"] ?? null,
   };
 
   const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
@@ -78,10 +89,12 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     peakTiers,
     rating1v1,
     rating2v2,
+    rating3v3,
     level,
     globalRank,
     region,
     rankedSeenAt: profile.ranked1v1Available ? new Date().toISOString() : previous?.rankedSeenAt ?? null,
+    ranked3v3SeenAt: profile.ranked3v3Available ? new Date().toISOString() : previous?.ranked3v3SeenAt ?? null,
   });
 
   // Historique de rating (pour la courbe /progression). Best-effort : ne bloque pas la synchro.
@@ -90,6 +103,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     recordRating(brawlhallaId, {
       rating1v1,
       rating2v2,
+      rating3v3,
       level,
       globalRank,
     }).catch(() => {});
@@ -140,7 +154,7 @@ export function isSyncingAll() {
 
 /**
  * Resynchronise TOUS les membres liés du serveur : (re)crée les rôles gérés si besoin,
- * applique à chacun ses rôles de rank (1v1 + 2v2, niveau, top, région) en corrigeant les
+ * applique à chacun ses rôles de rank (1v1, 2v2, 3v3, niveau, top, région) en corrigeant les
  * manquants/erronés, puis met à jour le rôle « n°1 du serveur ». Best-effort par membre.
  * `rolesByName` (ctx.rolesByName du bot) est revérifié à chaque appel et mis à jour EN
  * PLACE (rôle supprimé par un admin = recréé) ; sans lui, une map neuve est construite.
@@ -189,14 +203,14 @@ export async function syncAllMembers(guild, rolesByName = null) {
   }
 }
 
-async function announcePromotions(member, oldTiers, newTiers) {
+export async function announcePromotions(member, oldTiers, newTiers) {
   if (!oldTiers) return; // premiere liaison : pas d'annonce
   try {
     const { announceChannelId } = await getSettings();
     if (!announceChannelId) return;
 
     const promos = [];
-    for (const mode of ["1v1", "2v2"]) {
+    for (const mode of Object.keys(ROLE_PREFIX)) {
       const oldIdx = tierIndex(oldTiers[mode]);
       const newIdx = tierIndex(newTiers[mode]);
       if (newIdx > oldIdx && oldIdx >= 0) promos.push(`**${newTiers[mode]}** en ${mode}`);

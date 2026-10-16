@@ -54,26 +54,31 @@ const NO_MENTIONS = { parse: [] };
 
 // ---------- /top ----------
 
+// Champ du lien stockant le rating de chaque mode.
+const LINK_RATING_FIELD = { "1v1": "rating1v1", "2v2": "rating2v2", "3v3": "rating3v3" };
+
 export async function handleTop(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "top", 5000))) return;
   await interaction.deferReply({ flags: V2 });
+  const mode = interaction.options.getString("mode") ?? "1v1";
+  const field = LINK_RATING_FIELD[mode] ?? "rating1v1";
   const links = await getAllLinks();
   const entries = Object.entries(links)
-    .map(([id, l]) => ({ id, name: l.name, rating: l.rating1v1 ?? 0, tiers: l.tiers }))
+    .map(([id, l]) => ({ id, name: l.name, rating: l[field] ?? 0, tiers: l.tiers }))
     .filter((e) => e.rating > 0)
     .sort((a, b) => b.rating - a.rating)
     .slice(0, 15);
 
   if (entries.length === 0)
-    return interaction.editReply({ components: [tdc("Aucun membre lié avec un rank 1v1 pour le moment.")], flags: V2 });
+    return interaction.editReply({ components: [tdc(`Aucun membre lié avec un rank ${mode} pour le moment.`)], flags: V2 });
 
   const medals = ["🥇", "🥈", "🥉"];
   const lines = entries.map((e, i) => {
     const place = medals[i] ?? `**${i + 1}.**`;
-    const t = e.tiers?.["1v1"];
+    const t = e.tiers?.[mode];
     return `${place} <@${e.id}> — ${t ? `${tierEmoji(t)} ${t}` : "?"} (${e.rating})`;
   });
-  const card = v2Card(0xf1c40f, "## 🏆 Classement 1v1 — membres liés", SEP, lines.join("\n"));
+  const card = v2Card(0xf1c40f, `## 🏆 Classement ${mode} — membres liés`, SEP, lines.join("\n"));
   return interaction.editReply({ components: [card], flags: V2, allowedMentions: { parse: [] } });
 }
 
@@ -214,6 +219,19 @@ function buildProfileCard(view, p, legends) {
     } else {
       nodes.push(SEP, "**👥 Meilleure équipe 2v2**\nNon classé");
     }
+
+    if (p.ratings["3v3"] > 0) {
+      const tier = p.tiers["3v3"] === "Valhallan" ? "Valhallan" : tierFromRating(p.ratings["3v3"]);
+      const loss3 = Math.max(0, (p.games3v3 || 0) - (p.wins3v3 || 0));
+      nodes.push(
+        SEP,
+        `**🧑‍🤝‍🧑 3v3**\n` +
+          `${tierEmoji(p.tiers["3v3"])} **${tier}** — ${p.ratings["3v3"]} / ${p.peak3v3 || p.ratings["3v3"]} (peak)\n` +
+          `${p.wins3v3 || 0} V • ${loss3} D (${winrate(p.wins3v3 || 0, p.games3v3 || 0)})`,
+      );
+    } else {
+      nodes.push(SEP, "**🧑‍🤝‍🧑 3v3**\nNon classé");
+    }
     nodes.push(SEP, footer);
     return v2Card(0x9b59b6, ...nodes);
   }
@@ -260,6 +278,9 @@ function buildProfileCard(view, p, legends) {
   const rank2 = p.tiers["2v2"]
     ? `${tierEmoji(p.tiers["2v2"])} **${p.tiers["2v2"]}**${p.ratings["2v2"] ? ` (${p.ratings["2v2"]})` : ""}`
     : "Non classé";
+  const rank3 = p.tiers["3v3"]
+    ? `${tierEmoji(p.tiers["3v3"])} **${p.tiers["3v3"]}**${p.ratings["3v3"] ? ` (${p.ratings["3v3"]} · pic ${p.peak3v3 || p.ratings["3v3"]})` : ""}`
+    : "Non classé";
   const info = [
     `🎚️ **Niveau** ${p.level} · 🌍 **Région** ${p.region}`,
     `⏱️ **Temps de jeu** ${formatPlaytime(playSec)}`,
@@ -273,7 +294,7 @@ function buildProfileCard(view, p, legends) {
     SEP,
     info,
     SEP,
-    `**Rangs**\n🥊 1v1 : ${rank1}\n👥 2v2 : ${rank2}`,
+    `**Rangs**\n🥊 1v1 : ${rank1}\n👥 2v2 : ${rank2}\n🧑‍🤝‍🧑 3v3 : ${rank3}`,
     SEP,
     footer,
   );
@@ -369,6 +390,8 @@ export async function handleProgression(interaction, ctx) {
   const labels = points.map((p) => new Date(p.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }));
   const r1 = points.map((p) => p.r1 || null);
   const r2 = points.map((p) => (p.r2 ? p.r2 : null));
+  const r3 = points.map((p) => (p.r3 ? p.r3 : null));
+  const has3v3 = r3.some((v) => v != null);
 
   const chart = {
     type: "line",
@@ -377,6 +400,9 @@ export async function handleProgression(interaction, ctx) {
       datasets: [
         { label: "1v1", data: r1, borderColor: "#4ea1ff", backgroundColor: "#4ea1ff", fill: false, tension: 0.3, spanGaps: true, pointRadius: 0 },
         { label: "2v2", data: r2, borderColor: "#9b59b6", backgroundColor: "#9b59b6", fill: false, tension: 0.3, spanGaps: true, pointRadius: 0 },
+        ...(has3v3
+          ? [{ label: "3v3", data: r3, borderColor: "#2ecc71", backgroundColor: "#2ecc71", fill: false, tension: 0.3, spanGaps: true, pointRadius: 0 }]
+          : []),
       ],
     },
     options: {
@@ -391,6 +417,7 @@ export async function handleProgression(interaction, ctx) {
   const last = points[points.length - 1];
   const d1 = (last.r1 || 0) - (first.r1 || 0);
   const d2 = (last.r2 || 0) - (first.r2 || 0);
+  const d3 = (last.r3 || 0) - (first.r3 || 0);
   const sign = (n) => (n > 0 ? `+${n}` : `${n}`);
 
   const embed = new EmbedBuilder()
@@ -400,6 +427,7 @@ export async function handleProgression(interaction, ctx) {
     .addFields(
       { name: "1v1 actuel", value: `**${last.r1 || 0}**${d1 ? ` (${sign(d1)})` : ""}`, inline: true },
       { name: "2v2 actuel", value: `**${last.r2 || 0}**${d2 ? ` (${sign(d2)})` : ""}`, inline: true },
+      ...(has3v3 ? [{ name: "3v3 actuel", value: `**${last.r3 || 0}**${d3 ? ` (${sign(d3)})` : ""}`, inline: true }] : []),
       { name: "Période", value: `${labels[0]} → ${labels[labels.length - 1]}`, inline: true },
     )
     .setFooter({ text: "Historique enregistré à chaque refresh des rôles." });
@@ -489,6 +517,7 @@ export async function handleVersus(interaction, ctx) {
   addRow("Peak 1v1", pa.peak1v1 || 0, pb.peak1v1 || 0, pa.peak1v1 || 0, pb.peak1v1 || 0);
   addRow("Tier 1v1", pa.tiers["1v1"] ?? "—", pb.tiers["1v1"] ?? "—", null, null);
   addRow("Rating 2v2", pa.ratings["2v2"] || 0, pb.ratings["2v2"] || 0, pa.ratings["2v2"] || 0, pb.ratings["2v2"] || 0);
+  addRow("Rating 3v3", pa.ratings["3v3"] || 0, pb.ratings["3v3"] || 0, pa.ratings["3v3"] || 0, pb.ratings["3v3"] || 0);
   addRow("Winrate", wrA != null ? `${wrA}%` : "—", wrB != null ? `${wrB}%` : "—", wrA, wrB);
   addRow("Glory est.", gloryA ?? "—", gloryB ?? "—", gloryA, gloryB);
 
@@ -702,7 +731,7 @@ export async function handleHelp(interaction, ctx) {
     SEP,
     "### 📊 Tes stats\n" +
       "`/carte` — ta **carte profil** en image\n" +
-      "`/rank` — détail **Ranked** 1v1 & 2v2\n" +
+      "`/rank` — détail **Ranked** 1v1, 2v2 & 3v3\n" +
       "`/stats` — ta **fiche complète** (légendes, équipes)\n" +
       "`/progression` — la **courbe** de ton rating\n" +
       "`/versus` — **compare-toi** à un autre joueur",
