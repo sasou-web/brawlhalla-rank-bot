@@ -363,4 +363,8 @@ export const commandsData = [
         .setRequired(false),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName("guilde")
+    .setDescription("Guilde Brawlhalla du serveur : stats et meilleurs contributeurs.")
+    .toJSON(),
 ];

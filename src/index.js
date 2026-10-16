@@ -39,6 +39,7 @@ import { handleMessageXp, tickVoiceXp, VOICE_TICK_MS } from "./xpEvents.js";
 import { endDueGiveaways } from "./giveaway.js";
 import { tickReminders } from "./reminders.js";
 import { removeOpenTicket } from "./tickets.js";
+import { syncGuild } from "./guild.js";
 
 const client = new Client({
   intents: [
@@ -82,6 +83,15 @@ async function refreshAllMembers(guild) {
   const r = await syncAllMembers(guild, ctx.rolesByName);
   console.log(`Refresh auto termine : ${r.ok}/${r.total} mis a jour.`);
   if (r.top) console.log(`Role n°1 du serveur : <@${r.top.topId}> (${r.top.rating}).`);
+  // Guilde Brawlhalla (inerte si non configurée) : rôle, annonces d'arrivées/départs.
+  try {
+    const g = await syncGuild(guild);
+    if (g.error || g.roleError) console.warn(`Synchro guilde : ${g.error || g.roleError}`);
+    else if (!g.skipped && (g.added || g.removed || g.joined || g.left))
+      console.log(`Synchro guilde : +${g.joined}/-${g.left} membre(s), rôle +${g.added}/-${g.removed}.`);
+  } catch (err) {
+    console.warn("Synchro guilde échouée :", err.message);
+  }
 }
 
 // Rôles de rank : (re)crée les rôles gérés et met à jour ctx.rolesByName. Vrai si réussi.

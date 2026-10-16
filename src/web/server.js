@@ -47,6 +47,7 @@ import {
 import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
 import { getLolConfig, setLolConfig, buildLolWelcomePayload, resetGreeted, greetedCount } from "../lol.js";
+import { getGuildConfig, setGuildConfig, getGuildStatus, syncGuild } from "../guild.js";
 import { buildAnnouncePayload, dataUrlToAttachment } from "../announce.js";
 import {
   getTournament,
@@ -123,6 +124,7 @@ function buildSections(guildId, client) {
     welcome: { get: () => getWelcomeConfig(guildId), set: (b) => setWelcomeConfig(guildId, b) },
     lol: { get: () => getLolConfig(guildId), set: (b) => setLolConfig(guildId, b) },
     wordfilter: { get: () => getWordFilterConfig(guildId), set: (b) => setWordFilterConfig(guildId, b) },
+    guild: { get: () => getGuildConfig(guildId), set: (b) => setGuildConfig(guildId, b) },
     // Rôles autorisés vérifiés auprès de Discord (uniquement quand la liste change).
     roletimeout: roleTimeoutSection(guildId, async () => {
       const guild = await client.guilds.fetch(guildId);
@@ -806,6 +808,28 @@ export function startWebServer(client, ctx = null) {
       });
     } catch (err) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---- Guilde Brawlhalla : dernier instantané (lecture seule) et synchro immédiate ----
+  app.get("/api/guilde/status", requireAdmin, async (req, res) => {
+    try {
+      res.json(await getGuildStatus(config.guildId));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/guilde/sync", requireAdmin, async (req, res) => {
+    try {
+      const guild = await client.guilds.fetch(config.guildId);
+      const r = await syncGuild(guild);
+      if (r.skipped === "not-configured") return res.status(400).json({ error: "Indique d'abord l'ID de la guilde." });
+      if (r.skipped === "busy") return res.status(409).json({ error: "Une synchronisation est déjà en cours." });
+      if (r.error) return res.status(502).json({ error: r.error });
+      res.json({ ok: true, ...r, status: await getGuildStatus(config.guildId) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   });
 

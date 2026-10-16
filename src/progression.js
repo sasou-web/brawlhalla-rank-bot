@@ -1,6 +1,7 @@
 import { getAllLinks } from "./store.js";
 import { getRatingHistory } from "./ratingStore.js";
 import { getSettings, setSetting } from "./settings.js";
+import { takeGuildWeekRecap } from "./guild.js";
 
 /**
  * Récap hebdomadaire de progression : classe les membres liés par gain de rating 1v1
@@ -32,7 +33,7 @@ export function computeWeeklyProgress(entries, { now = Date.now(), windowMs = WE
 }
 
 /** Construit l'embed du récap (objet brut prêt pour channel.send({ embeds: [...] })). */
-export function buildWeeklyRecapEmbed(top, { guildName = "Serveur" } = {}) {
+export function buildWeeklyRecapEmbed(top, { guildName = "Serveur", guildBlock = null } = {}) {
   const medals = ["🥇", "🥈", "🥉"];
   const lines = top.map((e, i) => {
     const place = medals[i] ?? `**${i + 1}.**`;
@@ -42,6 +43,7 @@ export function buildWeeklyRecapEmbed(top, { guildName = "Serveur" } = {}) {
     color: 0x2ecc71,
     title: "📈 Progression de la semaine — 1v1",
     description: lines.join("\n") || "*Personne n'a progressé cette semaine.*",
+    ...(guildBlock ? { fields: [{ name: "🛡️ Guilde", value: guildBlock.slice(0, 1024) }] } : {}),
     footer: { text: `${guildName} · gains de rating 1v1 sur 7 jours` },
     timestamp: new Date().toISOString(),
   };
@@ -68,16 +70,19 @@ export async function runWeeklyRecap(client, guildId, { force = false } = {}) {
   }
   const top = computeWeeklyProgress(entries, { now });
 
+  // Bloc guilde Brawlhalla (null si non configurée) : remet aussi sa semaine à zéro.
+  const guildBlock = await takeGuildWeekRecap(guildId).catch(() => null);
+
   // Quoi qu'il arrive (posté ou pas), on cale le prochain récap à dans une semaine.
   await setSetting("lastWeeklyRecapTs", now);
 
-  if (!top.length) return { posted: false, reason: "no-gainers" };
+  if (!top.length && !guildBlock) return { posted: false, reason: "no-gainers" };
 
   try {
     const guild = await client.guilds.fetch(guildId);
     const ch = await guild.channels.fetch(s.announceChannelId).catch(() => null);
     if (ch?.isTextBased?.()) {
-      await ch.send({ embeds: [buildWeeklyRecapEmbed(top, { guildName: guild.name })], allowedMentions: { parse: [] } });
+      await ch.send({ embeds: [buildWeeklyRecapEmbed(top, { guildName: guild.name, guildBlock })], allowedMentions: { parse: [] } });
       return { posted: true, count: top.length };
     }
   } catch {
