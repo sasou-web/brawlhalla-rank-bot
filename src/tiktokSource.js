@@ -15,6 +15,8 @@
  * où `videoId` est le numéro TikTok de la vidéo (identifiant stable, sert au dédoublonnage)
  * et `uploadTs` l'heure de mise en ligne déduite de cet ID (voir videoIdTime).
  */
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -104,21 +106,117 @@ export function handleFromFeedUrl(url) {
 
 // ---------- HTTP ----------
 
-async function fetchText(url, headers = {}) {
+async function fetchText(url, headers = {}, { redirect = "follow" } = {}) {
   let res;
   try {
     res = await fetch(url, {
       headers: { "User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8", "Cache-Control": "no-cache", ...headers },
-      redirect: "follow",
+      redirect,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    return { status: res.status, ok: res.ok, body: await res.text() };
+    return { status: res.status, ok: res.ok, location: res.headers.get("location") || "", body: await res.text() };
   } catch (err) {
     if (err?.name === "TimeoutError" || err?.name === "AbortError") {
       throw new SourceError(`délai dépassé (${FETCH_TIMEOUT_MS / 1000} s)`);
     }
     throw new SourceError(`réseau : ${err?.cause?.code || err?.message || err}`);
   }
+}
+
+// ---------- Garde anti-SSRF du flux RSS ----------
+// L'URL du flux est saisie par un admin puis relue toutes les 2 min : sans garde, elle
+// permettrait de sonder le VPS et son réseau interne avec les droits réseau du bot
+// (127.0.0.1:…, métadonnées cloud 169.254.169.254, 10.x…). On n'accepte que du https vers
+// des adresses publiques, vérifié avant la requête ET après chaque redirection.
+
+const MAX_REDIRECTS = 5;
+
+const ipv4ToInt = (ip) => ip.split(".").reduce((n, part) => n * 256 + Number(part), 0);
+
+// Plages IPv4 jamais joignables : « ce réseau », privées, CGNAT, boucle locale, link-local,
+// réservé IETF, privées (172.16/12, 192.168/16), bancs de test, multicast et réservées.
+const BLOCKED_V4 = [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
+  ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3],
+].map(([net, bits]) => [ipv4ToInt(net), 2 ** (32 - bits)]);
+
+// Les huit groupes de 16 bits d'une IPv6 (gère « :: » et un suffixe IPv4 « ::ffff:1.2.3.4 »).
+function ipv6Groups(ip) {
+  let s = ip.toLowerCase().split("%")[0];
+  const v4 = s.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4) {
+    const n = ipv4ToInt(v4[1]);
+    s = s.slice(0, -v4[1].length) + `${Math.floor(n / 65536).toString(16)}:${(n % 65536).toString(16)}`;
+  }
+  const [head, tail] = s.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const zeros = tail === undefined ? [] : Array(8 - h.length - t.length).fill("0");
+  return [...h, ...zeros, ...t].map((g) => parseInt(g, 16) || 0);
+}
+
+/** true si l'adresse IP est publique ; false pour la boucle locale, le privé, le link-local, le réservé. */
+export function isPublicAddress(ip) {
+  const v = isIP(String(ip || ""));
+  if (v === 4) {
+    const n = ipv4ToInt(ip);
+    return !BLOCKED_V4.some(([base, size]) => n >= base && n < base + size);
+  }
+  if (v !== 6) return false;
+  const g = ipv6Groups(ip);
+  // IPv4 embarquée : compatible (::a.b.c.d, dont :: et ::1), mappée (::ffff:a.b.c.d), NAT64 (64:ff9b::/96).
+  const embedsV4 =
+    (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0 || g[5] === 0xffff)) ||
+    (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0));
+  if (embedsV4) return isPublicAddress(`${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`);
+  if ((g[0] & 0xfe00) === 0xfc00) return false; // fc00::/7 (unique local)
+  if ((g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0) return false; // link-local, site-local
+  if ((g[0] & 0xff00) === 0xff00) return false; // multicast
+  return true;
+}
+
+/** Vérifie qu'une URL de flux est en https et que son nom ne résout que vers des adresses publiques. */
+async function assertPublicFeedUrl(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new SourceError("URL du flux invalide", { fatal: true });
+  }
+  if (u.protocol !== "https:") throw new SourceError("le flux RSS doit être en https://", { fatal: true });
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  let addrs;
+  try {
+    addrs = isIP(host) ? [host] : (await lookup(host, { all: true, verbatim: true })).map((a) => a.address);
+  } catch {
+    throw new SourceError("nom de domaine du flux introuvable");
+  }
+  if (!addrs.length || !addrs.every((a) => isPublicAddress(a))) {
+    throw new SourceError("adresse du flux refusée (réseau local ou privé)", { fatal: true });
+  }
+  return u;
+}
+
+/** GET d'une URL de flux publique, en suivant (et revérifiant) les redirections une à une. */
+async function fetchPublicText(url, headers) {
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const u = await assertPublicFeedUrl(current);
+    let r;
+    try {
+      r = await fetchText(u.href, headers, { redirect: "manual" });
+    } catch {
+      // Message générique : ni code réseau ni délai (le diagnostic ne doit pas servir de scanner).
+      throw new SourceError("flux injoignable (connexion impossible ou trop lente)");
+    }
+    if (r.status < 300 || r.status >= 400 || !r.location) return r;
+    try {
+      current = new URL(r.location, u).href;
+    } catch {
+      throw new SourceError("flux injoignable (redirection invalide)");
+    }
+  }
+  throw new SourceError("flux injoignable (trop de redirections)");
 }
 
 // ---------- Source 1 : embed officiel du profil créateur ----------
@@ -280,10 +378,10 @@ export function parseFeedXml(xml) {
   return items.filter((i) => i.id && i.url).sort(byNewest);
 }
 
-/** Lit un flux RSS/Atom. */
+/** Lit un flux RSS/Atom (https, adresses publiques uniquement : voir assertPublicFeedUrl). */
 export async function fetchFeedItems(feedUrl) {
   if (!feedUrl) throw new SourceError("Aucune URL de flux définie.", { fatal: true });
-  const { status, ok, body } = await fetchText(feedUrl, {
+  const { status, ok, body } = await fetchPublicText(feedUrl, {
     Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
   });
   if (!ok) throw new SourceError(`HTTP ${status} (flux inaccessible)`, { status });

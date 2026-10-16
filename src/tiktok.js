@@ -148,7 +148,7 @@ function sanitizeConfigPatch(patch) {
       }
       case "feedUrl": {
         const s = String(v ?? "").trim();
-        if (s && !/^https?:\/\/\S+$/i.test(s)) throw new Error("URL du flux RSS invalide (http(s)://...).");
+        if (s && !/^https:\/\/\S+$/i.test(s)) throw new Error("URL du flux RSS invalide (https://...).");
         out[k] = s;
         break;
       }

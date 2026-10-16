@@ -12,9 +12,22 @@
  * distincts de ceux du dashboard (/api).
  * La page elle-même (src/web/public/lab/) est servie par express.static.
  */
+import { createHash } from "node:crypto";
 import { buildLabCatalog } from "../comboData.js";
 
 const pass = (req, res, next) => next();
+
+// ETag fort d'une vidéo, mémorisé par buffer (le cache vidéo resservant le même objet, le
+// hachage n'est calculé qu'une fois par téléchargement).
+const etags = new WeakMap();
+function etagOf(buf) {
+  let tag = etags.get(buf);
+  if (!tag) {
+    tag = `"${createHash("sha1").update(buf).digest("base64url")}"`;
+    etags.set(buf, tag);
+  }
+  return tag;
+}
 
 /**
  * Analyse un en-tête Range (une seule plage d'octets) pour une ressource de `size` octets.
@@ -45,13 +58,18 @@ export function parseRange(header, size) {
   return { start, end };
 }
 
-/** Envoie un buffer MP4 en respectant l'en-tête Range (200, 206 ou 416). */
+/** Envoie un buffer MP4 en respectant les en-têtes Range et If-Range (200, 206 ou 416). */
 export function sendVideoBuffer(req, res, buf) {
   const size = buf.length;
+  const etag = etagOf(buf);
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", "video/mp4");
   res.setHeader("Cache-Control", "public, max-age=86400");
-  const range = parseRange(req.headers.range, size);
+  res.setHeader("ETag", etag);
+  // If-Range : la plage n'est servie que si la copie du navigateur est toujours la même
+  // vidéo ; sinon (ou date, faute de Last-Modified), réponse complète (RFC 9110).
+  const ifRange = req.headers["if-range"];
+  const range = parseRange(!ifRange || ifRange === etag ? req.headers.range : undefined, size);
   if (range === "invalid") {
     res.setHeader("Content-Range", `bytes */${size}`);
     return res.status(416).end();

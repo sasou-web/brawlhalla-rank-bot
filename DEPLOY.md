@@ -371,6 +371,10 @@ Le bot n'écoute alors plus que en local : le port 3000 devient injoignable depu
 et Caddy continue de lui parler via `127.0.0.1:3000`. C'est préférable à une règle de
 pare-feu — aucun risque de se couper SSH au passage.
 
+Tant que `WEB_HOST` n'est pas restreint, le démarrage avertit que `TRUST_PROXY` n'est pas
+défini. Sans reverse proxy (accès direct `http://<ip>:3000`), ajoute `TRUST_PROXY=0` au
+`.env` : sinon le rate-limit se contourne avec un en-tête `X-Forwarded-For` forgé.
+
 Vérifie depuis ton PC (doit échouer) :
 ```powershell
 Test-NetConnection -ComputerName <ip-du-serveur> -Port 3000 -InformationLevel Quiet
