@@ -16,7 +16,7 @@ import {
 import { getLink, getAllLinks } from "../store.js";
 import { getRatingHistory } from "../ratingStore.js";
 import { renderProfileCard } from "../profileCard.js";
-import { tierEmojiResolvable } from "../config.js";
+import { tierEmojiResolvable, regionFlag } from "../config.js";
 import { EPHEMERAL, tierEmoji } from "./shared.js";
 import { getLinkPanelConfig } from "../linkpanel.js";
 
@@ -37,6 +37,8 @@ import { enforceCooldown } from "./cooldowns.js";
 // ---- Helpers Components V2 (cartes texte stylées : bordure de couleur + lignes fines) ----
 const V2 = MessageFlags.IsComponentsV2;
 const tdc = (s) => new TextDisplayBuilder().setContent(s);
+// Rang mondial/régional lisible (« 1 234 »), « ? » si inconnu.
+const fmtRank = (r) => (r > 0 ? r.toLocaleString("fr-FR") : "?");
 const sepc = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
 function v2Card(color, ...nodes) {
   const c = new ContainerBuilder().setAccentColor(color);
@@ -184,7 +186,9 @@ function buildProfileCard(view, p, legends) {
         "**🥊 1v1**",
         `${tierEmoji(p.tiers["1v1"])} **${tier}** — ${p.ratings["1v1"]} / ${p.peak1v1} (peak)`,
         `**${p.wins1v1}** V • **${losses}** D — ${p.games1v1} games (**${winrate(p.wins1v1, p.games1v1)}**)`,
-        `🌍 Rang mondial : **#${p.globalRank || "?"}** · Région : **${p.region}**`,
+        p.regionRank > 0
+          ? `🌍 Rang mondial : **#${fmtRank(p.globalRank)}** · ${regionFlag(p.region)} Rang ${p.region} : **#${fmtRank(p.regionRank)}**`
+          : `🌍 Rang mondial : **#${fmtRank(p.globalRank)}** · Région : **${p.region}**`,
       ];
       const glory = estimateGlory(p);
       if (glory) lines.push(`🏅 Glory estimée : **≈ ${glory.totalGlory.toLocaleString("fr-FR")}**`);

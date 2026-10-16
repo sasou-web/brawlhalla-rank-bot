@@ -257,6 +257,39 @@ export const TOP_ROLE_NAME = "Top 100 (1v1)";
 export const TOP_RANK_MAX = 100;
 export const TOP_ROLE_COLOR = 0xffd700;
 
+/**
+ * Region "maison" du serveur (HOME_REGION dans le .env, defaut EU) : base du role Top 100
+ * regional. Un code inconnu de l'API retombe sur EU avec un avertissement, sans bloquer.
+ */
+export function parseHomeRegion(raw) {
+  const code = String(raw ?? "").trim().toUpperCase();
+  if (!code) return "EU";
+  if (REGIONS.includes(code)) return code;
+  console.warn(`HOME_REGION="${raw}" n'est pas une region Brawlhalla (${REGIONS.join(", ")}) : EU utilisee. Corrige ton fichier .env.`);
+  return "EU";
+}
+export const HOME_REGION = parseHomeRegion(process.env.HOME_REGION);
+
+// Role "Top 100" de la region maison (rang regional 1v1, champ region_ranks de l'API).
+export const TOP_REGION_ROLE_NAME = `Top 100 ${HOME_REGION} (1v1)`;
+export const TOP_REGION_ROLE_COLOR = 0xf1c40f;
+
+// Drapeau affiche devant un rang regional (🌍 par defaut).
+export const REGION_FLAG = {
+  "US-E": "🇺🇸",
+  "US-W": "🇺🇸",
+  EU: "🇪🇺",
+  SEA: "🌏",
+  BRZ: "🇧🇷",
+  AUS: "🇦🇺",
+  JPN: "🇯🇵",
+  SA: "🇿🇦",
+  ME: "🌍",
+};
+export function regionFlag(region) {
+  return REGION_FLAG[region] || "🌍";
+}
+
 // Role "n°1 du serveur" : attribue au membre lie ayant le plus haut rating 1v1 du serveur.
 // Gere a part (pas dans managedRoleNames) car calcule globalement, pas par membre.
 export const TOP_SERVER_ROLE_NAME = "👑 N°1 du serveur";

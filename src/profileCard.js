@@ -83,9 +83,11 @@ export async function renderProfileCard(profile, opts = {}) {
   ctx.font = `bold 44px ${FONT_BOLD}`;
   ctx.fillText(name, textX, 80);
 
-  // Sous-ligne : region · niveau · rang mondial.
+  // Sous-ligne : region (+ rang regional) · niveau · rang mondial.
   const sub = [];
-  if (profile.region && profile.region !== "?") sub.push(profile.region);
+  if (profile.region && profile.region !== "?") {
+    sub.push(profile.regionRank > 0 ? `${profile.region} #${profile.regionRank}` : profile.region);
+  }
   sub.push(`Niveau ${profile.level || 0}`);
   if (profile.globalRank) sub.push(`Rang mondial #${profile.globalRank}`);
   ctx.fillStyle = "#9aa0aa";

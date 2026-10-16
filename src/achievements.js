@@ -1,5 +1,5 @@
 import { db } from "./db.js";
-import { tierIndex } from "./config.js";
+import { tierIndex, HOME_REGION, regionFlag } from "./config.js";
 import { getSettings } from "./settings.js";
 
 /**
@@ -15,7 +15,7 @@ function bestTierIndex(stats) {
 
 /**
  * Définitions. `test(stats)` est PURE. stats = {
- *   linked, tier1v1, tier2v2, level, globalRank, clips,
+ *   linked, tier1v1, tier2v2, level, globalRank, region, regionRank, clips,
  *   combos (combos maîtrisés), weaponsCompleted (armes dont tous les combos sont maîtrisés)
  * }
  */
@@ -25,6 +25,13 @@ export const ACHIEVEMENTS = [
   { id: "diamond", name: "Diamant", emoji: "💎", desc: "Atteindre Diamond", test: (s) => bestTierIndex(s) >= tierIndex("Diamond") },
   { id: "valhallan", name: "Valhallan", emoji: "🟣", desc: "Atteindre Valhallan", test: (s) => bestTierIndex(s) >= tierIndex("Valhallan") },
   { id: "top100", name: "Top 100", emoji: "🌍", desc: "Être classé top 100 mondial 1v1", test: (s) => s.globalRank > 0 && s.globalRank <= 100 },
+  {
+    id: `top100${HOME_REGION.toLowerCase()}`,
+    name: `Top 100 ${HOME_REGION}`,
+    emoji: regionFlag(HOME_REGION),
+    desc: `Être classé top 100 ${HOME_REGION} en 1v1`,
+    test: (s) => s.region === HOME_REGION && s.regionRank >= 1 && s.regionRank <= 100,
+  },
   { id: "level10", name: "Niveau 10", emoji: "⭐", desc: "Atteindre le niveau 10 sur le serveur", test: (s) => (s.level || 0) >= 10 },
   { id: "level50", name: "Niveau 50", emoji: "🌟", desc: "Atteindre le niveau 50 sur le serveur", test: (s) => (s.level || 0) >= 50 },
   { id: "clips5", name: "Créateur", emoji: "🎬", desc: "Poster 5 clips", test: (s) => (s.clips || 0) >= 5 },
