@@ -545,7 +545,7 @@ function openTournamentDrawer(t, onDone) {
 
 function startggImportDialog(onDone) {
   const s = { url: "", token: "" };
-  const hasToken = !!(CONFIG.settings && CONFIG.settings.startggToken);
+  const hasToken = !!(CONFIG.settings && CONFIG.settings.hasStartggToken);
   openDialog({
     title: "Importer les seeds start.gg",
     description: "Les seeds de l'événement sont appliqués aux inscrits (association par pseudo ou compte lié). Les joueurs non trouvés passent en fin de liste.",
@@ -658,21 +658,41 @@ async function archiveDialog(id) {
 // ═══════════════════ Tournoi : seeding d'un événement start.gg ═══════════════════
 function renderStartgg(host) {
   const s = { url: "", token: "", phaseId: "", result: null, loading: false, error: null };
-  const hasToken = !!(CONFIG.settings && CONFIG.settings.startggToken);
+  const hasToken = !!(CONFIG.settings && CONFIG.settings.hasStartggToken);
   host.append(toolbar("Pour un tournoi géré sur start.gg : calcule un seeding d'après le rating 1v1 Brawlhalla des inscrits, puis réécris-le sur start.gg."));
 
   const calc = button("Calculer le seeding", { variant: "primary", icon: "list-ordered", onClick: () => load() });
+  const tokenField = field("Token start.gg", textInput(s, "token", { type: "password", trim: true }), {
+    optional: hasToken,
+    help: hasToken ? "Un token est mémorisé : laisse vide pour l'utiliser." : "Personal Access Token (Settings › Developer). Il sera mémorisé.",
+  });
+  // Le token mémorisé n'est jamais renvoyé au navigateur : on peut le remplacer (en saisir un
+  // autre) ou l'effacer.
+  const forget = hasToken
+    ? button("Oublier le token mémorisé", {
+        variant: "ghost",
+        icon: "trash",
+        onClick: async () => {
+          const ok = await confirmDialog({ title: "Oublier le token start.gg ?", message: "Il faudra en saisir un à la prochaine utilisation.", confirmLabel: "Oublier", danger: true });
+          if (!ok) return;
+          await api("/api/startgg/token", "DELETE");
+          CONFIG.settings.hasStartggToken = false;
+          tokenField.querySelector(".field-opt")?.remove();
+          const help = tokenField.querySelector(".field-help");
+          if (help) help.textContent = "Personal Access Token (Settings › Developer). Il sera mémorisé.";
+          forget.remove();
+          toast("Token start.gg oublié", "ok");
+        },
+      })
+    : null;
   host.append(
     groups(
       settingsGroup(
         "Événement",
         "Le lien doit pointer vers un événement (…/event/…). Le token doit appartenir à un admin du tournoi pour réécrire le seeding.",
         field("Lien de l'événement", textInput(s, "url", { placeholder: "https://www.start.gg/tournament/…/event/…", trim: true })),
-        field("Token start.gg", textInput(s, "token", { type: "password", trim: true }), {
-          optional: hasToken,
-          help: hasToken ? "Un token est mémorisé : laisse vide pour l'utiliser." : "Personal Access Token (Settings › Developer). Il sera mémorisé.",
-        }),
-        el("div", {}, calc),
+        tokenField,
+        el("div", { class: "row" }, calc, forget),
       ),
     ),
   );

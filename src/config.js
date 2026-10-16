@@ -61,6 +61,21 @@ function normalizePublicUrl(raw) {
   return url;
 }
 
+/**
+ * Valeur Express « trust proxy » d'apres TRUST_PROXY : confiance accordee aux en-tetes
+ * X-Forwarded-* (IP du client pour le rate-limit). Non defini = 1 (comportement historique :
+ * un reverse proxy devant le bot). 0 / false = aucun proxy, port expose directement : l'IP
+ * reelle de la socket est utilisee et un X-Forwarded-For forge par le client est ignore.
+ * Un entier = nombre de proxys ; tout autre texte (loopback, liste d'IP...) est passe tel quel.
+ */
+export function parseTrustProxy(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) return 1;
+  if (/^(false|off|no|non)$/i.test(s)) return false;
+  if (/^\d+$/.test(s)) return Number(s) || false;
+  return s;
+}
+
 // Configuration du dashboard web (optionnel : actif seulement si CLIENT_SECRET est defini).
 export const webConfig = {
   port: Number(process.env.WEB_PORT || 3000),
@@ -68,6 +83,9 @@ export const webConfig = {
   // Derriere un reverse proxy HTTPS : 127.0.0.1, pour que le port ne soit plus
   // expose publiquement sans avoir a modifier le pare-feu.
   host: process.env.WEB_HOST || "0.0.0.0",
+  // Proxys de confiance (voir parseTrustProxy). trustProxySet : TRUST_PROXY renseigne explicitement.
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  trustProxySet: Boolean(String(process.env.TRUST_PROXY ?? "").trim()),
   clientSecret: process.env.CLIENT_SECRET || "",
   // URL publique du dashboard (ex: https://dash.mondomaine.com). Sert a construire le redirect OAuth.
   publicUrl: normalizePublicUrl(process.env.PUBLIC_URL),

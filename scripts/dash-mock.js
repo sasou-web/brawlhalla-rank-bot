@@ -93,7 +93,7 @@ function baseConfig() {
       requireProofScreenshot: true,
       proofTier: "Valhallan",
       proofChannelId: "",
-      startggToken: "",
+      hasStartggToken: true,
     },
     levels: {
       enabled: true,
@@ -763,6 +763,10 @@ app.post("/api/startgg/preview", (req, res) => {
   res.json({ eventName: "XK Weekly #12 — 1v1", phaseId, phaseName: phases.find((p) => p.id === phaseId).name, phases, rows });
 });
 app.post("/api/startgg/apply", (req, res) => ok(res, { updated: (req.body.mapping || []).length, message: `Seeding appliqué sur start.gg pour ${(req.body.mapping || []).length} joueur(s).` }));
+app.delete("/api/startgg/token", (req, res) => {
+  state.config.settings.hasStartggToken = false;
+  ok(res);
+});
 
 // ---- Giveaways ----
 app.get("/api/giveaway/list", (req, res) => res.json({ active: state.giveaways.filter((g) => g.status === "active"), recent: state.giveaways.slice().reverse() }));

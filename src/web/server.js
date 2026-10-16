@@ -28,6 +28,7 @@ import {
 import { STARTER_TERMS } from "../wordfilterEngine.js";
 import { roleTimeoutSection } from "../roleTimeout.js";
 import { configPutHandler } from "./configApi.js";
+import { isGuildAdmin as isGuildAdminOf, createAdminVerifier } from "./adminAuth.js";
 import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
@@ -91,15 +92,22 @@ const COOKIE = "bh_session";
 const STATE_COOKIE = "bh_oauth_state";
 const DISCORD_API = "https://discord.com/api";
 
+// Réglages tels qu'envoyés au navigateur : jamais la valeur du token start.gg (Personal Access
+// Token d'un admin, droits d'écriture sur ses tournois), seulement sa présence.
+async function publicSettings() {
+  const { startggToken, ...rest } = await getSettings();
+  return { ...rest, hasStartggToken: Boolean(startggToken) };
+}
+
 // Sections de config exposees a l'API (lecture/ecriture).
 function buildSections(guildId, client) {
   return {
     settings: {
-      get: () => getSettings(),
+      get: () => publicSettings(),
       set: async (body) => {
         const keys = ["reviewChannelId", "reviewerRoleId", "auditChannelId", "announceChannelId", "alertChannelId", "achievementsChannelId", "autoApproveTier", "requireProofScreenshot", "proofTier", "proofChannelId"];
         for (const k of keys) if (k in body) await setSetting(k, body[k]);
-        return getSettings();
+        return publicSettings();
       },
     },
     levels: { get: () => getLevelConfig(guildId), set: (b) => setLevelConfig(guildId, b) },
@@ -155,7 +163,14 @@ export function startWebServer(client) {
   const app = express();
   // Derrière un reverse proxy (nginx/caddy) : indispensable pour des cookies "secure",
   // la détection HTTPS (x-forwarded-proto) et le rate-limit par IP réelle (x-forwarded-for).
-  app.set("trust proxy", 1);
+  // Port exposé directement : TRUST_PROXY=0, sinon un X-Forwarded-For écrit par le client
+  // lui-même contournerait le rate-limit. Non défini = 1 (voir parseTrustProxy, config.js).
+  try {
+    app.set("trust proxy", webConfig.trustProxy);
+  } catch (err) {
+    console.warn(`TRUST_PROXY invalide (${err.message}) : valeur par défaut 1 utilisée.`);
+    app.set("trust proxy", 1);
+  }
   app.disable("x-powered-by");
 
   const wantHttps = webConfig.publicUrl.startsWith("https");
@@ -190,13 +205,10 @@ export function startWebServer(client) {
     next();
   });
 
-  // Parser large pour l'envoi d'annonces (images jointes en base64) — déclaré AVANT
-  // le parser global 1 Mo, sinon ce dernier rejetterait les gros corps en premier.
-  app.use("/api/announce", express.json({ limit: "12mb" }));
-  app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
-  // Rate-limit léger en mémoire (sans dépendance). Protège l'API et l'auth OAuth.
+  // Rate-limit léger en mémoire (sans dépendance). Protège l'API et l'auth OAuth. Monté AVANT
+  // les parseurs JSON : une requête est comptée dès ses en-têtes, sans attendre son corps.
   app.use("/api", rateLimiter({ windowMs: 60_000, max: 120 }));
   app.use(["/login", "/callback"], rateLimiter({ windowMs: 60_000, max: 20 }));
 
@@ -205,32 +217,20 @@ export function startWebServer(client) {
 
   // ---- Helpers ----
   async function isGuildAdmin(userId) {
-    const guild = await client.guilds.fetch(config.guildId);
-    if (guild.ownerId === userId) return true;
-    const member = await guild.members.fetch(userId);
-    return member.permissions.has(PermissionFlagsBits.ManageGuild);
+    return isGuildAdminOf(await client.guilds.fetch(config.guildId), userId);
   }
 
-  // Re-vérification des droits admin à chaque requête, mais mise en cache courte (60 s)
-  // pour ne pas marteler l'API Discord. Un admin déchu perd l'accès en <= 60 s, sans
-  // attendre l'expiration (1 j) du JWT figé au login.
-  const adminCache = new Map(); // userId -> { admin, exp }
-  const ADMIN_TTL_MS = 60_000;
-  async function verifyAdmin(userId, fallback) {
-    const now = Date.now();
-    const cached = adminCache.get(userId);
-    if (cached && cached.exp > now) return cached.admin;
-    try {
-      const admin = await isGuildAdmin(userId);
-      adminCache.set(userId, { admin, exp: now + ADMIN_TTL_MS });
-      return admin;
-    } catch {
-      // Échec TRANSITOIRE de l'API Discord (hoquet réseau, rate-limit pendant un refresh) :
-      // on ne révoque PAS l'admin pour autant. On garde la dernière valeur connue, sinon on
-      // se fie au flag de session (JWT signé au login). On ne met rien en cache pour réessayer.
-      if (cached) return cached.admin;
-      return Boolean(fallback);
-    }
+  // Re-vérification des droits admin à chaque requête (cache 60 s) : un admin déchu, exclu ou
+  // banni perd l'accès en <= 60 s. Sur un échec transitoire de Discord, repli sur la dernière
+  // valeur connue pendant 5 min au plus. Détails dans adminAuth.js.
+  const verifyAdmin = createAdminVerifier(isGuildAdmin);
+
+  // Salon textuel (ou fil) du serveur configuré, sinon null. Le bot peut être présent sur
+  // d'autres serveurs : un id de salon venu de l'API ne doit jamais faire publier ailleurs.
+  async function guildTextChannel(channelId) {
+    if (!channelId) return null;
+    const ch = await client.channels.fetch(String(channelId)).catch(() => null);
+    return ch?.isTextBased?.() && ch.guildId === config.guildId ? ch : null;
   }
 
   function signSession(payload) {
@@ -244,18 +244,31 @@ export function startWebServer(client) {
     }
   }
   function requireAdmin(req, res, next) {
+    if (req.session) return next(); // déjà vérifié par la garde de /api (plus bas)
     const s = readSession(req);
     if (!s || !s.isAdmin) return res.status(401).json({ error: "non authentifié" });
-    req.session = s;
     // Revérification live (cache 60 s) : invalide la session si les droits ont été retirés.
-    // En cas d'échec transitoire de l'API, on retombe sur le flag de session (pas de révocation abusive).
-    verifyAdmin(s.id, s.isAdmin)
-      .then((ok) => {
+    // Droits invérifiables (Discord injoignable trop longtemps) : 503, ni accès ni révocation.
+    verifyAdmin(s).then(
+      (ok) => {
         if (!ok) return res.status(403).json({ error: "accès révoqué" });
+        req.session = s;
         next();
-      })
-      .catch(() => res.status(403).json({ error: "accès révoqué" }));
+      },
+      () => res.status(503).json({ error: "Impossible de vérifier tes droits (Discord ne répond pas). Réessaie dans un instant." }),
+    );
   }
+
+  // Toute l'API exige un admin, sauf /api/me (état de connexion, lu par la page de login).
+  // Montée AVANT les parseurs JSON : un client non authentifié reçoit son 401 sans que le
+  // corps de sa requête soit lu ni parsé.
+  app.use("/api", (req, res, next) => (req.path === "/me" ? next() : requireAdmin(req, res, next)));
+
+  // Parser large pour l'envoi d'annonces (images jointes en base64), sur cette seule route et
+  // après l'authentification. Déclaré AVANT le parser 1 Mo, sinon ce dernier rejetterait les
+  // gros corps en premier.
+  app.use("/api/announce/send", express.json({ limit: "12mb" }));
+  app.use("/api", express.json({ limit: "1mb" }));
 
   // ---- OAuth ----
   app.get("/login", (req, res) => {
@@ -308,7 +321,9 @@ export function startWebServer(client) {
       const userRes = await fetch(`${DISCORD_API}/users/@me`, {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
-      const user = await userRes.json();
+      const user = userRes.ok ? await userRes.json() : null;
+      if (!user?.id) return res.redirect("/?error=oauth");
+      // Non membre du serveur (jamais venu, exclu, banni) : simplement « pas admin ».
       const admin = await isGuildAdmin(user.id);
 
       const jwtToken = signSession({
@@ -579,7 +594,7 @@ export function startWebServer(client) {
       const account = normalizeHandle(rawAccount);
       if (rawAccount && !account) return res.status(400).json({ error: "Compte TikTok invalide (ex : kayagoldforged, sans @)." });
       const feedUrl = String(req.body?.feedUrl || "").trim();
-      if (feedUrl && !/^https?:\/\/\S+$/i.test(feedUrl)) return res.status(400).json({ error: "URL du flux RSS invalide." });
+      if (feedUrl && !/^https:\/\/\S+$/i.test(feedUrl)) return res.status(400).json({ error: "URL du flux RSS invalide (https://...)." });
       if (!account && !feedUrl) return res.status(400).json({ error: "Indique un compte TikTok." });
       res.json({ account, results: await checkTikTokSources({ account, feedUrl }) });
     } catch (err) {
@@ -670,8 +685,8 @@ export function startWebServer(client) {
       const cfg = await getLinkPanelConfig(config.guildId);
       const channelId = req.body?.channelId || cfg.channelId;
       if (!channelId) return res.status(400).json({ error: "Choisis d'abord un salon." });
-      const ch = await client.channels.fetch(channelId).catch(() => null);
-      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      const ch = await guildTextChannel(channelId);
+      if (!ch) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
       await ch.send(buildLinkPanelPayload(cfg));
       res.json({ ok: true });
     } catch (err) {
@@ -1012,6 +1027,17 @@ export function startWebServer(client) {
     return settings.startggToken || "";
   }
 
+  // Efface le token start.gg mémorisé. Il n'est jamais renvoyé au navigateur (seulement
+  // hasStartggToken) : on peut le remplacer en en saisissant un autre, ou l'effacer ici.
+  app.delete("/api/startgg/token", requireAdmin, async (req, res) => {
+    try {
+      await setSetting("startggToken", "");
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Construit l'index normalisé pseudo -> meilleur rating 1v1 à partir des comptes liés.
   async function buildLinkedRatingIndex() {
     const links = await getAllLinks();
@@ -1124,7 +1150,8 @@ export function startWebServer(client) {
       const t = await getTournament(G);
       if (!t) return res.status(400).json({ error: "Aucun tournoi." });
       if (!t.signupChannelId) return res.status(400).json({ error: "Définis d'abord le salon d'inscription." });
-      const ch = await client.channels.fetch(t.signupChannelId);
+      const ch = await guildTextChannel(t.signupChannelId);
+      if (!ch) return res.status(400).json({ error: "Salon d'inscription introuvable ou non textuel." });
       const msg = await ch.send(buildSignupPayload(t));
       await updateTournament(G, { signupMessageId: msg.id });
       res.json({ ok: true });
@@ -1142,8 +1169,8 @@ export function startWebServer(client) {
         const t = await getTournament(G);
         signupChannelId = t?.signupChannelId || null;
         if (t && t.hallOfFameChannelId) {
-          const ch = await client.channels.fetch(t.hallOfFameChannelId).catch(() => null);
-          if (ch?.isTextBased?.()) await ch.send(buildHallOfFamePayload(t));
+          const ch = await guildTextChannel(t.hallOfFameChannelId);
+          if (ch) await ch.send(buildHallOfFamePayload(t));
         }
       } catch {
         /* recap best-effort */
@@ -1191,8 +1218,8 @@ export function startWebServer(client) {
       if (!channelId) return res.status(400).json({ error: "Choisis un salon." });
       const weapons = await weaponsWithCombos();
       if (!weapons.length) return res.status(400).json({ error: "Base de combos vide — mets-la à jour d'abord." });
-      const ch = await client.channels.fetch(channelId).catch(() => null);
-      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      const ch = await guildTextChannel(channelId);
+      if (!ch) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
       await ch.send(await buildPanelMessage({ labBaseUrl: webConfig.publicUrl }));
       res.json({ ok: true });
     } catch (err) {
@@ -1210,8 +1237,8 @@ export function startWebServer(client) {
       if (!cfg.enabled) return res.status(400).json({ error: "Active d'abord le système de tickets." });
       const channelId = req.body?.channelId;
       if (!channelId) return res.status(400).json({ error: "Choisis un salon." });
-      const ch = await client.channels.fetch(channelId).catch(() => null);
-      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
+      const ch = await guildTextChannel(channelId);
+      if (!ch) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
       await ch.send(buildTicketPanelPayload(cfg));
       res.json({ ok: true });
     } catch (err) {
@@ -1364,7 +1391,8 @@ export function startWebServer(client) {
   // directement sur http://<ip>:PORT). Derriere un reverse proxy HTTPS, mettre
   // WEB_HOST=127.0.0.1 dans le .env : le port n'est alors plus joignable depuis
   // Internet, sans avoir a toucher au pare-feu (donc aucun risque de se couper SSH).
-  app.listen(webConfig.port, webConfig.host, () => {
+  // Le serveur HTTP est renvoye pour les tests (index.js l'ignore).
+  return app.listen(webConfig.port, webConfig.host, () => {
     const scope = webConfig.host === "127.0.0.1" ? "local uniquement" : `ecoute ${webConfig.host}`;
     console.log(`Dashboard web sur ${webConfig.publicUrl} (port ${webConfig.port}, ${scope}).`);
     if (!webConfig.publicUrl.startsWith("https")) {
@@ -1372,6 +1400,13 @@ export function startWebServer(client) {
         "ATTENTION : PUBLIC_URL n'est pas en https. Le cookie de session (acces admin, 24 h) " +
           "circule EN CLAIR : n'importe qui sur le chemin reseau peut le capturer. " +
           "Mets un reverse proxy HTTPS devant le bot (voir DEPLOY.md).",
+      );
+    }
+    if (["0.0.0.0", "::"].includes(webConfig.host) && !webConfig.trustProxySet) {
+      console.warn(
+        "ATTENTION : dashboard joignable directement (WEB_HOST non restreint) et TRUST_PROXY non defini : " +
+          "l'en-tete X-Forwarded-For est cru sur parole, le rate-limit par IP est contournable. " +
+          "Sans reverse proxy : TRUST_PROXY=0. Avec un reverse proxy : WEB_HOST=127.0.0.1 (ou TRUST_PROXY=1 pour confirmer).",
       );
     }
   });

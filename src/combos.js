@@ -116,7 +116,22 @@ async function fetchCombo(id) {
   };
 }
 
+// Garde-fou : une panne, un anti-bot ou un changement de balisage de BrawlDB fait échouer la
+// plupart des fiches (fetchCombo → null). On refuse alors d'écraser la base (fichier versionné,
+// servi au Lab et à /combos) par un jeu vide ou amputé.
+const REFRESH_MIN_RATIO = 0.8;
+
+/** Raison de refuser un rafraîchissement qui passerait de `previousCount` à `nextCount` combos, ou "". */
+export function refreshRejection(previousCount, nextCount) {
+  if (nextCount === 0) return "aucun combo récupéré";
+  if (previousCount > 0 && nextCount < previousCount * REFRESH_MIN_RATIO) {
+    return `seulement ${nextCount} combos récupérés contre ${previousCount} actuellement`;
+  }
+  return "";
+}
+
 // Re-scrape BrawlDB et réécrit data/combos.json. Renvoie { count, byWeapon }.
+// Lève (sans rien écrire) si le résultat est suspect : voir refreshRejection.
 export async function refreshCombos() {
   const ids = Array.from({ length: MAX_ID }, (_, i) => i + 1);
   const combos = [];
@@ -125,6 +140,8 @@ export async function refreshCombos() {
     const results = await Promise.all(batch.map(fetchCombo));
     for (const c of results) if (c) combos.push(c);
   }
+  const why = refreshRejection((await loadCombos()).length, combos.length);
+  if (why) throw new Error(`${why} (BrawlDatabase indisponible ou modifié ?) : base actuelle conservée.`);
   combos.sort((a, b) => a.weapon.localeCompare(b.weapon) || b.usability - a.usability || a.id - b.id);
   const scrapedAt = new Date().toISOString();
   await mkdir(dirname(DATA), { recursive: true });
@@ -140,10 +157,13 @@ export async function refreshCombos() {
 // Le viewer est ré-affiché à chaque navigation (changement d'arme / de combo) et le Combo Lab
 // sert les mêmes fichiers. Sans cache, on re-`fetch` le .mp4 et on le recharge entièrement en
 // RAM à CHAQUE clic. LRU borné : budget total + taille max par fichier + TTL. Au-delà du budget,
-// on évince les entrées les plus anciennes ; un fichier trop gros n'est jamais mis en cache.
+// on évince les entrées les plus anciennes. Un fichier trop gros n'est même pas téléchargé ;
+// tout fichier téléchargé est mis en cache, sinon chaque requête Range du Combo Lab (lecture,
+// recherche, image par image) relancerait un téléchargement complet depuis BrawlDB.
 const VIDEO_TTL_MS = 60 * 60 * 1000; // 1 h
 const VIDEO_MAX_BYTES = 80 * 1024 * 1024; // budget total ~80 Mo
-const VIDEO_MAX_FILE = 12 * 1024 * 1024; // ne cache pas un fichier > 12 Mo
+const VIDEO_MAX_FILE = 30 * 1024 * 1024; // ni téléchargé ni caché au-delà de 30 Mo
+const VIDEO_FETCH_TIMEOUT_MS = 15_000; // BrawlDB muet : on abandonne au lieu de rester pendant
 const videoCache = new Map(); // key -> { buf, size, ts }
 let videoCacheBytes = 0;
 
@@ -183,6 +203,23 @@ function videoCacheSet(key, buf) {
 // Discord, ou requêtes Range parallèles du navigateur) ne déclenchent qu'un seul fetch.
 const videoInflight = new Map();
 
+// Corps d'une réponse, ou null s'il dépasse `max` octets (téléchargement interrompu aussitôt).
+async function readCapped(res, max) {
+  if (!res.body) return null;
+  if (Number(res.headers.get("content-length")) > max) {
+    await res.body.cancel().catch(() => {});
+    return null;
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    size += chunk.length;
+    if (size > max) return null; // quitter la boucle annule le flux
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size);
+}
+
 // Renvoie le buffer vidéo d'origine d'un combo (cache-first), ou null si indisponible.
 export async function getComboVideo(c) {
   const key = `${c.weapon}-${c.id}`;
@@ -191,9 +228,14 @@ export async function getComboVideo(c) {
   if (videoInflight.has(key)) return videoInflight.get(key);
   const p = (async () => {
     try {
-      const r = await fetch(c.video, { headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" } });
+      // Le délai couvre aussi la lecture du corps : rien ne reste pendant dans videoInflight.
+      const r = await fetch(c.video, {
+        headers: { "User-Agent": "Mozilla/5.0 (combo-fetcher)" },
+        signal: AbortSignal.timeout(VIDEO_FETCH_TIMEOUT_MS),
+      });
       if (!r.ok) return null;
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = await readCapped(r, VIDEO_MAX_FILE);
+      if (!buf) return null;
       videoCacheSet(key, buf);
       return buf;
     } catch {

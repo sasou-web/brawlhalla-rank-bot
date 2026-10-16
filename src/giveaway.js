@@ -313,7 +313,8 @@ export async function createGiveaway(client, {
 
   const cfg = await getGiveawayConfig(guildId);
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel?.isTextBased?.()) return { ok: false, error: "Salon introuvable ou non textuel." };
+  // Le salon doit appartenir au serveur du giveaway (le bot peut être sur d'autres serveurs).
+  if (!channel?.isTextBased?.() || channel.guildId !== guildId) return { ok: false, error: "Salon introuvable ou non textuel." };
 
   const gw = createGiveawayRow({
     guildId,
