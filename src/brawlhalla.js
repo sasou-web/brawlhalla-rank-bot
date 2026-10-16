@@ -1,5 +1,5 @@
 import { config, TIERS, RANKED_TIERS, BH_API_BASE, envNumber } from "./config.js";
-import { getProfileEntry, setProfileEntry, getWarmIds } from "./profileStore.js";
+import { getProfileEntry, setProfileEntry, getWarmIds, peekProfileData } from "./profileStore.js";
 import { getSearchEntry, setSearchEntry } from "./searchStore.js";
 import { upsertPlayers, searchLocalPlayers, markSynced, getIndexStats, getLocalPlayer } from "./leaderboardStore.js";
 import { recordOutcome, recordRetry, recordCooldown, snapshot as metricsSnapshot } from "./apiMetrics.js";
@@ -27,6 +27,10 @@ const _waiters = [];
 
 // Cache persistant des profils (sur disque) : reduit les appels et resiste aux pannes API.
 const PROFILE_TTL_MS = 15 * 60 * 1000;
+// Ranked 3v3 : un joueur NON classé en 3v3 n'est revérifié qu'au plus toutes les 4 h (≈ une
+// synchro sur 4 au rythme par défaut), pour ne pas ajouter 1 appel API à chaque profil.
+// Un joueur classé en 3v3 (ou jamais vérifié) est interrogé à chaque fetch.
+const RANKED_3V3_RECHECK_MS = 4 * 60 * 60 * 1000;
 const inflight = new Map(); // brawlhallaId -> Promise (dedup des fetchs concurrents)
 
 // Files de recuperation en arriere-plan : ce qui a echoue a cause de l'API est reessaye
@@ -529,10 +533,11 @@ export async function getApiMetrics() {
 }
 
 /**
- * Recupere un profil consolide d'un joueur en 3 appels paralleles :
+ * Recupere un profil consolide d'un joueur en 3 a 4 appels paralleles :
  * - /player/stats?mode=ranked_1v1 : rating/tier/peak/region/rang + legendes classees (peak)
  * - /player/teams : equipes 2v2
  * - /player/stats?mode=all : niveau, games/wins totaux, stats par legende
+ * - /player/stats?mode=ranked_3v3 : rating/tier/peak 3v3 (cf. shouldFetch3v3)
  */
 export async function getPlayerProfile(brawlhallaId, { force = false, allowStale = true } = {}) {
   const entry = await getProfileEntry(brawlhallaId);
@@ -572,7 +577,7 @@ export async function getPlayerProfile(brawlhallaId, { force = false, allowStale
 function isEmptyProfile(data) {
   if (!data) return true;
   const noName = !data.name || data.name === "?";
-  const noRanked = !(data.ratings?.["1v1"] > 0) && !(data.ratings?.["2v2"] > 0);
+  const noRanked = !(data.ratings?.["1v1"] > 0) && !(data.ratings?.["2v2"] > 0) && !(data.ratings?.["3v3"] > 0);
   const noActivity = !(data.level > 0) && !(data.totalGames > 0);
   return noName && noRanked && noActivity;
 }
@@ -593,13 +598,17 @@ function minimalProfileFromLocal(brawlhallaId, local) {
     peak1v1: rating1v1,
     games1v1: 0,
     wins1v1: 0,
-    tiers: { "1v1": tier1v1, "2v2": null },
-    ratings: { "1v1": rating1v1, "2v2": 0 },
+    peak3v3: 0,
+    games3v3: 0,
+    wins3v3: 0,
+    tiers: { "1v1": tier1v1, "2v2": null, "3v3": null },
+    ratings: { "1v1": rating1v1, "2v2": 0, "3v3": 0 },
     best2v2: null,
     teams: [],
     legendsRanked: [],
     legendsAll: [],
     partial: true, // donnee incomplete (API indisponible) : a rafraichir plus tard
+    ranked3v3Available: false, // 3v3 inconnu : la synchro garde le dernier rank 3v3 connu
   };
 }
 
@@ -727,15 +736,30 @@ export async function retryPending() {
   return { recovered, abandoned, pendingProfiles: pendingProfiles.size, pendingSearches: pendingSearches.size };
 }
 
+/**
+ * Faut-il interroger ranked_3v3 pour ce fetch (fonction PURE) ? `cached` = profil en cache.
+ * Oui, sauf si l'endpoint a répondu « non classé » (404) il y a moins de
+ * RANKED_3V3_RECHECK_MS : c'est le cas courant, et il ne coûte alors aucun appel de plus.
+ */
+export function shouldFetch3v3(cached, now = Date.now()) {
+  if (!cached) return true; // jamais vu
+  if (cached.ratings?.["3v3"] > 0) return true; // classé : on suit son rating
+  const checkedAt = Number(cached.ranked3v3CheckedAt) || 0; // 0 = jamais vérifié
+  return now - checkedAt >= RANKED_3V3_RECHECK_MS;
+}
+
 async function fetchPlayerProfile(brawlhallaId) {
-  // 3 appels en parallele, mais tolerants : seul l'appel principal (ranked 1v1) est requis.
-  // Si /player/teams (2v2) ou /player/stats?all echouent, on construit quand meme la fiche
-  // avec ce qu'on a (profil "partiel") au lieu de tout faire echouer. allSettled => pas de
-  // rejet global. Les 502 par fenetres de l'origine ne cassent plus toute la commande.
-  const [rankedR, teamsR, allR] = await Promise.allSettled([
+  // 3 ou 4 appels en parallele, mais tolerants : seul l'appel principal (ranked 1v1) est requis.
+  // Si /player/teams (2v2), /player/stats?all ou ranked_3v3 echouent, on construit quand meme
+  // la fiche avec ce qu'on a (profil "partiel") au lieu de tout faire echouer. allSettled =>
+  // pas de rejet global. Les 502 par fenetres de l'origine ne cassent plus toute la commande.
+  const cached = peekProfileData(brawlhallaId);
+  const with3v3 = shouldFetch3v3(cached);
+  const [rankedR, teamsR, allR, ranked3R] = await Promise.allSettled([
     apiGetOrNull("/player/stats", { brawlhalla_id: brawlhallaId, mode: "ranked_1v1" }),
     apiGetOrNull("/player/teams", { brawlhalla_id: brawlhallaId }),
     apiGetOrNull("/player/stats", { brawlhalla_id: brawlhallaId, mode: "all" }),
+    with3v3 ? apiGetOrNull("/player/stats", { brawlhalla_id: brawlhallaId, mode: "ranked_3v3" }) : null,
   ]);
 
   // L'appel ranked 1v1 porte le tier/rating/region : s'il echoue, on n'a pas de donnee
@@ -744,7 +768,8 @@ async function fetchPlayerProfile(brawlhallaId) {
 
   const teamsData = teamsR.status === "fulfilled" ? teamsR.value : null;
   const all = allR.status === "fulfilled" ? allR.value : null;
-  const partial = teamsR.status === "rejected" || allR.status === "rejected";
+  const ranked3 = ranked3R.status === "fulfilled" ? ranked3R.value : null;
+  const partial = teamsR.status === "rejected" || allR.status === "rejected" || ranked3R.status === "rejected";
 
   // Aucune donnee nulle part : l'appel ranked ET l'appel "all" renvoient null (404/vide).
   // Ce n'est pas un vrai profil -> on NE fabrique PAS une fiche vide "?" (qui serait mise
@@ -761,7 +786,12 @@ async function fetchPlayerProfile(brawlhallaId) {
     throw e;
   }
 
-  return buildPlayerProfile(brawlhallaId, { ranked: rankedR.value, teamsData, all, partial });
+  const profile = buildPlayerProfile(brawlhallaId, { ranked: rankedR.value, teamsData, all, ranked3, partial });
+  // Date de la dernière réponse de l'endpoint 3v3 (données ou 404). Appel sauté : on reprend
+  // celle du cache (le joueur y était non classé, ranked3v3Available reste false).
+  if (with3v3) profile.ranked3v3CheckedAt = ranked3R.status === "fulfilled" ? Date.now() : 0;
+  else profile.ranked3v3CheckedAt = cached.ranked3v3CheckedAt;
+  return profile;
 }
 
 /**
@@ -770,13 +800,16 @@ async function fetchPlayerProfile(brawlhallaId) {
  *  - ranked   : /player/stats?mode=ranked_1v1 (rating/tier/region/peak/rang + legendes classees)
  *  - teamsData: /player/teams (equipes 2v2)
  *  - all      : /player/stats?mode=all (niveau, games/wins totaux, stats par legende)
- *  - partial  : true si un appel secondaire (teams/all) a echoue
+ *  - ranked3  : /player/stats?mode=ranked_3v3 (rating/tier/peak/games/wins 3v3)
+ *  - partial  : true si un appel secondaire (teams/all/3v3) a echoue
  * Le tier 2v2 retenu est celui de l'equipe au plus haut rating. Valhallan est deduit par
  * resolveBaseTier quand l'API renvoie un tier vide sur un rating eleve.
  */
-export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = null, all = null, partial = false } = {}) {
+export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = null, all = null, ranked3 = null, partial = false } = {}) {
   const rating1v1 = ranked?.rating ?? 0;
   const tier1v1 = resolveBaseTier(rating1v1, ranked?.tier);
+  const rating3v3 = Number(ranked3?.rating) || 0;
+  const tier3v3 = resolveBaseTier(rating3v3, ranked3?.tier);
 
   const teams = teamsData?.teams?.ranked_2v2 ?? [];
   // Meilleure équipe 2v2 = celle au plus HAUT rating, comparé NUMÉRIQUEMENT.
@@ -800,8 +833,11 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     peak1v1: ranked?.peak_rating ?? 0,
     games1v1: ranked?.games ?? 0, // games/wins classees 1v1 (niveau joueur)
     wins1v1: ranked?.wins ?? 0,
-    tiers: { "1v1": tier1v1, "2v2": tier2v2 },
-    ratings: { "1v1": rating1v1, "2v2": best2v2 ? teamRating(best2v2) : 0 },
+    peak3v3: Number(ranked3?.peak_rating) || 0,
+    games3v3: Number(ranked3?.games) || 0,
+    wins3v3: Number(ranked3?.wins) || 0,
+    tiers: { "1v1": tier1v1, "2v2": tier2v2, "3v3": tier3v3 },
+    ratings: { "1v1": rating1v1, "2v2": best2v2 ? teamRating(best2v2) : 0, "3v3": rating3v3 },
     best2v2, // equipe 2v2 au plus haut rating (objet brut) ou null
     teams, // toutes les equipes 2v2 (brut)
     legendsRanked: Array.isArray(ranked?.legends) ? ranked.legends : [], // pour la Glory (peak_rating)
@@ -819,11 +855,15 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     // true si /player/stats?mode=all n'a renvoye AUCUNE donnee (404 masque par apiGetOrNull,
     // ou rejet) : le niveau a 0 vient d'un manque d'info, les appelants gardent l'ancien.
     allUnavailable: all == null,
+    // true si ranked_3v3 a renvoye des donnees. false = pas d'info (404 : non classe OU glitch,
+    // indiscernables, ou appel saute) : la synchro garde alors le dernier rank 3v3 vu depuis
+    // moins de 24 h, puis le retire.
+    ranked3v3Available: ranked3 != null,
   };
 }
 
 /**
- * GET /v1/leaderboard/ranked : top du classement (mode "1v1"|"2v2", region, page).
+ * GET /v1/leaderboard/ranked : top du classement (mode "1v1"|"2v2"|"3v3", region, page).
  */
 export async function getRankings(gameMode = "1v1", region = "ALL", page = 1, max = 10) {
   const data = await apiGet("/leaderboard/ranked", {

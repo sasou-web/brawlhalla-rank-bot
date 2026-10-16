@@ -7,18 +7,18 @@ import { db, loadDoc, runOnce } from "./db.js";
  * un point max par jour, mis à jour de façon atomique (UPSERT) au lieu de réécrire un gros
  * blob JSON à chaque refresh. Historique borné à MAX_POINTS jours par joueur.
  *
- * ts ms · r1 rating 1v1 · r2 rating 2v2 · lvl niveau · rank rang mondial 1v1
+ * ts ms · r1 rating 1v1 · r2 rating 2v2 · r3 rating 3v3 · lvl niveau · rank rang mondial 1v1
  */
 const MAX_POINTS = 365;
 
 const upsertStmt = db.prepare(`
-  INSERT INTO rating_history (brawlhalla_id, day_key, ts, r1, r2, lvl, rank)
-  VALUES (@id, @day, @ts, @r1, @r2, @lvl, @rank)
+  INSERT INTO rating_history (brawlhalla_id, day_key, ts, r1, r2, r3, lvl, rank)
+  VALUES (@id, @day, @ts, @r1, @r2, @r3, @lvl, @rank)
   ON CONFLICT(brawlhalla_id, day_key) DO UPDATE SET
-    ts = excluded.ts, r1 = excluded.r1, r2 = excluded.r2, lvl = excluded.lvl, rank = excluded.rank
+    ts = excluded.ts, r1 = excluded.r1, r2 = excluded.r2, r3 = excluded.r3, lvl = excluded.lvl, rank = excluded.rank
 `);
 const historyStmt = db.prepare(
-  "SELECT ts, r1, r2, lvl, rank FROM rating_history WHERE brawlhalla_id = ? ORDER BY ts ASC",
+  "SELECT ts, r1, r2, r3, lvl, rank FROM rating_history WHERE brawlhalla_id = ? ORDER BY ts ASC",
 );
 // Conserve les MAX_POINTS jours les plus récents, supprime le reste.
 const pruneStmt = db.prepare(`
@@ -51,6 +51,7 @@ function migrateFromJson() {
           ts: p.ts,
           r1: Math.floor(p.r1 || 0),
           r2: Math.floor(p.r2 || 0),
+          r3: 0,
           lvl: Math.floor(p.lvl || 0),
           rank: Math.floor(p.rank || 0),
         });
@@ -63,12 +64,13 @@ function migrateFromJson() {
 
 /**
  * Enregistre un point de rating pour un joueur. Remplace le point du jour s'il existe déjà.
- * N'écrit rien si le rating 1v1 ET 2v2 sont nuls (joueur non classé / donnée partielle).
+ * N'écrit rien si les ratings 1v1, 2v2 et 3v3 sont tous nuls (joueur non classé / donnée partielle).
  */
-export async function recordRating(brawlhallaId, { rating1v1 = 0, rating2v2 = 0, level = 0, globalRank = 0 } = {}) {
+export async function recordRating(brawlhallaId, { rating1v1 = 0, rating2v2 = 0, rating3v3 = 0, level = 0, globalRank = 0 } = {}) {
   const r1 = Math.max(0, Math.floor(rating1v1 || 0));
   const r2 = Math.max(0, Math.floor(rating2v2 || 0));
-  if (r1 === 0 && r2 === 0) return; // rien d'utile à tracer
+  const r3 = Math.max(0, Math.floor(rating3v3 || 0));
+  if (r1 === 0 && r2 === 0 && r3 === 0) return; // rien d'utile à tracer
 
   const id = String(brawlhallaId);
   const now = Date.now();
@@ -78,6 +80,7 @@ export async function recordRating(brawlhallaId, { rating1v1 = 0, rating2v2 = 0,
     ts: now,
     r1,
     r2,
+    r3,
     lvl: Math.floor(level || 0),
     rank: Math.floor(globalRank || 0),
   });

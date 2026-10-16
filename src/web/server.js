@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { PermissionFlagsBits, ChannelType } from "discord.js";
 
 import { config, webConfig, TIERS } from "../config.js";
-import { getSettings, setSetting } from "../settings.js";
+import { getSettings, setSetting, clampProofMaxFiles } from "../settings.js";
 import { getLevelConfig, setLevelConfig, buildLevelUpAnnounce, xpForLevel, totalXpForLevel } from "../levels.js";
 import {
   getTikTokConfig,
@@ -109,6 +109,8 @@ function buildSections(guildId, client) {
       set: async (body) => {
         const keys = ["reviewChannelId", "reviewerRoleId", "auditChannelId", "announceChannelId", "alertChannelId", "achievementsChannelId", "autoApproveTier", "requireProofScreenshot", "proofTier", "proofChannelId"];
         for (const k of keys) if (k in body) await setSetting(k, body[k]);
+        if ("proofMaxFiles" in body) await setSetting("proofMaxFiles", clampProofMaxFiles(body.proofMaxFiles));
+        if ("proofAllowVideo" in body) await setSetting("proofAllowVideo", body.proofAllowVideo === true);
         return publicSettings();
       },
     },

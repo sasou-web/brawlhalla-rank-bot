@@ -93,6 +93,8 @@ function baseConfig() {
       requireProofScreenshot: true,
       proofTier: "Valhallan",
       proofChannelId: "",
+      proofMaxFiles: 3,
+      proofAllowVideo: false,
       hasStartggToken: true,
     },
     levels: {
@@ -258,6 +260,7 @@ function makeTournament(status = "running") {
     t.matches.r0m2.status = "dispute";
     t.matches.r0m2.reports = { [t.matches.r0m2.aId]: { a: 2, b: 1 }, [t.matches.r0m2.bId]: { a: 1, b: 2 } };
     t.matches.r0m2.channelId = nextId();
+    t.matches.r0m2.dispute = { reason: "Il a déclaré 2-1 mais j'ai gagné la dernière manche.", by: "", byName: "Kaya", files: 1, at: Date.now() };
     t.matches.r0m3.status = "live";
     t.matches.r0m3.scoreA = 1;
   } else t.status = status;

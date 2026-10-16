@@ -77,6 +77,18 @@ export async function getProfileEntry(brawlhallaId) {
   }
 }
 
+// Lecture du profil en cache SANS le marquer comme consulté (usage interne au fetch : ne
+// doit pas garder le profil « chaud » pour warmProfiles). null si absent ou illisible.
+export function peekProfileData(brawlhallaId) {
+  const row = getStmt.get(String(brawlhallaId));
+  if (!row) return null;
+  try {
+    return JSON.parse(row.data);
+  } catch {
+    return null;
+  }
+}
+
 export async function setProfileEntry(brawlhallaId, data) {
   const now = Date.now();
   upsertStmt.run({
