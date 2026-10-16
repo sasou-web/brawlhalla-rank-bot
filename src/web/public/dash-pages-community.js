@@ -26,7 +26,7 @@ async function resyncRoles() {
   const ok = await confirmDialog({
     title: "Resynchroniser les rôles de rank ?",
     message:
-      "Le bot revérifie chaque membre lié auprès de l'API Brawlhalla et corrige ses rôles 1v1, 2v2 et « N°1 du serveur ». " +
+      "Le bot revérifie chaque membre lié auprès de l'API Brawlhalla et corrige ses rôles 1v1, 2v2, 3v3 et « N°1 du serveur ». " +
       "Le traitement tourne en arrière-plan pendant quelques minutes ; le bilan est posté dans le salon d'audit.",
     confirmLabel: "Lancer la resynchronisation",
   });
@@ -122,9 +122,17 @@ function validationTab(host, s) {
       ),
       settingsGroup(
         "Fils de preuve",
-        "À partir du rang choisi, le bot ouvre un fil privé par demande : le joueur y poste une capture de son profil en jeu, le staff valide depuis le fil.",
+        "À partir du rang choisi, le joueur envoie une capture de son profil en jeu dans un formulaire. Le bot ouvre un fil privé par demande avec la capture, et le staff valide depuis le fil.",
         switchField("Exiger une capture d'écran", s, "requireProofScreenshot"),
         showWhen(field("À partir du rang", selectInput(s, "proofTier", tiers, { size: "sm" }), { help: "Ce tier est inclus." }), () => !!s.requireProofScreenshot),
+        showWhen(
+          field("Fichiers par demande", numberInput(s, "proofMaxFiles", { min: 1, max: 3 }), { help: "Entre 1 et 3. 8 Mo maximum par fichier." }),
+          () => !!s.requireProofScreenshot,
+        ),
+        showWhen(
+          switchField("Accepter les vidéos", s, "proofAllowVideo", { help: "Ajoute MP4 et MOV aux images PNG, JPG et WebP." }),
+          () => !!s.requireProofScreenshot,
+        ),
         showWhen(
           field("Salon des fils de preuve", channelPicker(s, "proofChannelId", "text"), {
             help: "Doit être visible par les membres, sinon ils ne peuvent pas rejoindre le fil. Vide : salon où /lier est lancé. Le staff a besoin de « Gérer les fils ».",

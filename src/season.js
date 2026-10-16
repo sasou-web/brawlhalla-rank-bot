@@ -4,15 +4,15 @@ import { ensureRole } from "./roles.js";
 
 /**
  * Récompenses de fin de saison : badge PERMANENT attribué selon le plus haut tier
- * atteint par le membre (1v1 ou 2v2) durant la saison. Ces rôles ne sont jamais retirés
+ * atteint par le membre (1v1, 2v2 ou 3v3) durant la saison. Ces rôles ne sont jamais retirés
  * par /reset-saison (ce sont des trophées d'historique : "🏅 S3 Diamond").
  */
 
 /**
- * Tier de récompense d'un membre (fonction PURE) : le plus haut tier entre 1v1 et 2v2, pic
+ * Tier de récompense d'un membre (fonction PURE) : le plus haut tier entre 1v1, 2v2 et 3v3, pic
  * de la saison (`peakTiers`, enregistré à chaque synchro) ou tier courant (`tiers`, qui sert
  * seul de repli tant qu'aucun pic n'est connu). null si aucun rank.
- * `tiers` / `peakTiers` = { "1v1": "Gold"|null, "2v2": "Diamond"|null }.
+ * `tiers` / `peakTiers` = { "1v1": "Gold"|null, "2v2": "Diamond"|null, "3v3": "Platinum"|null }.
  */
 export function seasonRewardTier(tiers, peakTiers = null) {
   return highestTier([...Object.values(tiers || {}), ...Object.values(peakTiers || {})]);

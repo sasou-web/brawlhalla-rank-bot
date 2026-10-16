@@ -24,7 +24,7 @@ test("retryPending : au plus 5 profils par cycle, abandon des IDs introuvables",
 
     playerCalls = 0;
     await retryPending();
-    assert.ok(playerCalls <= 5 * 3, `au plus 5 profils (3 appels chacun) par cycle, vu ${playerCalls} appels`);
+    assert.ok(playerCalls <= 5 * 4, `au plus 5 profils (4 appels chacun avec le 3v3) par cycle, vu ${playerCalls} appels`);
     // Un seul échec 404 : rien n'est encore abandonné.
     const afterOne = loadPending("profile");
     for (const id of ids) assert.ok(afterOne.includes(id), `${id} abandonné trop tôt`);

@@ -70,6 +70,7 @@ db.exec(`
     ts   INTEGER NOT NULL,
     r1   INTEGER NOT NULL DEFAULT 0,
     r2   INTEGER NOT NULL DEFAULT 0,
+    r3   INTEGER NOT NULL DEFAULT 0,
     lvl  INTEGER NOT NULL DEFAULT 0,
     rank INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (brawlhalla_id, day_key)
@@ -144,7 +145,10 @@ db.exec(`
 // liste (une étape déployée ne se modifie ni ne se réordonne plus). L'étape i amène la base
 // à user_version = i + 1. Exemple :
 //   (d) => addColumn(d, "xp", "streak INTEGER NOT NULL DEFAULT 0"),
-const SCHEMA_STEPS = [];
+const SCHEMA_STEPS = [
+  // v1 : rating ranked 3v3 dans l'historique (/progression).
+  (d) => addColumn(d, "rating_history", "r3 INTEGER NOT NULL DEFAULT 0"),
+];
 
 /**
  * Ajoute une colonne si elle manque. Idempotent : sans effet si elle existe déjà (base neuve,

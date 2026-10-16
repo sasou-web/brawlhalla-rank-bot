@@ -298,8 +298,9 @@ export function buildMatchPayload(t, matchId) {
   return { content: done ? undefined : mentions.map((id) => `<@${id}>`).join(" "), embeds: [embed], components, allowedMentions: { users: mentions } };
 }
 
-// Alerte modérateur (litige / inactivité).
-export function buildModAlert(t, matchId, reason) {
+// Alerte modérateur (litige / inactivité). `imageName` : capture re-postée avec l'alerte
+// (`attachment://`), affichée en grand dans l'embed. `by` : id Discord de l'auteur du litige.
+export function buildModAlert(t, matchId, reason, { by, imageName, files = 0 } = {}) {
   const m = t.matches[matchId];
   const A = t.participants.find((p) => p.id === m.aId);
   const B = t.participants.find((p) => p.id === m.bId);
@@ -308,11 +309,16 @@ export function buildModAlert(t, matchId, reason) {
   const fmt = (r) => (r ? `${r.a}-${r.b}` : "—");
   const ping = t.modRoleId ? `<@&${t.modRoleId}> ` : "";
 
+  const lines = [`**${A.name}** vs **${B.name}**`, `**Raison** : ${reason}`];
+  if (by) lines.push(`**Signalé par** : <@${by}>`);
+  lines.push(`**Scores déclarés** — ${A.name} : ${fmt(ra)} · ${B.name} : ${fmt(rb)}`);
+  if (files) lines.push(`📎 ${files} capture(s) jointe(s)`);
   const embed = {
     title: "🚨 Litige / Match bloqué",
     color: 0xff4d5e,
-    description: `**${A.name}** vs **${B.name}**\n**Raison** : ${reason}\n**Scores déclarés** — ${A.name} : ${fmt(ra)} · ${B.name} : ${fmt(rb)}`,
+    description: lines.join("\n").slice(0, 4096),
   };
+  if (imageName) embed.image = { url: `attachment://${imageName}` };
   const row = {
     type: 1,
     components: [

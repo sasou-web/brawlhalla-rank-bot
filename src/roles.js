@@ -18,7 +18,7 @@ import {
 } from "./config.js";
 import { getAllLinks } from "./store.js";
 
-// Tous les noms de roles geres par le bot (tiers 1v1/2v2 + top mondial + regions).
+// Tous les noms de roles geres par le bot (tiers 1v1/2v2/3v3 + top mondial + regions).
 export function managedRoleNames() {
   const names = new Set();
   for (const mode of Object.keys(ROLE_PREFIX)) {
@@ -221,7 +221,7 @@ export async function ensureServerLevelRoles(guild) {
 
 /**
  * Applique au membre l'ensemble de ses roles Brawlhalla calcules.
- * info = { tiers: {"1v1","2v2"}, level, globalRank }
+ * info = { tiers: {"1v1","2v2","3v3"}, level, globalRank }
  * Retire les autres roles geres qu'il ne devrait plus avoir.
  */
 export async function applyMemberRoles(member, info, rolesByName) {

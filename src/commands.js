@@ -15,7 +15,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import { TIERS } from "./config.js";
-import { getAllLinks } from "./store.js";
+import { getAllLinks, clearSeason3v3 } from "./store.js";
 import { getSettings, setSetting } from "./settings.js";
 import { seasonalRoleNames } from "./roles.js";
 import {
@@ -121,6 +121,9 @@ import {
   handleLinkCancel,
   handleLinkPanelButton,
   handleLinkPanelModal,
+  handleLinkProofButton,
+  handleLinkThreadButton,
+  handleLinkProofModal,
   handleApprove,
   handleReject,
   handleForcelink,
@@ -228,6 +231,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("gw")) return handleGiveawayModal(interaction, ctx);
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
   if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
+  if (interaction.customId.startsWith("lnkproof_modal:")) return handleLinkProofModal(interaction, ctx);
   if (!interaction.customId.startsWith("rm:")) return;
   // Refus de liaison : revérifié à l'envoi (validateur destitué entre-temps, customId forgé).
   if (!(await isReviewer(interaction))) {
@@ -406,7 +410,10 @@ async function handleSeasonResetConfirm(interaction, ctx) {
     }
   }
 
-  // 3) Incrémente le numéro de saison.
+  // 3) Le pic 3v3 de la saison close ne doit pas compter pour le badge de la suivante.
+  await clearSeason3v3();
+
+  // 4) Incrémente le numéro de saison.
   await setSetting("season", season + 1);
 
   await logAudit(
@@ -425,7 +432,7 @@ async function handleSeasonResetConfirm(interaction, ctx) {
 
 // ---------- /refresh (admin) ----------
 
-// Resynchronise TOUS les membres lies : redistribue les roles de rank manquants (1v1 + 2v2),
+// Resynchronise TOUS les membres lies : redistribue les roles de rank manquants (1v1, 2v2, 3v3),
 // corrige ceux retires par erreur, puis met a jour le role "n°1 du serveur". Renvoie un bilan.
 async function refreshAllMembers(guild, ctx) {
   return syncAllMembers(guild, ctx?.rolesByName ?? null);
@@ -464,7 +471,7 @@ async function handleAdminRefreshButton(interaction, ctx) {
       const { ok, fail } = await refreshAllMembers(interaction.guild, ctx);
       const summary =
         `✅ Actualisation des rôles terminée : **${ok}** synchronisé(s), **${fail}** échec(s) sur **${total}** lié(s). ` +
-        "Les rôles de rank manquants (1v1 et 2v2) ont été redistribués.";
+        "Les rôles de rank manquants (1v1, 2v2 et 3v3) ont été redistribués.";
       await logAudit(interaction.guild, `🔄 <@${interaction.user.id}> — ${summary}`);
       await interaction.editReply(summary).catch(() => {}); // best-effort si l'interaction a expiré
     } catch (err) {
@@ -534,7 +541,7 @@ async function handleSetup(interaction, ctx) {
   return interaction.followUp({
     content:
       "🔄 **Resynchroniser les rôles de rank**\n" +
-      "Redistribue à tous les membres liés leurs rôles 1v1 **et** 2v2, corrige ceux retirés par " +
+      "Redistribue à tous les membres liés leurs rôles 1v1, 2v2 **et** 3v3, corrige ceux retirés par " +
       "erreur, et met à jour le rôle « n°1 du serveur ». À lancer après un incident d'API ou pour " +
       "rattraper les rôles manquants. Peut prendre un moment selon le nombre de membres.",
     components: [refreshRow],
@@ -667,6 +674,8 @@ async function routeButton(interaction, ctx) {
   if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);
   if (id.startsWith("lnkok:")) return handleLinkConfirm(interaction, ctx);
   if (id.startsWith("lnkno:")) return handleLinkCancel(interaction, ctx);
+  if (id.startsWith("lnkproof:")) return handleLinkProofButton(interaction, ctx);
+  if (id.startsWith("lnkthread:")) return handleLinkThreadButton(interaction, ctx);
   if (id.startsWith("profpick:")) return handleProfilePick(interaction);
   if (id.startsWith("prof:")) return handleProfileNav(interaction);
   if (id.startsWith("ap:")) return handleApprove(interaction, ctx);
