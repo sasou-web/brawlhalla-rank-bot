@@ -415,4 +415,23 @@ export const commandsData = [
     )
     .addStringOption((o) => o.setName("message").setDescription("Un mot pour tes futurs coéquipiers.").setMaxLength(200).setRequired(false))
     .toJSON(),
+  // ---------- Ladder interne (défis 1v1, Elo du serveur) ----------
+  new SlashCommandBuilder()
+    .setName("defi")
+    .setDescription("Défie un membre en 1v1 pour le ladder du serveur (Elo interne).")
+    .addUserOption((o) => o.setName("joueur").setDescription("Le membre à défier.").setRequired(true))
+    .addIntegerOption((o) =>
+      o
+        .setName("bo")
+        .setDescription("Format du défi (défaut : BO3).")
+        .addChoices({ name: "BO1", value: 1 }, { name: "BO3", value: 3 }, { name: "BO5", value: 5 })
+        .setRequired(false),
+    )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("ladder")
+    .setDescription("Classement du ladder 1v1 du serveur (ou les stats d'un joueur).")
+    .addBooleanOption((o) => o.setName("moi").setDescription("Afficher plutôt ta position et tes derniers matchs.").setRequired(false))
+    .addUserOption((o) => o.setName("membre").setDescription("Afficher la position et les derniers matchs de ce membre.").setRequired(false))
+    .toJSON(),
 ];

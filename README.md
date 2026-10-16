@@ -45,6 +45,7 @@ npm start              # demarre le bot
 - `/leaderboard [mode] [région]` — top 10 du classement
 - `/top` — classement 1v1 des membres liés du serveur
 - `/guilde` — guilde Brawlhalla du serveur : stats, meilleurs contributeurs (configurée dans le dashboard › Communauté › Guilde)
+- `/defi joueur:@x [bo:1|3|5]` — défi 1v1 classé au ladder interne · `/ladder [moi|membre]` — top 10 Elo, ou position et 5 derniers défis (voir « Ladder interne »)
 - `/versus` — compare deux joueurs · `/progression` — courbe du rating · `/carte` — carte profil image
 - `/niveau` · `/classement-niveaux` · `/leaderboard-xp` — XP et niveaux du serveur
 - `/achievements [membre]` — succès débloqués (lié, rank, niveau, clips…)
@@ -95,6 +96,17 @@ Dashboard › Événements › Tournois › **Récurrents** : un modèle (ex. «
 - **Automatique** : le bot ouvre les inscriptions X h avant (panneau publié, annonce), lance le check-in X min avant, puis le bracket à l'heure dite s'il y a au moins 2 joueurs prêts ; sinon il alerte le staff, qui décide. Le staff ne gère que les litiges et l'archivage.
 - **Événement Discord** : un événement planifié par occurrence, visible en haut du serveur avec rappel natif ; il est fermé à l'archivage. Permission du bot requise : **« Créer des événements »** (le dashboard signale si elle manque ; sans elle, le tournoi s'ouvre quand même).
 - **Sécurités** : un seul tournoi à la fois (un modèle ne s'ouvre pas si un tournoi existe déjà : alerte staff et créneau suivant), deux modèles qui se chevauchent sont refusés, aucune action jouée deux fois (même après un redémarrage). « Ouvrir maintenant » force l'ouverture du prochain tournoi pour tester.
+
+## Ladder interne
+
+Dashboard › Communauté › **Ladder**, **désactivé par défaut**. Classement Elo du serveur, indépendant du rating Brawlhalla.
+
+- **Défi** : `/defi` publie une carte dans le salon du ladder ; seul le joueur défié accepte ou refuse (expiration après 24 h). La carte devient le scoreboard : un clic par manche gagnée, ↩️ pour corriger la dernière, ⚠️ pour un litige (raison + captures).
+- **Validation** : au score final (premier à ⌈bo/2⌉), le **perdant** confirme ; sans réponse, le résultat est validé automatiquement après `autoConfirmHours` (12 h par défaut, 0 = le staff tranche). L'Elo (K = 32, départ 1000) ne bouge qu'à la validation. Annonce « ⚔️ @a bat @b 2-1 (+14 / -14) — #3 du ladder » et rôle **🥇 Ladder #1** au leader.
+- **Litige** : alerte dans le salon staff avec boutons « Victoire A / B » et « Annuler » (confirmation en deux temps), aussi tranchable depuis le dashboard ; chaque décision va au journal d'audit.
+- **Anti-abus** : un défi à la fois par paire, `maxPerDayPerPair` défis par paire sur 24 h, 10 min entre deux défis d'un même joueur, comptes liés exigés (`requireLink`).
+- **Saisons** : remise à zéro mensuelle optionnelle (`resetDay`, heure de Paris) ou manuelle depuis le dashboard : top 10 archivé, podium annoncé, Elo remis au départ.
+- **Permissions du bot** : écrire, intégrer des liens et joindre des fichiers dans le salon du ladder et le salon d'alerte ; « Gérer les rôles » pour 🥇 Ladder #1.
 
 ## Combos : apprendre et progresser
 

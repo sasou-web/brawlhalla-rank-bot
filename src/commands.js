@@ -110,6 +110,7 @@ import { handleTimeout } from "./commands/moderation.js";
 import { handleDevineTop } from "./commands/guesstop.js";
 import { handleGuilde, handleGuildButton } from "./commands/guild.js";
 import { handleLfg, handleLfgButton } from "./commands/lfg.js";
+import { handleDefi, handleLadder, handleLadderButton, handleLadderModal } from "./commands/ladder.js";
 import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
@@ -221,6 +222,8 @@ export async function handleChatInput(interaction, ctx) {
     case "caster": return handleCaster(interaction, ctx);
     case "guilde": return handleGuilde(interaction, ctx);
     case "lfg": return handleLfg(interaction, ctx);
+    case "defi": return handleDefi(interaction);
+    case "ladder": return handleLadder(interaction);
   }
 }
 
@@ -238,6 +241,7 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
   if (interaction.customId.startsWith("lnkproof_modal:")) return handleLinkProofModal(interaction, ctx);
   if (interaction.customId.startsWith("rep_modal:")) return handleReportModal(interaction);
+  if (interaction.customId.startsWith("lad_dispute_modal:")) return handleLadderModal(interaction);
   if (!interaction.customId.startsWith("rm:")) return;
   // Refus de liaison : revérifié à l'envoi (validateur destitué entre-temps, customId forgé).
   if (!(await isReviewer(interaction))) {
@@ -677,6 +681,7 @@ async function routeButton(interaction, ctx) {
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("gld_")) return handleGuildButton(interaction, ctx);
   if (id.startsWith("lfg_")) return handleLfgButton(interaction, ctx);
+  if (id.startsWith("lad_")) return handleLadderButton(interaction);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);
   if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);

@@ -42,6 +42,7 @@ import { tickReminders } from "./reminders.js";
 import { removeOpenTicket } from "./tickets.js";
 import { syncGuild } from "./guild.js";
 import { tickLfg } from "./lfg.js";
+import { tickLadder } from "./commands/ladder.js";
 
 const client = new Client({
   intents: [
@@ -234,6 +235,15 @@ async function onReady(c) {
   // Automatisation des matchs de tournoi chaque minute : création des salons, alerte staff
   // (litige, aucune manche jouée après `alertMinutes`), nettoyage. Aucun forfait automatique.
   every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
+
+  // Ladder (défis 1v1) chaque minute : expirations, validations automatiques, saison mensuelle.
+  every(
+    () =>
+      tickLadder(client, guild)
+        .then((r) => (r.expired || r.confirmed) && console.log(`Ladder : ${r.confirmed} défi(s) validé(s), ${r.expired} expiré(s).`))
+        .catch((err) => console.warn("Ladder (boucle) :", err.message)),
+    60 * 1000,
+  );
 
   // Rappels automatiques (vocaux privés, règles...) postés dans un salon, chaque minute
   // on vérifie si l'intervalle configuré est écoulé.

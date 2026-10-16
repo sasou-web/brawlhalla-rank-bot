@@ -44,7 +44,7 @@ let idSeq = 1000;
 const nextId = () => String(++idSeq);
 const ch = (name) => ({ id: nextId(), name });
 
-const text = ["général", "annonces", "lier-mon-compte", "clips", "devine-ton-rang", "validation", "audit", "alertes", "succès", "inscriptions-tournoi", "tournoi-annonces", "tiktok", "bienvenue", "au-revoir", "lol-discussion", "support", "hall-of-fame", "rappels", "combos"].map(ch);
+const text = ["général", "annonces", "lier-mon-compte", "clips", "devine-ton-rang", "validation", "audit", "alertes", "succès", "inscriptions-tournoi", "tournoi-annonces", "tiktok", "bienvenue", "au-revoir", "lol-discussion", "support", "hall-of-fame", "rappels", "combos", "ladder"].map(ch);
 const voice = ["Créer un vocal", "Général", "Tournoi", "Chill"].map(ch);
 const category = ["Communauté", "Vocaux", "Tickets", "Tournoi", "Vocaux rank"].map(ch);
 const announcement = ["news"].map(ch);
@@ -150,6 +150,18 @@ function baseConfig() {
     guessrank: { enabled: false, channelIds: [], reactions: [], ignoreBots: true, ignoreReplies: true, requireVideo: true, deleteNonVideo: false, extraDomains: [], singleVote: true, scoringEnabled: false, revealDelayHours: 24, pointsExact: 3, pointsNear: 1, truthMode: "1v1" },
     guild: { brawlhallaGuildId: scenario === "empty" ? "" : "48213", roleId: scenario === "empty" ? "" : roleId("Staff"), announceChannelId: byName(text, "annonces"), announceJoins: true },
     lfg: { enabled: scenario !== "empty", channelId: scenario === "empty" ? "" : byName(text, "annonces"), ttlMinutes: 60, requireLink: true, maxTierGap: 2, createVoice: false, voiceCategoryId: "" },
+    ladder: {
+      enabled: scenario !== "empty",
+      channelId: scenario === "empty" ? "" : byName(text, "ladder"),
+      requireLink: true,
+      kFactor: 32,
+      startElo: 1000,
+      maxPerDayPerPair: 3,
+      autoConfirmHours: 12,
+      resetDay: scenario === "empty" ? 0 : 1,
+      modRoleId: scenario === "empty" ? "" : roleId("Staff"),
+      modAlertChannelId: scenario === "empty" ? "" : byName(text, "alertes"),
+    },
     tempvoice: { enabled: true, categoryId: "", hubs: { [byName(voice, "Créer un vocal")]: { nameTemplate: "{user}", userLimit: 0 } } },
     reminders: { enabled: false, channelId: byName(text, "rappels"), intervalMinutes: 120, mode: "rotate", messages: ["Vocaux privés : rejoins « Créer un vocal ».", "Lie ton compte Brawlhalla avec /lier pour obtenir tes rôles de rank."] },
     linkpanel: {
@@ -372,7 +384,84 @@ function makeState() {
     greeted: 14,
     wordfilterLog: empty ? [] : fakeFilterLog(now),
     tiktok: empty ? emptyTikTokState() : fakeTikTokState(now),
+    ladder: fakeLadder(now, empty),
   };
+}
+
+// Ladder : joueurs classés, défis à chaque étape (litige, à confirmer, en cours) et une saison archivée.
+function fakeLadder(now, empty) {
+  const H = 3600000;
+  const ladderChannel = byName(text, "ladder");
+  const names = ["Nox", "Kaya", "Sasou", "Ryū", "Mirage", "Zeph", "Lune", "Tetsu", "Orion", "Vex", "Ash"];
+  const uid = (name) => String(7000 + names.indexOf(name));
+  const match = (id, a, b, status, extra = {}) => ({
+    id: "lad" + id,
+    aId: uid(a),
+    bId: uid(b),
+    aName: a,
+    bName: b,
+    bestOf: 3,
+    scoreA: 0,
+    scoreB: 0,
+    status,
+    createdAt: now - 2 * H,
+    acceptedAt: null,
+    reportedAt: null,
+    resolvedAt: null,
+    resolvedBy: null,
+    winnerId: null,
+    eloDelta: 0,
+    autoConfirmAt: null,
+    dispute: null,
+    channelId: ladderChannel,
+    messageId: "m" + nextId(),
+    ...extra,
+  });
+  if (empty) return { season: 1, startedAt: null, ranking: [], matches: [], recent: [], seasons: [] };
+  const ranking = [
+    ["Nox", 1268, 14, 4, 5],
+    ["Kaya", 1187, 11, 5, 2],
+    ["Mirage", 1104, 8, 6, -1],
+    ["Sasou", 1061, 9, 8, 1],
+    ["Ryū", 1012, 6, 6, 0],
+    ["Zeph", 979, 5, 7, -2],
+    ["Lune", 951, 4, 7, 1],
+    ["Tetsu", 918, 3, 8, -3],
+    ["Orion", 887, 2, 9, -4],
+  ].map(([name, elo, wins, losses, streak], i) => ({ userId: uid(name), name, elo, wins, losses, streak, played: wins + losses, updatedAt: now - (i + 1) * 5 * H }));
+  const matches = [
+    match(1, "Sasou", "Mirage", "disputed", { scoreA: 2, scoreB: 1, acceptedAt: now - 3 * H, reportedAt: now - H, dispute: { reason: "Il a quitté la 3e manche avant la fin, la partie n'a pas compté côté jeu.", by: uid("Mirage"), byName: "Mirage", files: 2, at: now - 50 * 60000 } }),
+    match(2, "Zeph", "Lune", "reported", { scoreA: 1, scoreB: 2, acceptedAt: now - 2 * H, reportedAt: now - 3 * H, autoConfirmAt: now + 9 * H }),
+    match(3, "Tetsu", "Orion", "accepted", { bestOf: 5, scoreA: 1, scoreB: 1, acceptedAt: now - 40 * 60000 }),
+    match(4, "Vex", "Kaya", "pending", { bestOf: 1, createdAt: now - 25 * 60000 }),
+  ];
+  const done = (id, a, b, sa, sb, delta, hoursAgo, extra = {}) =>
+    match(id, a, b, "confirmed", { scoreA: sa, scoreB: sb, winnerId: sa > sb ? uid(a) : uid(b), eloDelta: delta, resolvedAt: now - hoursAgo * H, resolvedBy: sa > sb ? uid(b) : uid(a), ...extra });
+  const recent = [
+    done(10, "Nox", "Kaya", 2, 1, 18, 4),
+    done(11, "Ryū", "Mirage", 0, 2, 14, 9, { resolvedBy: null }),
+    done(12, "Sasou", "Orion", 3, 2, 9, 20, { bestOf: 5 }),
+    done(13, "Lune", "Nox", 2, 0, 27, 30, { status: "resolved", resolvedBy: "staff" }),
+    done(14, "Kaya", "Zeph", 1, 0, 12, 52, { bestOf: 1 }),
+  ];
+  const seasons = [
+    {
+      season: 1,
+      startedAt: now - 62 * 86400000,
+      endedAt: now - 31 * 86400000,
+      by: "auto",
+      players: 12,
+      matches: 47,
+      top: [
+        ["Kaya", 1302, 19, 6],
+        ["Nox", 1255, 17, 7],
+        ["Ash", 1140, 10, 6],
+        ["Sasou", 1066, 9, 8],
+        ["Mirage", 1021, 7, 7],
+      ].map(([name, elo, wins, losses], i) => ({ position: i + 1, userId: uid(name), name, elo, wins, losses })),
+    },
+  ];
+  return { season: 2, startedAt: now - 31 * 86400000, ranking, matches, recent, seasons };
 }
 
 const LOG_MSGS = [
@@ -536,7 +625,7 @@ app.use("/api", async (req, res, next) => {
   if (req.path === "/me") return next();
   if (loggedOut || scenario === "loggedout" || scenario === "expired") return res.status(401).json({ error: "non authentifié" });
   if (scenario === "bootfail" && req.path === "/guild") return res.status(500).json({ error: "Discord API: Service Unavailable" });
-  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose", "/guilde/status", "/tournament/schedules"].includes(req.path)) {
+  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose", "/guilde/status", "/tournament/schedules", "/ladder/status"].includes(req.path)) {
     return res.status(500).json({ error: "Erreur interne simulée" });
   }
   next();
@@ -677,6 +766,74 @@ function mockGuildStatus() {
   };
 }
 app.get("/api/guilde/status", (req, res) => res.json(mockGuildStatus()));
+
+// ---- Ladder ----
+function mockLadderStatus() {
+  const L = state.ladder;
+  const ranking = L.ranking
+    .filter((r) => r.played > 0)
+    .sort((x, y) => y.elo - x.elo || y.wins - x.wins || x.losses - y.losses)
+    .map((r, i) => ({ ...r, position: i + 1 }));
+  const by = (st) => L.matches.filter((m) => m.status === st);
+  const active = [...by("pending"), ...by("accepted")];
+  return {
+    season: { number: L.season, startedAt: L.startedAt },
+    stats: { ranked: ranking.length, validated: L.recent.length, active: active.length, waiting: by("reported").length, disputes: by("disputed").length },
+    ranking,
+    disputes: by("disputed"),
+    waiting: by("reported"),
+    active,
+    recent: L.recent,
+    seasons: L.seasons,
+  };
+}
+function mockLadderPlayer(m, side) {
+  const L = state.ladder;
+  const id = side === "a" ? m.aId : m.bId;
+  let row = L.ranking.find((r) => r.userId === id);
+  if (!row) {
+    row = { userId: id, name: side === "a" ? m.aName : m.bName, elo: state.config.ladder.startElo, wins: 0, losses: 0, streak: 0, played: 0, updatedAt: 0 };
+    L.ranking.push(row);
+  }
+  return row;
+}
+app.get("/api/ladder/status", (req, res) => res.json(mockLadderStatus()));
+app.post("/api/ladder/resolve", (req, res) => {
+  const { matchId, winner } = req.body || {};
+  if (winner !== "a" && winner !== "b") return fail(res, "Vainqueur invalide.");
+  const L = state.ladder;
+  const m = L.matches.find((x) => x.id === matchId);
+  if (!m) return fail(res, "Défi introuvable.", 404);
+  if (m.status !== "disputed" && m.status !== "reported") return fail(res, "Ce défi n'attend pas de décision.", 409);
+  const w = mockLadderPlayer(m, winner);
+  const l = mockLadderPlayer(m, winner === "a" ? "b" : "a");
+  const k = state.config.ladder.kFactor;
+  const delta = Math.min(k, Math.max(1, Math.round(k * (1 - 1 / (1 + 10 ** ((l.elo - w.elo) / 400))))));
+  const now = Date.now();
+  Object.assign(w, { elo: w.elo + delta, wins: w.wins + 1, played: w.played + 1, streak: w.streak > 0 ? w.streak + 1 : 1, updatedAt: now });
+  Object.assign(l, { elo: l.elo - delta, losses: l.losses + 1, played: l.played + 1, streak: l.streak < 0 ? l.streak - 1 : -1, updatedAt: now });
+  const need = Math.ceil(m.bestOf / 2);
+  const lostGames = Math.min(need - 1, winner === "a" ? m.scoreB : m.scoreA);
+  Object.assign(m, { status: "resolved", winnerId: w.userId, eloDelta: delta, resolvedAt: now, resolvedBy: "staff", scoreA: winner === "a" ? need : lostGames, scoreB: winner === "b" ? need : lostGames });
+  L.matches = L.matches.filter((x) => x !== m);
+  L.recent.unshift(m);
+  setTimeout(() => ok(res, { delta, winnerId: w.userId }), 400);
+});
+app.post("/api/ladder/void", (req, res) => {
+  const L = state.ladder;
+  const m = L.matches.find((x) => x.id === req.body?.matchId);
+  if (!m) return fail(res, "Défi introuvable.", 404);
+  L.matches = L.matches.filter((x) => x !== m);
+  ok(res);
+});
+app.post("/api/ladder/reset", (req, res) => {
+  const L = state.ladder;
+  const s = mockLadderStatus();
+  const archive = { season: L.season, startedAt: L.startedAt, endedAt: Date.now(), by: "dashboard", players: s.ranking.length, matches: L.recent.length, top: s.ranking.slice(0, 10).map(({ position, userId, name, elo, wins, losses }) => ({ position, userId, name, elo, wins, losses })) };
+  L.seasons.unshift(archive);
+  Object.assign(L, { season: L.season + 1, startedAt: Date.now(), ranking: [], recent: [] });
+  setTimeout(() => ok(res, { archive }), 500);
+});
 app.post("/api/guilde/sync", (req, res) => {
   if (!state.config.guild.brawlhallaGuildId) return fail(res, "Indique d'abord l'ID de la guilde.");
   setTimeout(() => ok(res, { added: 1, removed: 0, joined: 1, left: 0, status: mockGuildStatus() }), 600);

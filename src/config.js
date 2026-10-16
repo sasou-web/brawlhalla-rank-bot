@@ -295,6 +295,11 @@ export function regionFlag(region) {
 export const TOP_SERVER_ROLE_NAME = "👑 N°1 du serveur";
 export const TOP_SERVER_ROLE_COLOR = 0xffc300;
 
+// Role "n°1 du ladder" : leader du classement interne par defis 1v1 (src/ladder.js). Gere a
+// part comme le n°1 du serveur : recalcule apres chaque defi valide et a chaque saison.
+export const LADDER_TOP_ROLE_NAME = "🥇 Ladder #1";
+export const LADDER_TOP_ROLE_COLOR = 0xe67e22;
+
 // Role "main legende" : un role par legende, cree A LA DEMANDE (prefixe commun), attribue
 // a la legende la plus jouee du membre. Gere a part (echange a chaque synchro).
 export const MAIN_LEGEND_ROLE_PREFIX = "🗡️ Main: ";

@@ -122,6 +122,18 @@ const NAV_GROUPS = [
       },
       { id: "guild", label: "Guilde", icon: "shield", keywords: "guilde brawlhalla clan membres rôle", render: (ctx) => renderGuild(ctx) },
       { id: "lfg", label: "LFG", icon: "users", keywords: "lfg coéquipier partenaire équipe 2v2 3v3 recherche", render: (ctx) => renderLfg(ctx) },
+      {
+        id: "ladder",
+        label: "Ladder",
+        icon: "trending-up",
+        keywords: "ladder défi 1v1 elo classement saison litige",
+        tabs: [
+          { id: "live", label: "Suivi" },
+          { id: "settings", label: "Réglages" },
+          { id: "seasons", label: "Saisons" },
+        ],
+        render: (ctx) => renderLadder(ctx),
+      },
       { id: "levels", label: "Niveaux", icon: "star", keywords: "xp récompenses paliers", render: (ctx) => renderLevels(ctx) },
       {
         id: "welcome",
@@ -208,6 +220,9 @@ function navAttention(id) {
   if (id === "tournament" && ATTN.disputes > 0) {
     return el("span", { class: "badge badge-warn", "aria-label": plural(ATTN.disputes, "litige à trancher", "litiges à trancher") }, String(ATTN.disputes));
   }
+  if (id === "ladder" && ATTN.ladderDisputes > 0) {
+    return el("span", { class: "badge badge-warn", "aria-label": plural(ATTN.ladderDisputes, "litige à trancher", "litiges à trancher") }, String(ATTN.ladderDisputes));
+  }
   if (id === "tiktok" && (ATTN.tiktok === "degraded" || ATTN.tiktok === "down")) {
     const label = ATTN.tiktok === "down" ? "TikTok : aucune source lisible" : "TikTok : surveillance dégradée";
     return el("span", { class: "nav-dot" + (ATTN.tiktok === "down" ? " danger" : ""), role: "img", "aria-label": label, "data-tip": label, "data-tip-pos": "right" });
@@ -234,11 +249,17 @@ function apiHealthLevel(m) {
 
 // Indicateurs de navigation chargés en arrière-plan au démarrage.
 async function loadAttention() {
-  const [t, m, tt] = await Promise.allSettled([api("/api/tournament"), api("/api/metrics"), api("/api/tiktok/status")]);
+  const [t, m, tt, l] = await Promise.allSettled([
+    api("/api/tournament"),
+    api("/api/metrics"),
+    api("/api/tiktok/status"),
+    CONFIG.ladder?.enabled ? api("/api/ladder/status") : Promise.resolve(null),
+  ]);
   const patch = {};
   if (t.status === "fulfilled") patch.disputes = t.value ? Object.values(t.value.matches || {}).filter((x) => x.status === "dispute").length : 0;
   if (m.status === "fulfilled") patch.api = apiHealthLevel(m.value);
   if (tt.status === "fulfilled") patch.tiktok = tiktokHealth(CONFIG.tiktok, tt.value).level;
+  if (l.status === "fulfilled") patch.ladderDisputes = l.value ? l.value.stats.disputes : 0;
   setAttention(patch);
 }
 
