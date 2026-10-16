@@ -41,6 +41,7 @@ import { endDueGiveaways } from "./giveaway.js";
 import { tickReminders } from "./reminders.js";
 import { removeOpenTicket } from "./tickets.js";
 import { syncGuild } from "./guild.js";
+import { tickLfg } from "./lfg.js";
 
 const client = new Client({
   intents: [
@@ -237,6 +238,9 @@ async function onReady(c) {
   // Rappels automatiques (vocaux privés, règles...) postés dans un salon, chaque minute
   // on vérifie si l'intervalle configuré est écoulé.
   every(() => tickReminders(client, guild.id).catch(() => {}), 60 * 1000);
+
+  // LFG : expiration des annonces, auteurs partis, cartes terminées retirées après 24 h.
+  every(() => tickLfg(client, guild).catch((err) => console.warn("Tick LFG :", err.message)), 60 * 1000);
 
   // Clôture des giveaways arrivés à échéance (tirage des gagnants) chaque minute.
   every(

@@ -120,6 +120,7 @@ const NAV_GROUPS = [
         render: (ctx) => renderLinking(ctx),
       },
       { id: "guild", label: "Guilde", icon: "shield", keywords: "guilde brawlhalla clan membres rôle", render: (ctx) => renderGuild(ctx) },
+      { id: "lfg", label: "LFG", icon: "users", keywords: "lfg coéquipier partenaire équipe 2v2 3v3 recherche", render: (ctx) => renderLfg(ctx) },
       { id: "levels", label: "Niveaux", icon: "star", keywords: "xp récompenses paliers", render: (ctx) => renderLevels(ctx) },
       {
         id: "welcome",

@@ -23,6 +23,7 @@ const MODULES = [
   { section: "tickets", label: "Tickets", page: "tickets" },
   { section: "giveaway", label: "Giveaways", page: "giveaway" },
   { section: "tempvoice", label: "Vocaux temporaires", page: "voice", tab: "temp" },
+  { section: "lfg", label: "LFG", page: "lfg" },
   { section: "reminders", label: "Rappels", page: "reminders" },
   { section: "clips", label: "Réactions aux clips", page: "clips", tab: "reactions" },
   { section: "guessrank", label: "Devine ton rang", page: "clips", tab: "guessrank" },

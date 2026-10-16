@@ -747,6 +747,8 @@ export async function handleHelp(interaction, ctx) {
       "`/niveau` · `/classement-niveaux` — ton **XP** et le top serveur\n" +
       "`/devine-top` — les meilleurs devins de **Devine ton rang**",
     SEP,
+    "### 🤝 Coéquipiers\n`/lfg` — cherche un **partenaire 2v2** ou une **équipe 3v3** avec ton rank vérifié",
+    SEP,
     "### 🎟️ Tournoi\n`/bracket` — affiche le **bracket** du tournoi en cours",
     SEP,
     "### 🖱️ Clic droit\n" +

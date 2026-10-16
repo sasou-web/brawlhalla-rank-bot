@@ -147,6 +147,7 @@ function baseConfig() {
     clips: { enabled: true, channelIds: [byName(text, "clips")], reactions: ["🔥", "👍", "<:xk:1>"], requireVideo: true, deleteNonVideo: false, ignoreBots: true, ignoreReplies: true, pinThreshold: 10, extraDomains: ["catbox.moe"] },
     guessrank: { enabled: false, channelIds: [], reactions: [], ignoreBots: true, ignoreReplies: true, requireVideo: true, deleteNonVideo: false, extraDomains: [], singleVote: true, scoringEnabled: false, revealDelayHours: 24, pointsExact: 3, pointsNear: 1, truthMode: "1v1" },
     guild: { brawlhallaGuildId: scenario === "empty" ? "" : "48213", roleId: scenario === "empty" ? "" : roleId("Staff"), announceChannelId: byName(text, "annonces"), announceJoins: true },
+    lfg: { enabled: scenario !== "empty", channelId: scenario === "empty" ? "" : byName(text, "annonces"), ttlMinutes: 60, requireLink: true, maxTierGap: 2, createVoice: false, voiceCategoryId: "" },
     tempvoice: { enabled: true, categoryId: "", hubs: { [byName(voice, "Créer un vocal")]: { nameTemplate: "{user}", userLimit: 0 } } },
     reminders: { enabled: false, channelId: byName(text, "rappels"), intervalMinutes: 120, mode: "rotate", messages: ["Vocaux privés : rejoins « Créer un vocal ».", "Lie ton compte Brawlhalla avec /lier pour obtenir tes rôles de rank."] },
     linkpanel: {

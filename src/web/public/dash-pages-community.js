@@ -333,6 +333,41 @@ function renderGuild(ctx) {
   ctx.interval(load, 60000);
 }
 
+// ═══════════════════ LFG ═══════════════════
+function renderLfg(ctx) {
+  const f = configForm("lfg");
+  const c = f.data;
+  ctx.root.append(
+    pageHeader({
+      title: "LFG",
+      description: "/lfg publie une annonce « cherche partenaire 2v2 / équipe 3v3 » avec le rank vérifié de l'auteur, des boutons pour rejoindre et une expiration automatique.",
+      actions: [moduleSwitch("lfg", "LFG")],
+    }),
+    groups(
+      settingsGroup(
+        "Annonces",
+        "Une annonce active par membre, 2 minutes entre deux publications. Le message libre passe par le filtre de mots.",
+        field("Salon LFG", channelPicker(c, "channelId", "text"), { help: "Les cartes y sont publiées. Le bot doit pouvoir y écrire. Salon supprimé : le module se désactive et le staff est alerté." }),
+        field("Durée d'une annonce", numberInput(c, "ttlMinutes", { min: 10, max: 1440, suffix: "min" }), { help: "Ensuite la carte passe en « Expirée », puis disparaît du salon 24 h plus tard." }),
+      ),
+      settingsGroup(
+        "Rank vérifié",
+        "Le rank affiché vient du compte lié (/lier), pas d'une déclaration du joueur.",
+        switchField("Exiger un compte lié", c, "requireLink", { help: "Désactivé : un membre non lié peut publier ou rejoindre, affiché « compte non lié »." }),
+        field("Écart de rank maximal", numberInput(c, "maxTierGap", { min: 0, max: 6, suffix: "paliers" }), {
+          help: "Écart entre le rank de l'auteur et celui de qui rejoint (Tin, Bronze, Silver, Gold, Platinum, Diamond, Valhallan). 6 : aucune limite.",
+        }),
+      ),
+      settingsGroup(
+        "Vocal d'équipe",
+        "Quand l'équipe est complète, un vocal temporaire peut être créé pour elle. Il disparaît quand il se vide.",
+        switchField("Créer un vocal à l'équipe complète", c, "createVoice"),
+        showWhen(field("Catégorie du vocal", channelPicker(c, "voiceCategoryId", "category", { noneLabel: "Celle du salon LFG" })), () => !!c.createVoice),
+      ),
+    ),
+  );
+}
+
 // ═══════════════════ Niveaux ═══════════════════
 const GAME_XP_MODE_LABELS = [
   ["1v1", "Ranked 1v1"],
