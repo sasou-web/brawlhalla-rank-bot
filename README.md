@@ -66,6 +66,7 @@ npm start              # demarre le bot
 - **Tiers** : `1v1 <tier>` et `2v2 <tier>` (Tin → Valhallan)
 - **Paliers de niveau** : `Niveau 25+`, `50+`, `75+`, `100+` (le plus haut atteint)
 - **Top mondial** : `Top 100 (1v1)` si le joueur est classé ≤ 100 en 1v1
+- **Top régional** : `Top 100 EU (1v1)` si le joueur est classé ≤ 100 dans la région du serveur (`HOME_REGION` du `.env`, défaut `EU`) ; entrée annoncée dans le salon d'annonces
 - **Validateur** : `🛡️ Valideur de Rank` (créé au démarrage)
 
 Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que les rôles **saisonniers** (tiers + Top), pas les paliers de niveau.
@@ -81,7 +82,7 @@ Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que le
 
 ## Engagement, saisons & observabilité
 
-- **Succès / achievements** : 13 succès débloquables (liaison, paliers de rank, Top 100, niveaux XP, clips postés, combos maîtrisés). Consultables via `/achievements`. Annoncés dans un salon dédié **sans ping** (configurable via `/setup-succes` ou le dashboard) — sinon silencieux.
+- **Succès / achievements** : succès débloquables (liaison, paliers de rank, Top 100 mondial et régional, niveaux XP, clips postés, combos maîtrisés). Consultables via `/achievements`. Annoncés dans un salon dédié **sans ping** (configurable via `/setup-succes` ou le dashboard) — sinon silencieux.
 - **Récap hebdo de progression** : une fois par semaine, le bot poste dans le salon d'annonces le top des plus gros gains de rating 1v1 sur 7 jours (basé sur l'historique).
 - **Badges de saison** : `/reset-saison` attribue à chaque membre lié un rôle **permanent** `🏅 S{n} {Tier}` (selon son meilleur tier) avant de retirer les rôles de rank, puis incrémente le numéro de saison. Ces badges ne sont jamais retirés.
 - **Fiabilité API** : métriques exposées via `/ping`, l'endpoint `/api/metrics` et un onglet dédié du dashboard (taux de succès, erreurs 429/5xx/réseau, cooldown, files de récupération, fraîcheur de l'index).
