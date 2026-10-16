@@ -109,6 +109,7 @@ import {
 import { handleTimeout } from "./commands/moderation.js";
 import { handleDevineTop } from "./commands/guesstop.js";
 import { handleGuilde, handleGuildButton } from "./commands/guild.js";
+import { handleLfg, handleLfgButton } from "./commands/lfg.js";
 import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
@@ -219,6 +220,7 @@ export async function handleChatInput(interaction, ctx) {
     case "bracket": return handleBracket(interaction, ctx);
     case "caster": return handleCaster(interaction, ctx);
     case "guilde": return handleGuilde(interaction, ctx);
+    case "lfg": return handleLfg(interaction, ctx);
   }
 }
 
@@ -674,6 +676,7 @@ async function routeButton(interaction, ctx) {
   if (id.startsWith("gw")) return handleGiveawayButton(interaction, ctx);
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("gld_")) return handleGuildButton(interaction, ctx);
+  if (id.startsWith("lfg_")) return handleLfgButton(interaction, ctx);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);
   if (id === "lnkp_open") return handleLinkPanelButton(interaction, ctx);

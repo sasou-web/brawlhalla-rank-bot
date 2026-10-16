@@ -95,22 +95,53 @@ function voiceControlPanel(ownerId) {
   };
 }
 
+// Donne au createur le controle de son salon et poste le panneau (best-effort : n'echoue pas la creation).
+function grantOwnerControls(channel, ownerId) {
+  channel.permissionOverwrites
+    .edit(ownerId, {
+      ManageChannels: true,
+      MoveMembers: true,
+      MuteMembers: true,
+    })
+    .catch(() => {});
+  channel.send(voiceControlPanel(ownerId)).catch(() => {});
+}
+
+// Creation simple (ne demande que "Gerer les salons"). Pas d'overwrite ici :
+// Discord refuse qu'un bot accorde une permission qu'il n'a pas -> echec total sinon.
+// Le salon est suivi comme temporaire : supprime quand il se vide (handleTempVoice).
+async function createRegisteredChannel(guild, { ownerId, name, userLimit, categoryId, reason }) {
+  const channel = await guild.channels.create({
+    name: String(name).slice(0, 100),
+    type: ChannelType.GuildVoice,
+    parent: categoryId || null,
+    userLimit: Math.min(99, Math.max(0, userLimit || 0)),
+    reason: reason || "Salon vocal temporaire",
+  });
+  await addTempChannel(guild.id, channel.id, ownerId);
+  return channel;
+}
+
+/**
+ * Vocal temporaire cree hors hub (ex. equipe LFG complete) : meme suivi et meme panneau de
+ * controle que les salons des hubs. Leve en cas d'echec de creation (l'appelant decide).
+ */
+export async function createTempChannelFor(guild, { ownerId, name, userLimit, categoryId, reason }) {
+  const channel = await createRegisteredChannel(guild, { ownerId, name, userLimit, categoryId, reason });
+  grantOwnerControls(channel, ownerId);
+  return channel;
+}
+
 async function createTempChannel(member, cfg, hubChannel, hub) {
   const guild = member.guild;
   const template = hub?.nameTemplate || "🎮 {user}";
-  const name = template.replace(/\{user\}/gi, member.displayName).slice(0, 100);
-  const parent = cfg.categoryId || hubChannel.parentId || null;
   try {
-    // Creation simple (ne demande que "Gerer les salons"). Pas d'overwrite ici :
-    // Discord refuse qu'un bot accorde une permission qu'il n'a pas -> echec total sinon.
-    const channel = await guild.channels.create({
-      name,
-      type: ChannelType.GuildVoice,
-      parent,
-      userLimit: Math.min(99, Math.max(0, hub?.userLimit || 0)),
-      reason: "Salon vocal temporaire",
+    const channel = await createRegisteredChannel(guild, {
+      ownerId: member.id,
+      name: template.replace(/\{user\}/gi, member.displayName),
+      userLimit: hub?.userLimit,
+      categoryId: cfg.categoryId || hubChannel.parentId,
     });
-    await addTempChannel(guild.id, channel.id, member.id);
     // Deplacement impossible (membre deja ressorti du hub, permission « Deplacer des membres »
     // manquante...) : le salon resterait vide sans jamais etre supprime -> on le retire aussitot.
     const moved = await member.voice
@@ -123,17 +154,7 @@ async function createTempChannel(member, cfg, hubChannel, hub) {
       return null;
     }
 
-    // Donne au createur le controle de son salon (best-effort : n'echoue pas la creation).
-    channel.permissionOverwrites
-      .edit(member.id, {
-        ManageChannels: true,
-        MoveMembers: true,
-        MuteMembers: true,
-      })
-      .catch(() => {});
-
-    // Poste le panneau de controle dans le chat integre du salon vocal (best-effort).
-    channel.send(voiceControlPanel(member.id)).catch(() => {});
+    grantOwnerControls(channel, member.id);
     return channel;
   } catch (err) {
     console.warn("Creation salon temporaire echouee :", err.message);

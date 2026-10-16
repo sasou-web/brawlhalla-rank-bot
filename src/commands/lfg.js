@@ -1,0 +1,171 @@
+import { PermissionFlagsBits } from "discord.js";
+import {
+  LFG_MODES,
+  LFG_COOLDOWN_MS,
+  LFG_TEXT_MAX,
+  getLfgConfig,
+  getPost,
+  findOpenPostByAuthor,
+  reservePost,
+  deletePost,
+  saveLfg,
+  canJoin,
+  joinPost,
+  leavePost,
+  closePost,
+  lfgCapacity,
+  memberTier,
+  memberRating,
+  buildLfgCard,
+} from "../lfg.js";
+import { getLink, getAllLinks } from "../store.js";
+import { getWordFilterConfig, checkWordFilterText } from "../wordfilter.js";
+import { createTempChannelFor } from "../voiceManager.js";
+import { checkCooldown, peekCooldown } from "./cooldowns.js";
+import { EPHEMERAL, logAudit } from "./shared.js";
+
+const postUrl = (guildId, post) => `https://discord.com/channels/${guildId}/${post.channelId}/${post.messageId}`;
+
+export const JOIN_REFUSALS = {
+  closed: "Cette annonce n'est plus ouverte.",
+  author: "C'est ton annonce : attends qu'on te rejoigne.",
+  already: "Tu fais déjà partie de cette équipe.",
+  full: "L'équipe est déjà complète.",
+  not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : le LFG vérifie le rank de chacun.",
+  unranked: "Tu n'as pas de rank dans ce mode cette saison : l'écart de rank ne peut pas être vérifié.",
+  tier_gap: "L'écart de rank avec l'auteur est trop grand pour cette annonce.",
+};
+
+// ---------- /lfg ----------
+
+export async function handleLfg(interaction) {
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+  const cfg = await getLfgConfig(guildId);
+  if (!cfg.enabled || !cfg.channelId) {
+    return interaction.reply({ content: "Le LFG n'est pas activé sur ce serveur.", flags: EPHEMERAL });
+  }
+  const wait = peekCooldown("lfg", userId, LFG_COOLDOWN_MS);
+  if (wait > 0) {
+    return interaction.reply({ content: `⏳ Doucement ! Tu pourras republier dans **${Math.ceil(wait / 1000)}s**.`, flags: EPHEMERAL });
+  }
+  const existing = findOpenPostByAuthor(guildId, userId);
+  if (existing) {
+    const where = existing.messageId ? ` : ${postUrl(guildId, existing)}` : ".";
+    return interaction.reply({ content: `Tu as déjà une annonce active${where}\nFerme-la avant d'en publier une autre.`, flags: EPHEMERAL });
+  }
+  const link = await getLink(userId);
+  if (cfg.requireLink && !link) {
+    return interaction.reply({ content: JOIN_REFUSALS.not_linked, flags: EPHEMERAL });
+  }
+
+  const mode = interaction.options.getString("mode", true);
+  if (!LFG_MODES[mode]) return interaction.reply({ content: "Mode inconnu.", flags: EPHEMERAL });
+  const region = interaction.options.getString("region") ?? link?.region ?? "";
+  const text = (interaction.options.getString("message") ?? "").replace(/\s+/g, " ").trim().slice(0, LFG_TEXT_MAX);
+  if (text) {
+    const wf = await getWordFilterConfig(guildId);
+    if (wf.enabled && checkWordFilterText(text, wf).matches.length) {
+      return interaction.reply({ content: "Ton message contient un terme interdit sur ce serveur. Reformule-le.", flags: EPHEMERAL });
+    }
+  }
+
+  await interaction.deferReply({ flags: EPHEMERAL });
+  const channel = await interaction.guild.channels.fetch(cfg.channelId).catch(() => null);
+  if (!channel?.isTextBased?.()) return interaction.editReply("Le salon LFG est introuvable : préviens le staff.");
+
+  const res = reservePost(guildId, {
+    authorId: userId,
+    mode,
+    region,
+    text,
+    tier: memberTier(link, mode),
+    rating: memberRating(link, mode),
+    channelId: channel.id,
+    ttlMinutes: cfg.ttlMinutes,
+  });
+  if (res.error) return interaction.editReply("Tu as déjà une annonce active. Ferme-la avant d'en publier une autre.");
+
+  const post = res.post;
+  let message;
+  try {
+    message = await channel.send(buildLfgCard(post, await getAllLinks()));
+  } catch (err) {
+    await deletePost(guildId, post.id);
+    return interaction.editReply(`Impossible de publier dans <#${channel.id}> (${err.message}). Préviens le staff.`);
+  }
+  post.messageId = message.id;
+  await saveLfg();
+  checkCooldown("lfg", userId, LFG_COOLDOWN_MS);
+  return interaction.editReply(`✅ Annonce publiée : ${message.url}\nElle expire dans ${cfg.ttlMinutes} min.`);
+}
+
+// ---------- Boutons lfg_join / lfg_leave / lfg_close ----------
+
+export async function handleLfgButton(interaction) {
+  const [action, id] = interaction.customId.split(":");
+  const guildId = interaction.guildId;
+  const userId = interaction.user.id;
+  const post = getPost(guildId, id);
+  if (!post) return interaction.reply({ content: "Cette annonce n'existe plus.", flags: EPHEMERAL });
+
+  if (action === "lfg_join") {
+    const [cfg, link] = await Promise.all([getLfgConfig(guildId), getLink(userId)]);
+    // Vérification et ajout sans `await` entre les deux : deux clics simultanés ne dépassent pas la capacité.
+    const check = canJoin(post, link, userId, cfg);
+    if (!check.ok) return interaction.reply({ content: JOIN_REFUSALS[check.reason], flags: EPHEMERAL });
+    joinPost(post, userId);
+    await saveLfg();
+    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    if (post.status === "full") await onTeamFull(interaction, post, cfg);
+    return;
+  }
+
+  if (action === "lfg_leave") {
+    if (post.status !== "open") return interaction.reply({ content: JOIN_REFUSALS.closed, flags: EPHEMERAL });
+    if (userId === post.authorId) return interaction.reply({ content: "Tu es l'auteur : utilise « Fermer » pour retirer l'annonce.", flags: EPHEMERAL });
+    if (!leavePost(post, userId)) return interaction.reply({ content: "Tu ne fais pas partie de cette équipe.", flags: EPHEMERAL });
+    await saveLfg();
+    return interaction.update(buildLfgCard(post, await getAllLinks()));
+  }
+
+  if (action === "lfg_close") {
+    const staff = interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false;
+    if (userId !== post.authorId && !staff) {
+      return interaction.reply({ content: "Seul l'auteur de l'annonce ou le staff peut la fermer.", flags: EPHEMERAL });
+    }
+    if (!closePost(post, "closed")) return interaction.reply({ content: "Cette annonce est déjà terminée.", flags: EPHEMERAL });
+    await saveLfg();
+    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    if (userId !== post.authorId) await logAudit(interaction.guild, `🔒 <@${userId}> a fermé l'annonce LFG de <@${post.authorId}>.`);
+  }
+}
+
+// Équipe complète : vocal d'équipe (option) puis ping des membres dans un message à part
+// (l'édition de la carte ne notifie personne).
+async function onTeamFull(interaction, post, cfg) {
+  if (cfg.createVoice) {
+    const author = interaction.guild.members.cache.get(post.authorId);
+    try {
+      const voice = await createTempChannelFor(interaction.guild, {
+        ownerId: post.authorId,
+        name: `🎮 ${LFG_MODES[post.mode]?.label ?? post.mode} · ${author?.displayName ?? "équipe"}`,
+        userLimit: lfgCapacity(post.mode),
+        categoryId: cfg.voiceCategoryId || interaction.channel?.parentId || null,
+        reason: "Équipe LFG complète",
+      });
+      post.voiceChannelId = voice.id;
+      await saveLfg();
+      await interaction.editReply(buildLfgCard(post, await getAllLinks())).catch(() => {});
+    } catch (err) {
+      console.warn("LFG : création du vocal d'équipe échouée :", err.message);
+    }
+  }
+  const mentions = post.members.map((id) => `<@${id}>`).join(" ");
+  await interaction
+    .followUp({
+      content: `✅ Équipe complète : ${mentions}${post.voiceChannelId ? `\n🎙️ Rendez-vous dans <#${post.voiceChannelId}>.` : ""}`,
+      allowedMentions: { users: post.members },
+    })
+    .catch(() => {});
+}

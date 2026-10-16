@@ -48,6 +48,7 @@ import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from ".
 import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
 import { getLolConfig, setLolConfig, buildLolWelcomePayload, resetGreeted, greetedCount } from "../lol.js";
 import { getGuildConfig, setGuildConfig, getGuildStatus, syncGuild } from "../guild.js";
+import { getLfgConfig, setLfgConfig } from "../lfg.js";
 import { buildAnnouncePayload, dataUrlToAttachment } from "../announce.js";
 import {
   getTournament,
@@ -127,6 +128,7 @@ function buildSections(guildId, client) {
     lol: { get: () => getLolConfig(guildId), set: (b) => setLolConfig(guildId, b) },
     wordfilter: { get: () => getWordFilterConfig(guildId), set: (b) => setWordFilterConfig(guildId, b) },
     guild: { get: () => getGuildConfig(guildId), set: (b) => setGuildConfig(guildId, b) },
+    lfg: { get: () => getLfgConfig(guildId), set: (b) => setLfgConfig(guildId, b) },
     // Rôles autorisés vérifiés auprès de Discord (uniquement quand la liste change).
     roletimeout: roleTimeoutSection(guildId, async () => {
       const guild = await client.guilds.fetch(guildId);

@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChannelType } from "discord.js";
 import { ContextMenuCommandBuilder, ApplicationCommandType, InteractionContextType } from "discord.js";
-import { TIERS } from "../config.js";
+import { TIERS, REGIONS, REGION_LABELS } from "../config.js";
 import { WEAPON_META } from "../combos.js";
 
 // Noms des menus contextuels (clic droit). Majuscules et espaces autorisés, 32 caractères max.
@@ -395,5 +395,24 @@ export const commandsData = [
   new SlashCommandBuilder()
     .setName("guilde")
     .setDescription("Guilde Brawlhalla du serveur : stats et meilleurs contributeurs.")
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("lfg")
+    .setDescription("Cherche un partenaire ou une équipe, avec ton rank vérifié.")
+    .addStringOption((o) =>
+      o
+        .setName("mode")
+        .setDescription("Le mode de jeu.")
+        .addChoices({ name: "2v2", value: "2v2" }, { name: "3v3", value: "3v3" }, { name: "1v1 entraînement", value: "1v1" })
+        .setRequired(true),
+    )
+    .addStringOption((o) =>
+      o
+        .setName("region")
+        .setDescription("Région de jeu (par défaut : celle de ton compte lié).")
+        .addChoices(...REGIONS.map((r) => ({ name: REGION_LABELS[r], value: r })))
+        .setRequired(false),
+    )
+    .addStringOption((o) => o.setName("message").setDescription("Un mot pour tes futurs coéquipiers.").setMaxLength(200).setRequired(false))
     .toJSON(),
 ];
