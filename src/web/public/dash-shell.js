@@ -84,9 +84,10 @@ const NAV_GROUPS = [
         label: "Tournois",
         icon: "trophy",
         wide: true,
-        keywords: "bracket inscriptions check-in seeding",
+        keywords: "bracket inscriptions check-in seeding récurrent hebdo planifié événement",
         tabs: [
           { id: "current", label: "Tournoi en cours" },
+          { id: "recurring", label: "Récurrents" },
           { id: "archives", label: "Archives" },
           { id: "startgg", label: "Seeding start.gg" },
         ],

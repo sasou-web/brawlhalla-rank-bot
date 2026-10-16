@@ -41,6 +41,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 - **settings.js** — réglages serveur (`data/settings.json`), priorité : /setup > .env > défaut.
 - **searchStore.js / profileStore.js / leaderboardStore.js** — caches/persistance.
 - **tournament.js / tournamentUI.js** — système de tournois (inscriptions, matchs, salons). Cast gate (`castFromTopN`, matchs verrouillés), podium/MVP (`tournamentPodium`), Hall of Fame.
+- **tournamentSchedule.js / tournamentScheduleRules.js** — tournois récurrents (`kv.tournament_schedule`) : `tickSchedules` (appelé par `tournamentTick`) ouvre, passe en check-in et lance le bracket de chaque occurrence, avec un événement planifié Discord (`CreateEvents`). Le tournoi ouvert porte `scheduleId`/`scheduleRunAt`/`scheduledEventId` ; `lastFired` = occurrence déjà traitée par action (jamais deux fois). `closeScheduledOccurrence` (via `teardownTournament`) ferme l'événement. Règles pures testées (`nextOccurrence` en heure de Paris, `dueActions`, chevauchements) ; routes `/api/tournament/schedules*` dans `web/tournamentScheduleApi.js`, onglet Tournois › Récurrents.
 - **bracketImage.js** — rendu visuel du bracket en image PNG via `@napi-rs/canvas` (commande `/bracket`).
 - **tempvoice.js** — salons vocaux temporaires ("rejoindre pour créer").
 - **guild.js** — guilde Brawlhalla du serveur (`kv.guild`) : `syncGuild` appelé à la fin de chaque refresh des membres (rôle aux membres liés présents dans la guilde, annonces arrivées/départs par diff avec une baseline), snapshot TTL 10 min pour `/guilde` (`commands/guild.js`, bouton staff `gld_unlinked`) et la page dashboard Communauté › Guilde, bloc « Guilde » du récap hebdo. Aucun retrait de rôle sur lecture API échouée ou liste vide. `diffGuildMembers` / `guildRolePlan` / `computeGuildWeek` = fonctions pures testées.
@@ -68,7 +69,7 @@ TikTok, tickets, vocaux temporaires, dashboard web, etc.). Langue : **français*
 
 | Irremplaçable (sauvegardé) | Reconstructible depuis l'API (exclu des sauvegardes) |
 |---|---|
-| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`, `wordfilter`, `wordfilterState`, `guild`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
+| `kv` (clé→JSON : `links`, `settings`, `levels`, `tiktok`, `tiktokState`, `clips`, `guessrank`, `tempvoice`, `welcome`, `tournament`, `linkpanel`, `tickets`, `giveaway`, `reminders`, `lol`, `wordfilter`, `wordfilterState`, `guild`, `tournament_schedule`) | `leaderboard` (miroir du classement Brawlhalla, ~40 000 lignes = l'essentiel du poids de la base) |
 | `xp`, `rating_history`, `achievements`, `counters`, `combo_mastery`, `guess_pending` | `profiles`, `searches` (caches API, TTL 15 min) |
 | `giveaways`, `giveaway_entries` | `pending` (file de récupération, 7 j) |
 

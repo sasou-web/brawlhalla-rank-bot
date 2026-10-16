@@ -66,8 +66,9 @@ import {
   getHistoryEntry,
   deleteHistoryEntry,
 } from "../tournament.js";
-import { buildSignupPayload, refreshSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
+import { refreshSignupPanel, publishSignupPanel, tournamentAnnounce, tournamentAnnouncePayload, buildRegistrationAnnounce, buildCheckinAnnounce, buildBracketAnnounce, buildHallOfFamePayload, postNoTournamentPanel } from "../tournamentUI.js";
 import { teardownTournament } from "../tournamentAutomation.js";
+import { mountTournamentScheduleRoutes } from "./tournamentScheduleApi.js";
 import { getLink } from "../store.js";
 import { getAllLinks } from "../store.js";
 import { combosInfo, refreshCombos, buildPanelMessage, weaponsWithCombos, loadCombos, getComboVideo } from "../combos.js";
@@ -1189,18 +1190,15 @@ export function startWebServer(client, ctx = null) {
 
   app.post("/api/tournament/publish", requireAdmin, async (req, res) => {
     try {
-      const t = await getTournament(G);
-      if (!t) return res.status(400).json({ error: "Aucun tournoi." });
-      if (!t.signupChannelId) return res.status(400).json({ error: "Définis d'abord le salon d'inscription." });
-      const ch = await guildTextChannel(t.signupChannelId);
-      if (!ch) return res.status(400).json({ error: "Salon d'inscription introuvable ou non textuel." });
-      const msg = await ch.send(buildSignupPayload(t));
-      await updateTournament(G, { signupMessageId: msg.id });
+      await publishSignupPanel(client, G);
       res.json({ ok: true });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(400).json({ error: err.message });
     }
   });
+
+  // ---- Tournois récurrents ----
+  mountTournamentScheduleRoutes(app, { client, guildId: G, requireAdmin });
 
   // ---- Historique ----
   app.post("/api/tournament/archive", requireAdmin, async (req, res) => {

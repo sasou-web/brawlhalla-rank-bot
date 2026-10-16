@@ -88,6 +88,14 @@ Tous sont créés automatiquement au lancement. `/reset-saison` ne retire que le
 - **Fiabilité API** : métriques exposées via `/ping`, l'endpoint `/api/metrics` et un onglet dédié du dashboard (taux de succès, erreurs 429/5xx/réseau, cooldown, files de récupération, fraîcheur de l'index).
 - **Anti-abus** : cooldowns par utilisateur sur les commandes coûteuses (API/canvas).
 
+## Tournois récurrents
+
+Dashboard › Événements › Tournois › **Récurrents** : un modèle (ex. « Friday Night 1v1 », chaque vendredi à 21 h, heure de Paris) reprend tous les réglages d'un tournoi.
+
+- **Automatique** : le bot ouvre les inscriptions X h avant (panneau publié, annonce), lance le check-in X min avant, puis le bracket à l'heure dite s'il y a au moins 2 joueurs prêts ; sinon il alerte le staff, qui décide. Le staff ne gère que les litiges et l'archivage.
+- **Événement Discord** : un événement planifié par occurrence, visible en haut du serveur avec rappel natif ; il est fermé à l'archivage. Permission du bot requise : **« Créer des événements »** (le dashboard signale si elle manque ; sans elle, le tournoi s'ouvre quand même).
+- **Sécurités** : un seul tournoi à la fois (un modèle ne s'ouvre pas si un tournoi existe déjà : alerte staff et créneau suivant), deux modèles qui se chevauchent sont refusés, aucune action jouée deux fois (même après un redémarrage). « Ouvrir maintenant » force l'ouverture du prochain tournoi pour tester.
+
 ## Combos : apprendre et progresser
 
 Données et vidéos : [BrawlDatabase](https://www.brawldatabase.com) (`data/combos.json`, mis à jour depuis le dashboard).

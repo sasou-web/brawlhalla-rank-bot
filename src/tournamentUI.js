@@ -1,4 +1,4 @@
-import { getTournament, tournamentWinner, matchBestOf, tournamentPodium } from "./tournament.js";
+import { getTournament, updateTournament, tournamentWinner, matchBestOf, tournamentPodium } from "./tournament.js";
 import { config } from "./config.js";
 
 const STATUS_LABEL = {
@@ -72,6 +72,20 @@ export async function postNoTournamentPanel(client, channelId) {
   } catch {
     /* ignore */
   }
+}
+
+// Publie le panneau d'inscription dans le salon d'inscription du tournoi courant (dashboard,
+// tournois récurrents). Le salon doit être un salon textuel de CE serveur : le bot peut être
+// présent ailleurs, un id saisi ne doit jamais le faire publier sur un autre serveur.
+export async function publishSignupPanel(client, guildId) {
+  const t = await getTournament(guildId);
+  if (!t) throw new Error("Aucun tournoi.");
+  if (!t.signupChannelId) throw new Error("Définis d'abord le salon d'inscription.");
+  const ch = await client.channels.fetch(String(t.signupChannelId)).catch(() => null);
+  if (!ch?.isTextBased?.() || ch.guildId !== guildId) throw new Error("Salon d'inscription introuvable ou non textuel.");
+  const msg = await ch.send(buildSignupPayload(t));
+  await updateTournament(guildId, { signupMessageId: msg.id });
+  return msg;
 }
 
 // Rafraîchit le message du panneau d'inscription si publié.
