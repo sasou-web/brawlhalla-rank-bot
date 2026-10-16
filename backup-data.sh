@@ -137,7 +137,7 @@ done
 # kv.settings et partirait sinon en clair sur le webhook. A ressaisir dans le dashboard
 # apres une restauration. Place AVANT le VACUUM, qui reecrit le fichier sans l'ancienne page.
 sqlite3 "$SNAPSHOT" "UPDATE kv SET value = json_remove(value, '\$.startggToken') WHERE key = 'settings';" 2>/dev/null \
-  || echo "[backup] ⚠️ Retrait du jeton start.gg impossible : il reste present dans l'archive."
+  || notify_warning "retrait du jeton start.gg impossible : il est present dans cette archive."
 sqlite3 "$SNAPSHOT" "VACUUM;"
 
 # --- 3 bis. Controle du contenu (ALERTE seulement, ne bloque jamais l'archivage) ---

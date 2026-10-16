@@ -48,6 +48,7 @@ const allRoles = () => new Map([...managedRoleNames()].map((name) => [name, { id
 test("syncMember : 404 sur ranked, Région et Top 100 conservés depuis le lien", async () => {
   await setLink("i5-user", 555, "Neo", {
     tiers: { "1v1": "Diamond", "2v2": null }, rating1v1: 2100, rating2v2: 0, level: 80, globalRank: 50, region: "EU",
+    rankedSeenAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
   });
   const member = fakeMember("i5-user", [roleName("1v1", "Diamond"), regionRoleName("EU"), TOP_ROLE_NAME]);
   const profile = buildPlayerProfile(555, { ranked: null, teamsData: { teams: { ranked_2v2: [] } }, all: { name: "Neo", level: 81 } });
@@ -148,4 +149,33 @@ test("syncAllMembers : Discord indisponible, on garde la map connue ; sans map, 
   await syncAllMembers(fakeGuild({ failRolesFetch: true }), shared);
   assert.equal(shared.get(roleName("1v1", "Gold")).id, "connu");
   await assert.rejects(syncAllMembers(fakeGuild({ failRolesFetch: true })), /Discord 503/);
+});
+
+test("syncMember : ranked absent depuis plus de 24 h (placements après reset) → plus de Top 100", async () => {
+  await setLink("i5-old", 557, "Neo", {
+    tiers: { "1v1": "Diamond", "2v2": null }, rating1v1: 2100, rating2v2: 0, level: 80, globalRank: 50, region: "EU",
+    rankedSeenAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const member = fakeMember("i5-old", [roleName("1v1", "Diamond"), regionRoleName("EU"), TOP_ROLE_NAME]);
+  const profile = buildPlayerProfile(557, { ranked: null, teamsData: { teams: { ranked_2v2: [] } }, all: { name: "Neo", level: 81 } });
+  try {
+    const r = await syncMember(member, 557, allRoles(), { profile });
+    assert.equal(r.globalRank, 0);
+    assert.ok(r.removed.includes(TOP_ROLE_NAME));
+    assert.equal(r.region, "EU");
+  } finally {
+    await removeLink("i5-old");
+  }
+});
+
+test("syncMember : rankedSeenAt mis à jour quand ranked répond", async () => {
+  const ranked = { name: "Neo", rating: 2100, tier: "Diamond", region: "EU", global_rank: 50 };
+  const profile = buildPlayerProfile(558, { ranked, teamsData: { teams: { ranked_2v2: [] } }, all: { name: "Neo", level: 81 } });
+  try {
+    await syncMember(fakeMember("i5-seen"), 558, allRoles(), { profile });
+    const seen = Date.parse((await getLink("i5-seen")).rankedSeenAt);
+    assert.ok(Date.now() - seen < 60_000);
+  } finally {
+    await removeLink("i5-seen");
+  }
 });

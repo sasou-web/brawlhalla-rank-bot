@@ -351,11 +351,12 @@ async function postLog(message, cfg, entry, scanned) {
 }
 
 // Texte affiché ailleurs que dans `content` : message transféré (son texte vit dans le
-// snapshot), question et réponses d'un sondage, noms des pièces jointes.
-const names = (attachments) => [...(attachments?.values?.() ?? [])].map((a) => a?.name);
+// snapshot), question et réponses d'un sondage. Les noms de pièces jointes ne sont PAS
+// analysés : « FDP_octobre.pdf » ou « IMG_PD_2026.jpg » se découpent sur « _ » en mots
+// interdits et sanctionneraient des membres innocents.
 function extraTexts(message) {
-  const out = names(message.attachments);
-  for (const snap of message.messageSnapshots?.values?.() ?? []) out.push(snap?.content, ...names(snap?.attachments));
+  const out = [];
+  for (const snap of message.messageSnapshots?.values?.() ?? []) out.push(snap?.content);
   const poll = message.poll;
   if (poll) out.push(poll.question?.text, ...[...(poll.answers?.values?.() ?? [])].map((a) => a?.text));
   return out.filter((s) => typeof s === "string" && s.trim());

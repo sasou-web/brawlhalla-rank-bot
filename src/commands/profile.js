@@ -558,12 +558,15 @@ async function showProfile(interaction, view, brawlhallaId) {
   try {
     p = await getPlayerProfile(brawlhallaId);
   } catch (err) {
-    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2 });
+    return interaction.editReply({ components: [tdc(`Erreur API : ${err.message}`)], flags: V2, allowedMentions: NO_MENTIONS });
   }
   const legends = await getLegends().catch(() => new Map());
+  // Le nom du joueur (et de ses coéquipiers) vient de l'API Brawlhalla : un compte renommé
+  // « @everyone » ou « <@&id> » ne doit pinger personne.
   return interaction.editReply({
     components: [buildProfileCard(view, p, legends), profileNavRow(view, p.brawlhallaId)],
     flags: V2,
+    allowedMentions: NO_MENTIONS,
   });
 }
 

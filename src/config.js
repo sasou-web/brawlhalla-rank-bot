@@ -14,24 +14,28 @@ function required(name) {
  * demarrage : Number("1h") vaut NaN, et un setInterval de NaN ms tourne toutes les 1 ms
  * (API martelee, logs qui remplissent le disque).
  */
-export function envNumber(name, def, env = process.env) {
+export function envNumber(name, def, env = process.env, { max = Infinity } = {}) {
   const raw = String(env[name] ?? "").trim();
   if (!raw) return def;
   const n = Number(raw);
-  if (Number.isFinite(n)) return n;
-  console.warn(`${name}="${raw}" n'est pas un nombre : valeur par defaut ${def} utilisee. Corrige ton fichier .env.`);
+  if (Number.isFinite(n) && n <= max) return n;
+  const why = Number.isFinite(n) ? `depasse le maximum (${max})` : "n'est pas un nombre";
+  console.warn(`${name}="${raw}" ${why} : valeur par defaut ${def} utilisee. Corrige ton fichier .env.`);
   return def;
 }
+
+// Au-dela de 2^31 - 1 ms, setInterval retombe a 1 ms (TimeoutOverflowWarning) : ~35 791 min.
+const MAX_INTERVAL_MIN = 35_000;
 
 export const config = {
   token: required("DISCORD_TOKEN"),
   clientId: required("CLIENT_ID"),
   guildId: required("GUILD_ID"),
-  refreshIntervalMinutes: envNumber("REFRESH_INTERVAL_MINUTES", 60),
+  refreshIntervalMinutes: envNumber("REFRESH_INTERVAL_MINUTES", 60, process.env, { max: MAX_INTERVAL_MIN }),
   // Synchro de l'index local du leaderboard (recherche instantanee facon Raybot).
   // Pages de 50 joueurs : 500 pages = top ~25 000 classes 1v1. Mets 0 pour desactiver.
   leaderboardSyncPages: envNumber("LEADERBOARD_SYNC_PAGES", 500),
-  leaderboardSyncIntervalMinutes: envNumber("LEADERBOARD_SYNC_INTERVAL_MINUTES", 180),
+  leaderboardSyncIntervalMinutes: envNumber("LEADERBOARD_SYNC_INTERVAL_MINUTES", 180, process.env, { max: MAX_INTERVAL_MIN }),
   // Sync incrementale : pages "chaudes" (haut du classement) resynchronisees a CHAQUE cycle,
   // + un bloc de pages "profondes" balayees par rotation entre cycles (doux pour l'API).
   leaderboardSyncShallowPages: envNumber("LEADERBOARD_SYNC_SHALLOW_PAGES", 20),

@@ -38,3 +38,10 @@ test("envNumber : valeur non numérique → défaut + avertissement, pas d'excep
     assert.match(warnings[0], /LEADERBOARD_SYNC_INTERVAL_MINUTES/);
   }
 });
+
+test("envNumber : valeur au-delà du maximum → défaut avec avertissement (setInterval > 2^31 ms = 1 ms)", () => {
+  const { value, warnings } = withWarnings(() => envNumber("X", 180, { X: "50000" }, { max: 35_000 }));
+  assert.equal(value, 180);
+  assert.equal(warnings.length, 1);
+  assert.equal(envNumber("X", 180, { X: "35000" }, { max: 35_000 }), 35_000);
+});

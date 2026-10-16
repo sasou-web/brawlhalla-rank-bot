@@ -6,6 +6,9 @@ import { tierIndex, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config
 import { recordRating } from "./ratingStore.js";
 import { getCounter, grantAndAnnounce } from "./achievements.js";
 
+// Durée pendant laquelle un 404 sur ranked laisse le rang mondial connu en place.
+const RANK_CARRY_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Recupere le profil d'un joueur, applique tous ses roles (tiers, niveau, top),
  * met a jour la liaison stockee, et annonce une eventuelle montee de tier.
@@ -36,7 +39,13 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
       // Région et rang mondial viennent du même appel : sans lui, on garde ceux du lien
       // (sinon les rôles Région et Top 100 tombaient sur un simple 404 momentané).
       region = region || previous.region || null;
-      globalRank = globalRank || previous.globalRank || 0;
+      // Rang mondial repris seulement si ranked a répondu récemment : un joueur en placements
+      // (ranked null pendant des jours, typiquement après un reset de saison) ne doit pas garder
+      // le rôle Top 100 de la saison précédente.
+      const seenAt = Date.parse(previous.rankedSeenAt || "");
+      if (Number.isFinite(seenAt) && Date.now() - seenAt < RANK_CARRY_MS) {
+        globalRank = globalRank || previous.globalRank || 0;
+      }
     }
     // Stats globales indisponibles (404 sur /all) : le niveau à 0 n'est pas une vraie valeur.
     if (profile.allUnavailable) level = level || previous.level || 0;
@@ -72,6 +81,7 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     level,
     globalRank,
     region,
+    rankedSeenAt: profile.ranked1v1Available ? new Date().toISOString() : previous?.rankedSeenAt ?? null,
   });
 
   // Historique de rating (pour la courbe /progression). Best-effort : ne bloque pas la synchro.

@@ -63,14 +63,16 @@ test("sondage : question et réponses analysées", async () => {
   assert.equal((await lastAction()).action, "delete");
 });
 
-test("nom de fichier analysé, même avec un texte propre : suppression (pas de republication)", async () => {
-  const { message, hooks } = mockMessage({
-    content: "regardez ça",
-    attachments: new Collection([["a1", { name: "connard.png", size: 10, url: "https://cdn/x" }]]),
+test("noms de fichiers NON analysés : « FDP_octobre.pdf » ne sanctionne pas un innocent", async () => {
+  const { message } = mockMessage({
+    content: "voici le planning",
+    attachments: new Collection([
+      ["a1", { name: "FDP_octobre.pdf", size: 10, url: "https://cdn/x" }],
+      ["a2", { name: "connard.png", size: 10, url: "https://cdn/y" }],
+    ]),
   });
-  assert.equal(await handleWordFilter(message), true);
-  assert.equal(hooks.length, 0);
-  assert.equal((await lastAction()).action, "delete");
+  assert.equal(await handleWordFilter(message), false);
+  assert.equal(message.deleted, false);
 });
 
 test("terme dans le texte seulement : « mask » republie le texte masqué", async () => {
