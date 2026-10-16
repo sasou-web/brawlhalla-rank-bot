@@ -77,7 +77,7 @@ function buildConfirmPayload(ownerId, brawlhallaId, data) {
   return { embeds: [embed], components: [row] };
 }
 
-async function isReviewer(interaction) {
+export async function isReviewer(interaction) {
   const { reviewerRoleId, validatorRoleId } = await getSettings();
   const roles = interaction.member?.roles?.cache;
   if (reviewerRoleId && roles?.has(reviewerRoleId)) return true;
@@ -137,17 +137,23 @@ export async function handleLier(interaction, ctx) {
     });
   }
 
+  // Réponses PUBLIQUES qui recopient la saisie du membre : on ne laisse pinger que lui
+  // (sinon `/lier pseudo:@everyone` mentionnerait tout le serveur via le bot).
   let players;
   try {
     players = await searchPlayers(pseudo);
   } catch (err) {
     const msg = err.pending ? err.message : `Erreur lors de la recherche : ${err.message}`;
-    return interaction.editReply(`<@${interaction.user.id}> ${msg}`);
+    return interaction.editReply({
+      content: `<@${interaction.user.id}> ${msg}`,
+      allowedMentions: { users: [interaction.user.id] },
+    });
   }
   if (players.length === 0) {
-    return interaction.editReply(
-      `<@${interaction.user.id}> aucun joueur classé trouvé pour **${pseudo}**. Seuls les joueurs ayant joué en ranked cette saison apparaissent.\n💡 Astuce : tu peux aussi lier directement avec ton **ID** via \`/lier id:123456\`.`,
-    );
+    return interaction.editReply({
+      content: `<@${interaction.user.id}> aucun joueur classé trouvé pour **${pseudo}**. Seuls les joueurs ayant joué en ranked cette saison apparaissent.\n💡 Astuce : tu peux aussi lier directement avec ton **ID** via \`/lier id:123456\`.`,
+      allowedMentions: { users: [interaction.user.id] },
+    });
   }
 
   return interaction.editReply({

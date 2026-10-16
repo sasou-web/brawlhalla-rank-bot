@@ -107,7 +107,7 @@ import {
   handleCombosMaster,
 } from "./commands/combos.js";
 import { handleTimeout } from "./commands/moderation.js";
-import { EPHEMERAL, logAudit, dmUser, requirePermission } from "./commands/shared.js";
+import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
 import { syncAllMembers } from "./sync.js";
 import { enforceCooldown } from "./commands/cooldowns.js";
 import { awardSeasonRewards } from "./season.js";
@@ -127,6 +127,7 @@ import {
   handleUnlink,
   handleWhois,
   handleDelier,
+  isReviewer,
 } from "./commands/linking.js";
 
 // Les definitions (JSON) des slash commands vivent dans ./commands/definitions.js.
@@ -146,6 +147,17 @@ export const MANAGE_MESSAGES_COMMANDS = new Set(["clear"]);
 // `timeout` n'est dans aucun de ces ensembles : la commande est déléguée à des rôles choisis
 // dans le dashboard, ses droits (rôle autorisé ou « Exclure temporairement des membres »)
 // sont vérifiés dans son handler (commands/moderation.js).
+
+// Même principe pour les composants et modals des panneaux de configuration (éphémères,
+// ouverts par les commandes admin ci-dessus) : revérifiés à chaque interaction. Un panneau
+// resté ouvert après un retrait de droits, ou un customId forgé, ne modifie plus rien.
+// Les composants publics `tck*` / `gw*` (ouvrir un ticket, participer à un giveaway) ne sont
+// pas concernés : seuls `tckcfg_` / `gwcfg_` le sont.
+export const ADMIN_COMPONENT_PREFIXES = ["lvl_", "tt_", "clp_", "gr_", "tv_", "tckcfg_", "gwcfg_", "setup_"];
+
+export function isAdminComponent(customId) {
+  return ADMIN_COMPONENT_PREFIXES.some((prefix) => customId.startsWith(prefix));
+}
 
 export async function handleChatInput(interaction, ctx) {
   // Garde de permission centralisée (défense en profondeur) avant tout dispatch.
@@ -203,6 +215,7 @@ export async function handleChatInput(interaction, ctx) {
 }
 
 export async function handleModal(interaction, ctx) {
+  if (isAdminComponent(interaction.customId) && !(await requireManageGuild(interaction))) return;
   if (interaction.customId.startsWith("lvl_")) return handleLevelsPanelModal(interaction, ctx);
   if (interaction.customId.startsWith("tt_")) return handleTikTokPanelModal(interaction, ctx);
   if (interaction.customId.startsWith("clp_")) return handleClipsPanelModal(interaction, ctx);
@@ -214,6 +227,10 @@ export async function handleModal(interaction, ctx) {
   if (interaction.customId.startsWith("trn_")) return handleTournamentModal(interaction, ctx);
   if (interaction.customId.startsWith("lnkp_")) return handleLinkPanelModal(interaction, ctx);
   if (!interaction.customId.startsWith("rm:")) return;
+  // Refus de liaison : revérifié à l'envoi (validateur destitué entre-temps, customId forgé).
+  if (!(await isReviewer(interaction))) {
+    return interaction.reply({ content: "Tu n'as pas la permission de refuser.", flags: EPHEMERAL });
+  }
   const [, requesterId, , channelId, messageId] = interaction.customId.split(":");
   const reason = interaction.fields.getTextInputValue("raison")?.trim() || "Non précisée";
   await interaction.deferReply({ flags: EPHEMERAL });
@@ -412,21 +429,17 @@ async function refreshAllMembers(guild, ctx) {
   return syncAllMembers(guild, ctx?.rolesByName ?? null);
 }
 
+// /refresh : même traitement que le bouton « Actualiser les rôles » ci-dessous (réponse
+// immédiate, synchro en arrière-plan, bilan dans le salon d'audit).
 async function handleRefresh(interaction, ctx) {
-  await interaction.deferReply({ flags: EPHEMERAL });
-  try {
-    const { ok, fail, total } = await refreshAllMembers(interaction.guild, ctx);
-    return interaction.editReply(`Rafraîchissement : ${ok} ok, ${fail} échec(s) sur ${total}.`);
-  } catch (err) {
-    return interaction.editReply(`⏳ ${err.message}`);
-  }
+  return handleAdminRefreshButton(interaction, ctx);
 }
 
-// Bouton "Actualiser les rôles" du panneau /setup : même logique que /refresh, mais
-// NON BLOQUANT. Un refresh complet est séquentiel (1 appel API forcé par membre) et peut,
-// sur beaucoup de liaisons, dépasser la fenêtre de 15 min d'une interaction Discord — ce qui
-// laisserait le « thinking… » bloqué pour toujours. On répond donc tout de suite, on traite en
-// arrière-plan, et on poste le bilan dans le salon d'audit (et on tente d'éditer la réponse).
+// Bouton "Actualiser les rôles" du panneau /setup (et /refresh) : NON BLOQUANT. Un refresh
+// complet est séquentiel (1 appel API forcé par membre) et peut, sur beaucoup de liaisons,
+// dépasser la fenêtre de 15 min d'une interaction Discord — ce qui laisserait le « thinking… »
+// bloqué pour toujours. On répond donc tout de suite, on traite en arrière-plan, et on poste
+// le bilan dans le salon d'audit (et on tente d'éditer la réponse).
 async function handleAdminRefreshButton(interaction, ctx) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     return interaction.reply({ content: "Réservé aux admins.", flags: EPHEMERAL });
@@ -589,6 +602,7 @@ export async function handleSelect(interaction, ctx) {
 }
 
 async function routeSelect(interaction, ctx) {
+  if (isAdminComponent(interaction.customId) && !(await requireManageGuild(interaction))) return;
   if (interaction.customId === "cbp_open") return handleCombosOpen(interaction);
   if (interaction.customId === "cbp_weapon") return handleCombosWeapon(interaction);
   if (interaction.customId.startsWith("cbp_pick:")) return handleCombosPick(interaction);
@@ -634,6 +648,7 @@ export async function handleButton(interaction, ctx) {
 
 async function routeButton(interaction, ctx) {
   const id = interaction.customId;
+  if (isAdminComponent(id) && !(await requireManageGuild(interaction))) return;
   if (id.startsWith("cbp_slow:")) return handleCombosSlow(interaction);
   if (id.startsWith("cbp_master:")) return handleCombosMaster(interaction);
   if (id.startsWith("lvl_")) return handleLevelsPanelButton(interaction, ctx);

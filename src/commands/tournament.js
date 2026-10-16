@@ -125,11 +125,27 @@ export async function handleCastGo(interaction, ctx) {
   }
 }
 
+// Erreur d'une action de tournoi : si l'accusé est déjà parti (update / deferReply), on
+// l'édite ; sinon on répond en éphémère.
+function replyTournamentError(interaction, e) {
+  const content = `❌ ${e.message}`;
+  if (interaction.deferred || interaction.replied) return interaction.editReply({ content, components: [] });
+  return interaction.reply({ content, flags: EPHEMERAL });
+}
+
 async function giveParticipantRoles(guild, t, userIds) {
   if (!t.participantRoleId) return;
   for (const uid of userIds) {
     const m = await guild.members.fetch(uid).catch(() => null);
     if (m) await m.roles.add(t.participantRoleId, "Inscription tournoi").catch(() => {});
+  }
+}
+
+async function removeParticipantRoles(guild, t, userIds) {
+  if (!t.participantRoleId) return;
+  for (const uid of userIds) {
+    const m = await guild.members.fetch(uid).catch(() => null);
+    if (m) await m.roles.remove(t.participantRoleId, "Désinscription tournoi").catch(() => {});
   }
 }
 
@@ -161,9 +177,12 @@ export async function handleTournamentButton(interaction, ctx) {
         const bo = matchBestOf(t, m);
         const need = Math.ceil(bo / 2);
         const cur = side === "a" ? m.scoreA + 1 : m.scoreB + 1;
+        // Le nombre de manches déjà jouées est encodé dans le customId : la confirmation ne
+        // vaut que pour CE score (rejouée après un autre point, elle est refusée).
+        const played = (m.gameLog || []).length;
         return interaction.reply({
           content: `⚠️ Confirmer : **match gagné par ${nameOf(side)}** → +1 point (${cur}/${need}) ?`,
-          components: [{ type: 1, components: [{ type: 2, style: 3, label: "Oui, attribuer le point", custom_id: `trn_gameok:${matchId}:${side}` }] }],
+          components: [{ type: 1, components: [{ type: 2, style: 3, label: "Oui, attribuer le point", custom_id: `trn_gameok:${matchId}:${side}:${played}` }] }],
           flags: EPHEMERAL,
         });
       }
@@ -180,28 +199,39 @@ export async function handleTournamentButton(interaction, ctx) {
         return interaction.update(buildMatchPayload(t2, matchId));
       }
       // --- Étape 2 : confirmations ---
+      // On accuse réception (et on retire le bouton) AVANT d'écrire quoi que ce soit : les
+      // appels Discord qui suivent (scoreboard, panneau, annonce) peuvent dépasser la fenêtre
+      // de 3 s, et un « Échec de l'interaction » pousserait le joueur à recliquer.
       if (action === "trn_gameok") {
-        const r = await reportGame(guildId, matchId, parts[2]);
+        // customId : trn_gameok:<match>:<side>:<manches déjà jouées>. L'ancien format (sans
+        // compteur) n'est plus accepté : il ne protège pas contre un double point.
+        const expected = parts[3] === undefined ? NaN : Number(parts[3]);
+        if (!Number.isInteger(expected) || expected < 0) {
+          return interaction.update({ content: "Cette confirmation a expiré : reclique sur le bouton du point dans le salon du match.", components: [] });
+        }
+        await interaction.update({ content: "⏳ Attribution du point…", components: [] });
+        const r = await reportGame(guildId, matchId, parts[2], expected);
         await refreshMatchMessage(interaction.client, guildId, matchId);
         await refreshSignupPanel(interaction.client, guildId);
         if (r.finished) {
           const w = r.tournament.participants.find((p) => p.id === r.match.winnerId)?.name || "?";
           await tournamentAnnounce(interaction.client, guildId, undefined, [buildMatchResultEmbed(r.tournament, r.match)]);
-          return interaction.update({ content: `🏆 Point attribué — **${w}** remporte le match !`, components: [] });
+          return interaction.editReply({ content: `🏆 Point attribué — **${w}** remporte le match !`, components: [] });
         }
-        return interaction.update({ content: `✅ Point attribué (${r.match.scoreA}-${r.match.scoreB}).`, components: [] });
+        return interaction.editReply({ content: `✅ Point attribué (${r.match.scoreA}-${r.match.scoreB}).`, components: [] });
       }
       if (action === "trn_disputeok") {
+        await interaction.update({ content: "⏳ Signalement du litige…", components: [] });
         const t3 = await disputeMatch(guildId, matchId);
         if (t3.modAlertChannelId) {
           const ch = await interaction.guild.channels.fetch(t3.modAlertChannelId).catch(() => null);
           if (ch?.isTextBased?.()) await ch.send(buildModAlert(t3, matchId, `Litige signalé par ${interaction.user.username}`)).catch(() => {});
         }
         await refreshMatchMessage(interaction.client, guildId, matchId);
-        return interaction.update({ content: "⚠️ Litige signalé, le staff a été prévenu.", components: [] });
+        return interaction.editReply({ content: "⚠️ Litige signalé, le staff a été prévenu.", components: [] });
       }
     } catch (e) {
-      return interaction.reply({ content: `❌ ${e.message}`, flags: EPHEMERAL });
+      return replyTournamentError(interaction, e);
     }
   }
 
@@ -223,14 +253,16 @@ export async function handleTournamentButton(interaction, ctx) {
       });
     }
     try {
+      // Accusé + retrait du bouton avant les appels Discord (fenêtre de 3 s).
+      await interaction.update({ content: "⏳ Application de la décision…", components: [] });
       // La valeur de retour n'est pas utilisee ici : seul l'effet de bord compte.
       await resolveMatch(guildId, matchId, entrantId);
       await refreshSignupPanel(interaction.client, guildId);
       await refreshMatchMessage(interaction.client, guildId, matchId);
       await tournamentAnnounce(interaction.client, guildId, `🛠️ Décision staff — **${name}** est déclaré vainqueur du match.`);
-      return interaction.update({ content: `✅ Victoire attribuée à **${name}**.`, components: [] });
+      return interaction.editReply({ content: `✅ Victoire attribuée à **${name}**.`, components: [] });
     } catch (e) {
-      return interaction.reply({ content: `❌ ${e.message}`, flags: EPHEMERAL });
+      return replyTournamentError(interaction, e);
     }
   }
 
@@ -255,33 +287,38 @@ export async function handleTournamentButton(interaction, ctx) {
   if (id === "trn_joinok") {
     if (t.status !== "registration") return interaction.update({ content: "Les inscriptions ne sont pas ouvertes.", components: [] });
     try {
+      // Accusé + retrait du bouton avant les appels Discord (rôle, panneau) : fenêtre de 3 s.
+      await interaction.update({ content: "⏳ Inscription en cours…", components: [] });
       await registerEntrant(guildId, { members: [interaction.user.id], name: interaction.member.displayName });
       await giveParticipantRoles(interaction.guild, t, [interaction.user.id]);
       await refreshSignupPanel(interaction.client, guildId);
-      return interaction.update({ content: "✅ Inscription confirmée ! Bonne chance. 🍀", components: [] });
+      return interaction.editReply({ content: "✅ Inscription confirmée ! Bonne chance. 🍀", components: [] });
     } catch (e) {
-      return interaction.update({ content: `❌ ${e.message}`, components: [] });
+      return replyTournamentError(interaction, e);
     }
   }
 
   if (id === "trn_leave") {
     try {
-      await unregisterEntrant(guildId, interaction.user.id);
-      if (t.participantRoleId) await interaction.member.roles.remove(t.participantRoleId).catch(() => {});
+      await interaction.deferReply({ flags: EPHEMERAL });
+      const entry = await unregisterEntrant(guildId, interaction.user.id);
+      // En 2v2, c'est l'équipe entière qui est désinscrite : le rôle est retiré aux deux.
+      await removeParticipantRoles(interaction.guild, t, entry.members);
       await refreshSignupPanel(interaction.client, guildId);
-      return interaction.reply({ content: "🚪 Tu es désinscrit·e.", flags: EPHEMERAL });
+      return interaction.editReply("🚪 Tu es désinscrit·e.");
     } catch (e) {
-      return interaction.reply({ content: `❌ ${e.message}`, flags: EPHEMERAL });
+      return replyTournamentError(interaction, e);
     }
   }
 
   if (id === "trn_checkin") {
     try {
+      await interaction.deferReply({ flags: EPHEMERAL });
       await checkInEntrant(guildId, interaction.user.id);
       await refreshSignupPanel(interaction.client, guildId);
-      return interaction.reply({ content: "📥 Check-in validé ! Tu es prêt·e.", flags: EPHEMERAL });
+      return interaction.editReply("📥 Check-in validé ! Tu es prêt·e.");
     } catch (e) {
-      return interaction.reply({ content: `❌ ${e.message}`, flags: EPHEMERAL });
+      return replyTournamentError(interaction, e);
     }
   }
 }
@@ -309,12 +346,14 @@ export async function handleTournamentModal(interaction, ctx) {
     if (!t) return interaction.reply({ content: "Aucun tournoi.", flags: EPHEMERAL });
     const teamName = interaction.fields.getTextInputValue("team")?.trim() || `Team ${interaction.member.displayName}`;
     try {
+      // Accusé avant les appels Discord (rôles des deux membres, panneau) : fenêtre de 3 s.
+      await interaction.deferReply({ flags: EPHEMERAL });
       await registerEntrant(guildId, { members: [interaction.user.id, partnerId], name: teamName });
       await giveParticipantRoles(interaction.guild, t, [interaction.user.id, partnerId]);
       await refreshSignupPanel(interaction.client, guildId);
-      return interaction.reply({ content: `✅ Équipe **${teamName}** inscrite avec <@${partnerId}> !`, flags: EPHEMERAL });
+      return interaction.editReply(`✅ Équipe **${teamName}** inscrite avec <@${partnerId}> !`);
     } catch (e) {
-      return interaction.reply({ content: `❌ ${e.message}`, flags: EPHEMERAL });
+      return replyTournamentError(interaction, e);
     }
   }
 }

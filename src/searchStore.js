@@ -22,13 +22,14 @@ const upsertStmt = db.prepare(`
 // ---------- Migration unique : ancien data/searches.json -> table searches ----------
 migrateFromJson();
 function migrateFromJson() {
-  if (!runOnce("searchesTable")) return;
   const p = resolve(DATA_DIR, "searches.json");
-  if (!existsSync(p)) return;
-  let migrated = 0;
+  let migrated = null;
   try {
-    const old = JSON.parse(readFileSync(p, "utf-8"));
-    const tx = db.transaction(() => {
+    // Un échec annule tout, drapeau compris (voir runOnce) : nouvel essai au prochain démarrage.
+    runOnce("searchesTable", () => {
+      if (!existsSync(p)) return;
+      const old = JSON.parse(readFileSync(p, "utf-8"));
+      let n = 0;
       for (const [query, entry] of Object.entries(old || {})) {
         if (!entry || !Array.isArray(entry.results)) continue;
         upsertStmt.run({
@@ -36,19 +37,21 @@ function migrateFromJson() {
           ts: Number(entry.ts) || Date.now(),
           results: JSON.stringify(entry.results),
         });
-        migrated++;
+        n++;
       }
+      migrated = n;
     });
-    tx();
-    try {
-      renameSync(p, `${p}.migrated`);
-    } catch {
-      /* best-effort */
-    }
-    console.log(`Migration searches.json -> table searches (${migrated} recherche(s)).`);
   } catch (e) {
-    console.warn(`Migration de searches.json échouée (laissée en JSON) : ${e.message}`);
+    console.warn(`Migration de searches.json échouée (laissée en JSON, nouvel essai au prochain démarrage) : ${e.message}`);
+    return;
   }
+  if (migrated === null) return;
+  try {
+    renameSync(p, `${p}.migrated`);
+  } catch {
+    /* best-effort */
+  }
+  console.log(`Migration searches.json -> table searches (${migrated} recherche(s)).`);
 }
 
 export async function getSearchEntry(queryLower) {

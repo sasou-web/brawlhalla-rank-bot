@@ -1,9 +1,11 @@
-import { config, TIERS, RANKED_TIERS, BH_API_BASE } from "./config.js";
+import { config, TIERS, RANKED_TIERS, BH_API_BASE, envNumber } from "./config.js";
 import { getProfileEntry, setProfileEntry, getWarmIds } from "./profileStore.js";
 import { getSearchEntry, setSearchEntry } from "./searchStore.js";
 import { upsertPlayers, searchLocalPlayers, markSynced, getIndexStats, getLocalPlayer } from "./leaderboardStore.js";
 import { recordOutcome, recordRetry, recordCooldown, snapshot as metricsSnapshot } from "./apiMetrics.js";
 import { addPending, removePending, loadPending, prunePending } from "./pendingStore.js";
+import { loadDoc, saveDoc } from "./db.js";
+import { getAllLinks } from "./store.js";
 
 /**
  * Client de l'API officielle Brawlhalla v1.
@@ -19,7 +21,7 @@ import { addPending, removePending, loadPending, prunePending } from "./pendingS
 // NOTE : l'origine Brawlhalla rate-limite/502 desormais quand on l'inonde (teste : des
 // rafales font tomber le taux de succes a ~10%). On garde donc une concurrence FAIBLE
 // pour ne pas aggraver, et on s'appuie sur le retry par fenetres + l'index local.
-const MAX_CONCURRENCY = Number(process.env.API_MAX_CONCURRENCY || 3);
+const MAX_CONCURRENCY = envNumber("API_MAX_CONCURRENCY", 3);
 let _active = 0;
 const _waiters = [];
 
@@ -36,6 +38,14 @@ prunePending(PENDING_MAX_AGE_MS);
 const pendingProfiles = new Set(loadPending("profile")); // brawlhallaId (string)
 const pendingSearches = new Set(loadPending("search")); // pseudo recherche (string brut)
 
+// Garde-fous de la file : un profil coute 3 requetes. Sans limite, un ID inexistant (faute
+// de frappe, saisie abusive dans le panneau de liaison) etait reessaye toutes les 30 s
+// pendant 7 jours, et des dizaines d'IDs saturaient le limiteur pour tout le bot.
+const PENDING_PER_TICK = 5; // elements traites par file et par cycle (les autres attendent leur tour)
+const PENDING_MAX_NOT_FOUND = 5; // abandon apres N reponses "introuvable" (404 / aucun resultat)
+const notFoundCounts = new Map(); // "kind:item" -> nb de reponses "introuvable" (memoire seulement)
+const isNotFound = (err) => err?.empty === true || err?.status === 404;
+
 // Mutations miroir mémoire + SQLite (pour que les files survivent au restart).
 function addPendingProfile(id) {
   const k = String(id);
@@ -46,6 +56,7 @@ function addPendingProfile(id) {
 }
 function delPendingProfile(id) {
   const k = String(id);
+  notFoundCounts.delete(`profile:${k}`);
   if (pendingProfiles.delete(k)) removePending("profile", k);
 }
 function addPendingSearch(name) {
@@ -55,7 +66,40 @@ function addPendingSearch(name) {
   }
 }
 function delPendingSearch(name) {
+  notFoundCounts.delete(`search:${name}`);
   if (pendingSearches.delete(name)) removePending("search", name);
+}
+
+// Compte une reponse "introuvable" pour un element de la file ; vrai s'il faut l'abandonner.
+function countNotFound(key) {
+  const n = (notFoundCounts.get(key) || 0) + 1;
+  notFoundCounts.set(key, n);
+  return n >= PENDING_MAX_NOT_FOUND;
+}
+
+// Purge des elements trop vieux (> 7 jours) a chaque cycle, et plus seulement au demarrage :
+// les files en memoire suivent la base.
+function prunePendingQueues() {
+  prunePending(PENDING_MAX_AGE_MS);
+  for (const [kind, queue] of [["profile", pendingProfiles], ["search", pendingSearches]]) {
+    const alive = new Set(loadPending(kind));
+    for (const item of queue) {
+      if (alive.has(item)) continue;
+      queue.delete(item);
+      notFoundCounts.delete(`${kind}:${item}`);
+    }
+  }
+}
+
+// Prend les `n` premiers elements d'une file et les replace a la fin (rotation) : des
+// elements qui echouent en boucle ne bloquent pas ceux qui suivent.
+function takeBatch(queue, n) {
+  const batch = [...queue].slice(0, n);
+  for (const item of batch) {
+    queue.delete(item);
+    queue.add(item);
+  }
+  return batch;
 }
 
 function _acquireSlot() {
@@ -87,12 +131,18 @@ const BROWSER_HEADERS = {
 let cooldownUntil = 0;
 const COOLDOWN_CAP_MS = 15000; // un cooldown global ne bloque jamais plus de 15s
 
-async function throttledFetch(url) {
+// Delai max d'une requete HTTP. Sans lui, une connexion qui ne repond pas (incident
+// Cloudflare) tenait un slot du limiteur jusqu'aux 5 min d'undici, hors budget de retry.
+// Un depassement leve une erreur reseau : retry tant qu'il reste du budget.
+const FETCH_TIMEOUT_MS = 10 * 1000;
+const SEARCH_FETCH_TIMEOUT_MS = 15 * 1000; // ?search= est plus lent cote API
+
+async function throttledFetch(url, timeoutMs = FETCH_TIMEOUT_MS) {
   await _acquireSlot();
   try {
     const wait = cooldownUntil - Date.now();
     if (wait > 0) await sleep(wait); // respecte le cooldown global avant de taper l'API
-    return await fetch(url, { headers: BROWSER_HEADERS });
+    return await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
   } finally {
     _releaseSlot();
   }
@@ -100,7 +150,7 @@ async function throttledFetch(url) {
 
 // Budget de temps total pour decrocher un 200 malgre les 429/502 intermittents.
 // On retape avec un BACKOFF EXPONENTIEL + jitter tant que la fenetre n'est pas ecoulee.
-const RETRY_BUDGET_MS = Number(process.env.API_RETRY_BUDGET_MS || 30000);
+const RETRY_BUDGET_MS = envNumber("API_RETRY_BUDGET_MS", 30000);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -133,7 +183,7 @@ async function apiGet(path, params = {}, deadline = null, attempt = 0) {
 
   let res;
   try {
-    res = await throttledFetch(url);
+    res = await throttledFetch(url, params.search ? SEARCH_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS);
   } catch (err) {
     recordOutcome("networkErrors", { message: err.message });
     // Erreur reseau : on reessaie avec backoff exponentiel tant qu'il reste du budget.
@@ -202,7 +252,7 @@ export async function pingApi() {
   const check = async (url) => {
     const start = Date.now();
     try {
-      const res = await fetch(url, { headers: BROWSER_HEADERS });
+      const res = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       // Un endpoint qui repond (meme 404/400) est joignable : seuls les 5xx = panne.
       return { ok: res.status < 500, status: res.status, ms: Date.now() - start };
     } catch (err) {
@@ -319,8 +369,10 @@ export async function searchPlayers(name, limit = 5) {
     if (cached) return cached.results.slice(0, limit);
     // 3c) Rien en base : on programme une recuperation en arriere-plan (marchera au prochain essai).
     addPendingSearch(name);
+    // `query` (nettoyé) et non `name` : ce message est recopié dans des réponses publiques,
+    // la saisie brute pourrait y glisser des mentions (@everyone, <@id>…).
     const e = new Error(
-      `🔎 Je cherche **${name}**… l'API Brawlhalla fait des siennes en ce moment.\n` +
+      `🔎 Je cherche **${query}**… l'API Brawlhalla fait des siennes en ce moment.\n` +
         `💡 Astuce : pour une **première** recherche fiable, utilise plutôt l'option **\`id\`** ` +
         `(le Brawlhalla ID, visible sur corehalla.com ou l'appli Brawlhalla).\n` +
         `Sinon je récupère le profil en arrière-plan — réessaie dans ~30 s 👍`,
@@ -345,7 +397,9 @@ export async function searchPlayers(name, limit = 5) {
  *  - pages "chaudes" 1..shallow : toujours incluses (haut du classement, très volatil)
  *  - pages "profondes" : un bloc de `deepChunk` pages, en rotation via `deepCursor`,
  *    pour couvrir tout le classement sur plusieurs cycles sans marteler l'API.
- * `knownMaxPage` (>0) borne la zone profonde à la dernière page réellement peuplée.
+ * `knownMaxPage` (>0) borne la zone profonde à la fin du classement constatée. La page
+ * juste après la borne est alors ajoutée en SONDE : si elle se remplit (classement qui
+ * grandit en début de saison), la borne saute (cf. nextKnownMaxPage).
  * Renvoie { pages: number[], nextCursor }.
  */
 export function planLeaderboardSync({ maxPages, shallowPages, deepChunk, knownMaxPage = 0, deepCursor = 0 }) {
@@ -362,12 +416,44 @@ export function planLeaderboardSync({ maxPages, shallowPages, deepChunk, knownMa
     for (let i = 0; i < take; i++) pages.push(shallow + 1 + ((start + i) % deepCount));
     nextCursor = (start + take) % deepCount;
   }
+  if (knownMaxPage > 0 && knownMaxPage < maxPages) pages.push(knownMaxPage + 1);
   return { pages, nextCursor };
 }
 
-// Etat de la rotation incrementale (persiste pour la duree du process).
-let deepCursor = 0;
-let knownMaxPage = 0; // derniere page connue contenant des joueurs (0 = inconnu)
+/**
+ * Nouvelle borne de fin du classement d'après les pages lues pendant un cycle (fonction PURE).
+ * `results` = [[page, peuplée], ...] dans l'ordre de lecture (pages en échec exclues).
+ *  - page peuplée AU-DELÀ de la borne (la sonde) : le classement a grandi, la borne
+ *    redevient inconnue (0) et les cycles suivants rebalaient toute la zone ;
+ *  - au moins deux pages vides CONSÉCUTIVES : fin du classement trouvée juste avant. Une
+ *    page vide isolée peut être un hoquet de l'API : elle ne touche pas à la borne.
+ * Une page peuplée ne fixe jamais la borne (avant, la dernière page lue devenait la borne
+ * et la rotation ne dépassait plus jamais le premier bloc de pages).
+ */
+export function nextKnownMaxPage(knownMaxPage, results) {
+  let bound = knownMaxPage;
+  let runStart = 0; // première page de la série de pages vides en cours
+  let lastEmpty = 0;
+  for (const [page, populated] of results) {
+    if (populated) {
+      if (bound > 0 && page > bound) bound = 0;
+      lastEmpty = 0;
+      continue;
+    }
+    runStart = lastEmpty && page === lastEmpty + 1 ? runStart : page;
+    lastEmpty = page;
+    if (page > runStart) bound = runStart - 1;
+  }
+  return bound;
+}
+
+// Etat de la rotation incrementale, persiste en base (kv) pour reprendre la rotation
+// apres un redemarrage au lieu de repartir de la premiere page profonde.
+const ROTATION_KEY = "leaderboardRotation";
+const savedRotation = loadDoc(ROTATION_KEY, {});
+const asPage = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
+let deepCursor = asPage(savedRotation.deepCursor);
+let knownMaxPage = asPage(savedRotation.knownMaxPage); // fin du classement constatee (0 = inconnue)
 
 /**
  * Synchronise l'index local des joueurs classes 1v1 (toutes regions) en arriere-plan.
@@ -390,6 +476,7 @@ export async function syncLeaderboard() {
 
   let total = 0;
   let consecutiveFails = 0;
+  const results = []; // [page, peuplee] : sert a recalculer la borne de fin du classement
   for (const page of pages) {
     let rankings;
     try {
@@ -402,19 +489,19 @@ export async function syncLeaderboard() {
       await sleep(450);
       continue;
     }
+    results.push([page, rankings.length > 0]);
     if (!rankings.length) {
-      // Page vide = au-dela du classement reel : on memorise la borne pour eviter
-      // de balayer du vide aux prochains cycles.
-      if (knownMaxPage === 0 || page - 1 < knownMaxPage) knownMaxPage = Math.max(0, page - 1);
+      // Page vide : au-dela du classement reel (ou hoquet de l'API), cf. nextKnownMaxPage.
       await sleep(450);
       continue;
     }
-    if (page > knownMaxPage) knownMaxPage = page; // on a vu des donnees plus loin que prevu
     const players = rankings.map(mapRankingEntry).filter((p) => p.id);
     await upsertPlayers(players);
     total += players.length;
     await sleep(450); // pause douce entre pages : evite de se faire rate-limiter
   }
+  knownMaxPage = nextKnownMaxPage(knownMaxPage, results);
+  saveDoc(ROTATION_KEY, { deepCursor, knownMaxPage });
   if (total > 0) await markSynced();
   return { players: total, pages: pages.length };
 }
@@ -552,50 +639,72 @@ function revalidate(brawlhallaId) {
   return p;
 }
 
+// Warm : au plus WARM_MAX profils par cycle, et jamais deux cycles en parallele (en panne
+// lente, un cycle peut durer plus que l'intervalle de 15 min).
+const WARM_MAX = 50;
+let warming = false;
+
 /**
- * Rafraichit en arriere-plan tous les profils gardes "chauds" (accedes recemment).
+ * Rafraichit en arriere-plan les profils gardes "chauds" (consultes recemment), au plus
+ * WARM_MAX, les plus recemment consultes d'abord. Les membres lies sont exclus : le refresh
+ * des roles les rafraichit deja (fetch force) a chaque cycle.
  * Les appels passent par la file globale throttlee, donc c'est doux pour l'API.
  */
 export async function warmProfiles() {
-  const ids = await getWarmIds();
-  let ok = 0;
-  for (const id of ids) {
-    try {
-      await revalidate(id);
-      ok++;
-    } catch {
-      /* on continue malgre les erreurs API */
+  if (warming) return { total: 0, ok: 0, skipped: true };
+  warming = true;
+  try {
+    const linked = new Set(Object.values(await getAllLinks()).map((l) => String(l.brawlhallaId)));
+    const ids = (await getWarmIds(undefined, WARM_MAX + linked.size)).filter((id) => !linked.has(id)).slice(0, WARM_MAX);
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        await revalidate(id);
+        ok++;
+      } catch {
+        /* on continue malgre les erreurs API */
+      }
     }
+    return { total: ids.length, ok };
+  } finally {
+    warming = false;
   }
-  return { total: ids.length, ok };
 }
 
 /**
  * Reessaie en arriere-plan tout ce qui a echoue a cause de l'API (profils + recherches),
  * et le stocke en base des que l'API repond. Ainsi, la commande relancee par l'utilisateur
  * trouve la donnee en cache et fonctionne, meme si l'API est encore capricieuse.
- * Appele a intervalle court par index.js.
+ * Appele a intervalle court par index.js. Au plus PENDING_PER_TICK elements par file et par
+ * cycle ; un element repondu "introuvable" PENDING_MAX_NOT_FOUND fois est abandonne.
  */
 export async function retryPending() {
+  prunePendingQueues();
   let recovered = 0;
+  let abandoned = 0;
 
   // Profils : on force un fetch reel ; succes complet => retire de la file.
   // Si le profil revient encore partiel (un appel secondaire echoue toujours), revalidate()
   // l'a deja remis dans la file : on ne compte pas comme recupere et on reessaiera.
-  for (const id of [...pendingProfiles]) {
+  for (const id of takeBatch(pendingProfiles, PENDING_PER_TICK)) {
     try {
       const data = await revalidate(id);
       if (!data?.partial) {
         delPendingProfile(id);
         recovered++;
       }
-    } catch {
-      /* toujours indispo : on garde pour le prochain cycle */
+    } catch (err) {
+      // Toujours indispo : on garde pour un prochain cycle. Sauf un ID que l'API dit
+      // introuvable a repetition : ce n'est pas une panne, rien a recuperer.
+      if (isNotFound(err) && countNotFound(`profile:${id}`)) {
+        delPendingProfile(id);
+        abandoned++;
+      }
     }
   }
 
   // Recherches par pseudo : succes => searchStore + index local remplis par searchPlayers().
-  for (const name of [...pendingSearches]) {
+  for (const name of takeBatch(pendingSearches, PENDING_PER_TICK)) {
     try {
       const results = await searchPlayers(name);
       if (results.length) {
@@ -603,13 +712,19 @@ export async function retryPending() {
         // On pre-charge aussi le profil du meilleur resultat pour que /stats /rank marche direct.
         revalidate(results[0].id).catch(() => {});
         recovered++;
+      } else if (countNotFound(`search:${name}`)) {
+        delPendingSearch(name); // l'API repond, mais aucun joueur classe sous ce pseudo
+        abandoned++;
       }
-    } catch {
-      /* toujours indispo : on garde pour le prochain cycle */
+    } catch (err) {
+      if (isNotFound(err) && countNotFound(`search:${name}`)) {
+        delPendingSearch(name);
+        abandoned++;
+      }
     }
   }
 
-  return { recovered, pendingProfiles: pendingProfiles.size, pendingSearches: pendingSearches.size };
+  return { recovered, abandoned, pendingProfiles: pendingProfiles.size, pendingSearches: pendingSearches.size };
 }
 
 async function fetchPlayerProfile(brawlhallaId) {
@@ -701,6 +816,9 @@ export function buildPlayerProfile(brawlhallaId, { ranked = null, teamsData = nu
     // existait : le tier 1v1 calcule est alors null PAR DEFAUT D'INFO, pas parce que le joueur
     // est non classe. Les appelants NE doivent donc pas retirer le role 1v1 dans ce cas.
     ranked1v1Available: ranked != null,
+    // true si /player/stats?mode=all n'a renvoye AUCUNE donnee (404 masque par apiGetOrNull,
+    // ou rejet) : le niveau a 0 vient d'un manque d'info, les appelants gardent l'ancien.
+    allUnavailable: all == null,
   };
 }
 

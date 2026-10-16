@@ -123,6 +123,52 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_leaderboard_rating ON leaderboard(rating DESC);
 `);
 
+// ---------- Évolution du schéma (PRAGMA user_version) ----------
+// `CREATE TABLE IF NOT EXISTS` ne touche JAMAIS une table existante : une colonne ajoutée
+// dans un CREATE (ici ou dans un module) n'existe pas sur la base de prod, et le premier
+// `db.prepare` qui l'utilise fait planter le bot au démarrage. Toute évolution d'une table
+// existante = mettre à jour son CREATE (bases neuves) ET ajouter une étape À LA FIN de cette
+// liste (une étape déployée ne se modifie ni ne se réordonne plus). L'étape i amène la base
+// à user_version = i + 1. Exemple :
+//   (d) => addColumn(d, "xp", "streak INTEGER NOT NULL DEFAULT 0"),
+const SCHEMA_STEPS = [];
+
+/**
+ * Ajoute une colonne si elle manque. Idempotent : sans effet si elle existe déjà (base neuve,
+ * dont le CREATE l'a) ou si la table n'existe pas encore (elle sera créée plus tard par son
+ * module, avec la colonne dans son CREATE).
+ */
+export function addColumn(database, table, columnDef) {
+  const cols = database.pragma(`table_info(${table})`);
+  if (!cols.length) return;
+  const name = columnDef.trim().split(/\s+/)[0];
+  if (cols.some((c) => c.name === name)) return;
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+}
+
+/**
+ * Applique les étapes de schéma manquantes, chacune dans une transaction avec sa montée de
+ * user_version : une étape en échec est annulée en entier et rejouée au démarrage suivant.
+ * Renvoie la version finale.
+ */
+export function migrateSchema(database, steps) {
+  let version = database.pragma("user_version", { simple: true });
+  if (version > steps.length) {
+    console.warn(`Schéma de la base en v${version}, plus récent que ce code (v${steps.length}) : retour à une version antérieure ?`);
+  }
+  while (version < steps.length) {
+    const next = version + 1;
+    database.transaction(() => {
+      steps[next - 1](database);
+      database.pragma(`user_version = ${next}`);
+    })();
+    version = next;
+    console.log(`Schéma de la base migré en v${version}.`);
+  }
+  return version;
+}
+migrateSchema(db, SCHEMA_STEPS);
+
 const getStmt = db.prepare("SELECT value FROM kv WHERE key = ?");
 const setStmt = db.prepare(
   "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -197,13 +243,17 @@ export function closeDb() {
 }
 
 /**
- * Garde de migration unique : renvoie true la PREMIÈRE fois qu'on appelle ce nom,
- * puis false ensuite (le flag est persisté dans la table kv sous "_migrations").
+ * Migration de données unique : exécute `fn` (SYNCHRONE) puis pose le drapeau `name` (kv
+ * "_migrations"), le tout dans UNE transaction. Si `fn` lève, rien n'est conservé, drapeau
+ * compris : l'erreur remonte à l'appelant et la migration est rejouée au démarrage suivant
+ * (posé avant le travail, le drapeau faisait perdre pour toujours une migration en échec).
+ * Renvoie true si la migration vient de tourner, false si elle était déjà faite.
  */
-export function runOnce(name) {
-  const flags = loadDoc("_migrations", {});
-  if (flags[name]) return false;
-  flags[name] = true;
-  saveDoc("_migrations", flags);
-  return true;
+export function runOnce(name, fn) {
+  return db.transaction(() => {
+    if (loadDoc("_migrations", {})[name]) return false;
+    fn();
+    saveDoc("_migrations", { ...loadDoc("_migrations", {}), [name]: true });
+    return true;
+  })();
 }

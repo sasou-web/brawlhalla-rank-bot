@@ -1,10 +1,13 @@
-import { getPlayerProfile, getLegends } from "./brawlhalla.js";
-import { applyMemberRoles, applyMainLegendRole, ensureRoles, updateTopServerRole } from "./roles.js";
+import { getPlayerProfile, getLegends, baseTier, tierFromRating } from "./brawlhalla.js";
+import { applyMemberRoles, applyMainLegendRole, refreshRankRoles, updateTopServerRole } from "./roles.js";
 import { setLink, getLink, getAllLinks } from "./store.js";
 import { getSettings } from "./settings.js";
 import { tierIndex, SMURF_JUMP_THRESHOLD, MAIN_LEGEND_MIN_GAMES } from "./config.js";
 import { recordRating } from "./ratingStore.js";
 import { getCounter, grantAndAnnounce } from "./achievements.js";
+
+// Durée pendant laquelle un 404 sur ranked laisse le rang mondial connu en place.
+const RANK_CARRY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Recupere le profil d'un joueur, applique tous ses roles (tiers, niveau, top),
@@ -33,7 +36,19 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     if (!profile.ranked1v1Available) {
       tiers["1v1"] = profile.tiers?.["1v1"] ?? previous.tiers?.["1v1"] ?? null;
       rating1v1 = rating1v1 || previous.rating1v1 || 0;
+      // Région et rang mondial viennent du même appel : sans lui, on garde ceux du lien
+      // (sinon les rôles Région et Top 100 tombaient sur un simple 404 momentané).
+      region = region || previous.region || null;
+      // Rang mondial repris seulement si ranked a répondu récemment : un joueur en placements
+      // (ranked null pendant des jours, typiquement après un reset de saison) ne doit pas garder
+      // le rôle Top 100 de la saison précédente.
+      const seenAt = Date.parse(previous.rankedSeenAt || "");
+      if (Number.isFinite(seenAt) && Date.now() - seenAt < RANK_CARRY_MS) {
+        globalRank = globalRank || previous.globalRank || 0;
+      }
     }
+    // Stats globales indisponibles (404 sur /all) : le niveau à 0 n'est pas une vraie valeur.
+    if (profile.allUnavailable) level = level || previous.level || 0;
     // 2v2 indisponible (l'endpoint teams n'a rien renvoyé) : idem, on garde le rank 2v2 connu.
     if (profile.teamsUnavailable) {
       tiers["2v2"] = profile.tiers?.["2v2"] ?? previous.tiers?.["2v2"] ?? null;
@@ -47,15 +62,26 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
     }
   }
 
+  // Pic de la saison par mode (peak_rating de l'API, remis à zéro par le jeu à chaque saison) :
+  // le badge de fin de saison récompense le meilleur tier ATTEINT, pas celui du jour.
+  // Donnée indisponible (404, profil partiel ou minimal) : on garde le pic connu.
+  const bestTeamPeak = Math.max(0, ...(profile.teams ?? []).map((t) => Number(t.peak_rating) || 0));
+  const peakTiers = {
+    "1v1": profile.ranked1v1Available === true ? peakTier(profile.peak1v1) : previous?.peakTiers?.["1v1"] ?? null,
+    "2v2": profile.teamsUnavailable === false ? peakTier(bestTeamPeak) : previous?.peakTiers?.["2v2"] ?? null,
+  };
+
   const result = await applyMemberRoles(member, { tiers, level, globalRank, region }, rolesByName);
 
   await setLink(member.id, brawlhallaId, profile.name ?? member.user.username, {
     tiers,
+    peakTiers,
     rating1v1,
     rating2v2,
     level,
     globalRank,
     region,
+    rankedSeenAt: profile.ranked1v1Available ? new Date().toISOString() : previous?.rankedSeenAt ?? null,
   });
 
   // Historique de rating (pour la courbe /progression). Best-effort : ne bloque pas la synchro.
@@ -98,6 +124,13 @@ export async function syncMember(member, brawlhallaId, rolesByName, opts = {}) {
   return { profile, tiers, ratings: profile.ratings, level, globalRank, region, ...result };
 }
 
+// Tier de base d'un pic de rating. tierFromRating et non resolveBaseTier : sans tier fourni
+// par l'API, ≥ 2000 = Diamond (Valhallan dépend du classement : il est couvert par le tier
+// courant dans seasonRewardTier).
+function peakTier(rating) {
+  return rating > 0 ? baseTier(tierFromRating(rating)) : null;
+}
+
 // Garde anti-chevauchement partagée : un refresh complet est séquentiel (1 appel API forcé par
 // membre) et peut être long. On évite que deux refresh globaux tournent en même temps.
 let syncingAll = false;
@@ -109,14 +142,23 @@ export function isSyncingAll() {
  * Resynchronise TOUS les membres liés du serveur : (re)crée les rôles gérés si besoin,
  * applique à chacun ses rôles de rank (1v1 + 2v2, niveau, top, région) en corrigeant les
  * manquants/erronés, puis met à jour le rôle « n°1 du serveur ». Best-effort par membre.
- * `rolesByName` peut être fourni (contexte du bot) ; sinon il est calculé via ensureRoles.
- * Renvoie { ok, fail, total }. Lève si un refresh est déjà en cours.
+ * `rolesByName` (ctx.rolesByName du bot) est revérifié à chaque appel et mis à jour EN
+ * PLACE (rôle supprimé par un admin = recréé) ; sans lui, une map neuve est construite.
+ * Point d'entrée UNIQUE des refresh globaux (automatique, /refresh, bouton, dashboard) :
+ * son verrou empêche deux passes simultanées (annonces de promotion en double).
+ * Renvoie { ok, fail, total, top }. Lève si un refresh est déjà en cours.
  */
 export async function syncAllMembers(guild, rolesByName = null) {
   if (syncingAll) throw new Error("Une actualisation est déjà en cours.");
   syncingAll = true;
   try {
-    const roles = rolesByName ?? (await ensureRoles(guild));
+    const roles = rolesByName ?? new Map();
+    try {
+      await refreshRankRoles(guild, roles);
+    } catch (err) {
+      if (!rolesByName) throw err; // aucune map connue : impossible d'appliquer les rôles
+      console.warn("Roles de rank non reverifies (on garde ceux connus) :", err.message);
+    }
     const links = await getAllLinks();
     const entries = Object.entries(links);
     let ok = 0;
@@ -127,19 +169,21 @@ export async function syncAllMembers(guild, rolesByName = null) {
         if (!member) continue;
         await syncMember(member, brawlhallaId, roles);
         ok++;
-      } catch {
+      } catch (err) {
+        console.warn(`  refresh echoue pour ${discordId} : ${err.message}`);
         fail++;
       }
     }
 
     // Met à jour le rôle « n°1 du serveur » après avoir rafraîchi tous les ratings.
+    let top = null;
     try {
-      await updateTopServerRole(guild);
-    } catch {
-      /* best-effort */
+      top = await updateTopServerRole(guild);
+    } catch (err) {
+      console.warn("Maj role n°1 du serveur echouee :", err.message); // best-effort
     }
 
-    return { ok, fail, total: entries.length };
+    return { ok, fail, total: entries.length, top };
   } finally {
     syncingAll = false;
   }

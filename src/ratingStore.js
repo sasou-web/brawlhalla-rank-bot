@@ -36,11 +36,11 @@ function dayKey(ts) {
 // ---------- Migration unique : ancien doc JSON "ratings" -> table rating_history ----------
 migrateFromJson();
 function migrateFromJson() {
-  if (!runOnce("ratingsTable")) return;
-  const old = loadDoc("ratings", null);
-  if (!old || typeof old !== "object") return;
   let migrated = 0;
-  const tx = db.transaction(() => {
+  // Un échec annule tout, drapeau compris (voir runOnce) : rejouée au démarrage suivant.
+  runOnce("ratingsTable", () => {
+    const old = loadDoc("ratings", null);
+    if (!old || typeof old !== "object") return;
     for (const [id, points] of Object.entries(old)) {
       if (!Array.isArray(points)) continue;
       for (const p of points) {
@@ -58,7 +58,6 @@ function migrateFromJson() {
       }
     }
   });
-  tx();
   if (migrated) console.log(`Migration ratings -> table rating_history (${migrated} point(s)).`);
 }
 

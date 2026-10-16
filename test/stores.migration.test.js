@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { db } from "../src/db.js";
 import { getProfileEntry, setProfileEntry, getWarmIds } from "../src/profileStore.js";
 import { getSearchEntry, setSearchEntry } from "../src/searchStore.js";
 import {
@@ -35,6 +36,27 @@ test("profileStore : getWarmIds ne renvoie que les profils récents", async () =
   // Une très petite fenêtre exclut un profil dont l'accès date d'avant.
   const none = await getWarmIds(-1);
   assert.equal(none.includes(recent), false);
+});
+
+test("profileStore : une mise à jour du cache ne réchauffe pas le profil (last_access vieillit)", async () => {
+  const id = "pf_cold";
+  await setProfileEntry(id, { name: "Cold" });
+  const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+  db.prepare("UPDATE profiles SET last_access = ? WHERE brawlhalla_id = ?").run(eightDaysAgo, id);
+  await setProfileEntry(id, { name: "Cold v2" }); // ex. warm / refresh / file de récupération
+  const row = db.prepare("SELECT last_access AS a, data FROM profiles WHERE brawlhalla_id = ?").get(id);
+  assert.equal(row.a, eightDaysAgo);
+  assert.equal(JSON.parse(row.data).name, "Cold v2");
+  assert.equal((await getWarmIds()).includes(id), false);
+});
+
+test("profileStore : getWarmIds trie par accès récent et respecte la limite", async () => {
+  const now = Date.now();
+  for (const [i, id] of ["pf_l1", "pf_l2", "pf_l3"].entries()) {
+    await setProfileEntry(id, { name: id });
+    db.prepare("UPDATE profiles SET last_access = ? WHERE brawlhalla_id = ?").run(now + 10_000 + i * 1000, id);
+  }
+  assert.deepEqual(await getWarmIds(undefined, 2), ["pf_l3", "pf_l2"]);
 });
 
 // ---------- searchStore ----------

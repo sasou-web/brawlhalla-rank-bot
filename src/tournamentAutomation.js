@@ -18,6 +18,7 @@ import { buildMatchPayload, buildModAlert } from "./tournamentUI.js";
  * - nettoyage des salons des matchs terminés.
  *
  * Point d'entrée : `tournamentTick(client, guild)` (appelé périodiquement).
+ * `teardownTournament(guild, t)` : nettoyage complet en fin de tournoi.
  */
 
 function slug(s) {
@@ -121,6 +122,29 @@ async function cleanupMatchChannels(guild) {
       if (ch) await ch.delete("Match terminé").catch(() => {});
     }
     await clearMatchChannel(guild.id, m.id);
+  }
+}
+
+/**
+ * Fin de tournoi (archivage, suppression) : supprime les salons de match encore ouverts
+ * (uniquement ceux référencés par t.matches) et retire le rôle participant aux inscrits,
+ * sinon l'annonce de check-in du tournoi suivant les mentionnerait encore. À appeler APRÈS
+ * l'archivage / la suppression (le tick ne recrée alors plus rien). Best-effort.
+ */
+export async function teardownTournament(guild, t) {
+  if (!guild || !t) return;
+  for (const m of Object.values(t.matches || {})) {
+    for (const id of [m.channelId, m.voiceChannelId]) {
+      if (!id) continue;
+      const ch = await guild.channels.fetch(id).catch(() => null);
+      if (ch) await ch.delete("Fin du tournoi").catch(() => {});
+    }
+  }
+  if (!t.participantRoleId) return;
+  const userIds = new Set((t.participants || []).flatMap((p) => p.members || []));
+  for (const uid of userIds) {
+    const member = await guild.members.fetch(uid).catch(() => null);
+    if (member) await member.roles.remove(t.participantRoleId, "Fin du tournoi").catch(() => {});
   }
 }
 

@@ -183,6 +183,31 @@ function vcIsOwner(interaction, owner) {
   return interaction.user.id === owner || interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels);
 }
 
+// ---- Renommage : limite Discord de 2 changements de nom par salon et par 10 min ----
+// Au-delà, la requête n'échoue pas : @discordjs/rest la met en attente jusqu'à la fin de la
+// fenêtre (jusqu'à 10 min), l'interaction expire et le salon change de nom bien plus tard
+// sans explication. On compte donc les renommages en mémoire et on refuse le suivant.
+const RENAME_MAX = 2;
+const RENAME_WINDOW_MS = 10 * 60 * 1000;
+const RENAME_TIMEOUT_MS = 5000; // au-delà, on prévient le membre au lieu de le faire attendre
+const renameLog = new Map(); // channelId -> timestamps des renommages récents
+
+/** Délai (ms) avant de pouvoir renommer à nouveau, d'après l'historique ; 0 = possible. */
+export function renameWaitMs(history, now = Date.now()) {
+  const recent = (history || []).filter((ts) => now - ts < RENAME_WINDOW_MS);
+  if (recent.length < RENAME_MAX) return 0;
+  return RENAME_WINDOW_MS - (now - recent[recent.length - RENAME_MAX]);
+}
+
+function recordRename(channelId, now = Date.now()) {
+  for (const [id, list] of renameLog) {
+    const recent = list.filter((ts) => now - ts < RENAME_WINDOW_MS);
+    if (recent.length) renameLog.set(id, recent);
+    else renameLog.delete(id);
+  }
+  renameLog.set(channelId, [...(renameLog.get(channelId) || []), now]);
+}
+
 export async function handleVoiceControlButton(interaction, ctx) {
   const c = await vcContext(interaction);
   if (!c) return;
@@ -298,7 +323,34 @@ export async function handleVoiceControlModal(interaction, ctx) {
   if (interaction.customId === "vc_rename_modal") {
     const name = interaction.fields.getTextInputValue("name")?.trim().slice(0, 95);
     if (!name) return interaction.reply({ content: "Nom vide.", flags: EPHEMERAL });
-    await channel.setName(name).catch(() => {});
-    return interaction.reply({ content: `✏️ Salon renommé en **${name}**.` });
+    const wait = renameWaitMs(renameLog.get(channel.id));
+    if (wait > 0) {
+      return interaction.reply({
+        content: `⏳ Discord limite à **${RENAME_MAX} renommages par 10 min** pour un salon. Réessaie dans **${Math.ceil(wait / 60_000)} min**.`,
+        flags: EPHEMERAL,
+      });
+    }
+    recordRename(channel.id);
+    // Accusé AVANT l'appel Discord (fenêtre de 3 s), puis on n'attend pas indéfiniment.
+    await interaction.deferReply();
+    let timer;
+    const outcome = await Promise.race([
+      channel.setName(name).then(
+        () => "ok",
+        () => "error",
+      ),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve("slow"), RENAME_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    const content =
+      outcome === "ok"
+        ? `✏️ Salon renommé en **${name}**.`
+        : outcome === "slow"
+          ? `⏳ Discord fait patienter ce renommage (limite de ${RENAME_MAX} par 10 min) : le salon prendra le nom **${name}** dès que possible.`
+          : "❌ Impossible de renommer le salon (permissions du bot ?).";
+    // Réponse publique qui recopie le nom saisi : aucune mention autorisée.
+    return interaction.editReply({ content, allowedMentions: { parse: [] } });
   }
 }

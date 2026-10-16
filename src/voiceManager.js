@@ -111,7 +111,17 @@ async function createTempChannel(member, cfg, hubChannel, hub) {
       reason: "Salon vocal temporaire",
     });
     await addTempChannel(guild.id, channel.id, member.id);
-    await member.voice.setChannel(channel).catch(() => {});
+    // Deplacement impossible (membre deja ressorti du hub, permission « Deplacer des membres »
+    // manquante...) : le salon resterait vide sans jamais etre supprime -> on le retire aussitot.
+    const moved = await member.voice
+      .setChannel(channel)
+      .then(() => true)
+      .catch(() => false);
+    if (!moved) {
+      await channel.delete("Salon vocal temporaire : membre non deplace").catch(() => {});
+      await removeTempChannel(guild.id, channel.id);
+      return null;
+    }
 
     // Donne au createur le controle de son salon (best-effort : n'echoue pas la creation).
     channel.permissionOverwrites
@@ -135,9 +145,11 @@ export async function handleTempVoice(oldState, newState) {
   const guild = newState.guild || oldState.guild;
   if (!guild) return;
 
-  // Un membre rejoint un hub -> on lui cree un salon selon le modele de CE hub.
+  // Un membre rejoint un hub -> on lui cree un salon selon le modele de CE hub. Seulement a
+  // l'ENTREE : micro, casque, camera ou stream emettent aussi un VoiceStateUpdate sur place.
   const cfg = await getTempConfig(guild.id);
-  if (cfg.enabled && newState.channelId && newState.member) {
+  const joined = newState.channelId && newState.channelId !== oldState.channelId;
+  if (cfg.enabled && joined && newState.member) {
     const hub = await getHub(guild.id, newState.channelId);
     if (hub) {
       const hubChannel =

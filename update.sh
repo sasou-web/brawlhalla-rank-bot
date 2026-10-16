@@ -3,11 +3,21 @@
 # A lancer sur le serveur, dans le dossier du projet (clone git) :
 #   sudo bash update.sh
 #
-# Etapes : pull du code -> install des deps si besoin -> (re)deploy des commandes -> restart.
+# Etapes : instantane de la base -> pull du code -> install des deps si besoin
+#          -> (re)deploy des commandes -> restart.
 # Les donnees (data/, .env, backup.env) sont gitignorees : jamais touchees par le pull.
 
 set -e
 cd "$(dirname "$0")"
+
+echo "==> Instantane de la base avant mise a jour..."
+# Point de retour si la nouvelle version migre mal les donnees (la sauvegarde de 4h peut
+# dater de 24h) : backups/pre-update_<date>_<commit>.db, les 5 derniers sont gardes.
+# Pris AVANT le pull et avant `npm run deploy`, qui ouvre deja la base. Via node et
+# better-sqlite3 : le CLI sqlite3 n'est pas forcement installe (install-server.sh ne le met pas).
+# NON BLOQUANT : un echec ne doit jamais empecher la mise a jour.
+mkdir -p backups && node scripts/snapshot-db.js "$(git rev-parse --short HEAD 2>/dev/null)" \
+  || echo "    !! Instantane impossible : mise a jour poursuivie SANS point de retour."
 
 echo "==> Recuperation du code (git pull)..."
 # package-lock.json est regenere par 'npm install' sur le serveur, ce qui bloque

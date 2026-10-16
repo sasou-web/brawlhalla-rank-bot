@@ -9,13 +9,22 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # 20 = version du serveur de prod (fin de vie le 30/04/2026).
+    # Node 24 retire pour l'instant : better-sqlite3 11.x plante a la fermeture du process
+    # sous Node 24 (« Assertion failed: (env) != nullptr », RemoveEnvironmentCleanupHook).
+    # Le correctif est better-sqlite3 13, qui exige Node >= 22 : a faire EN MEME TEMPS que
+    # la migration du serveur vers Node 24, puis remettre "24" ici.
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
           cache: "npm"
 
       - name: Install dependencies

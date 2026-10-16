@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, MessageFlags } from "discord.js";
+import { Client, GatewayIntentBits, Events, MessageFlags, Partials } from "discord.js";
 import { config } from "./config.js";
 import { installLogCapture } from "./logBuffer.js";
 import { initHealth, notifyAdmin } from "./health.js";
@@ -16,27 +16,29 @@ process.on("uncaughtException", (err) => {
   console.error("uncaughtException :", err?.message || err);
   notifyAdmin(`🛑 **Erreur non gérée** : ${err?.message || err}. Le process va probablement redémarrer (pm2).`);
 });
-import { ensureRoles, ensureValidatorRole, ensureServerLevelRoles, updateTopServerRole } from "./roles.js";
+import { refreshRankRoles, ensureValidatorRole, ensureServerLevelRoles } from "./roles.js";
 import { handleChatInput, handleButton, handleSelect, handleModal } from "./commands.js";
-import { syncMember } from "./sync.js";
+import { syncAllMembers, isSyncingAll } from "./sync.js";
 import { getAllLinks } from "./store.js";
 import { closeDb } from "./db.js";
 import { setSetting } from "./settings.js";
 import { warmProfiles, syncLeaderboard, getIndexStats, retryPending } from "./brawlhalla.js";
 import { getLevelConfig, setLevelConfig, setReward } from "./levels.js";
 import { tickTikTok } from "./tiktok.js";
-import { handleClipMessage, handleClipReaction } from "./clips.js";
+import { handleClipMessage } from "./clips.js";
 import { handleWordFilter } from "./wordfilter.js";
-import { handleGuessRankMessage, getGuessRankConfig, reactionStoredKey } from "./guessrank.js";
+import { handleGuessRankMessage } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
 import { handleLolRole } from "./lol.js";
+import { onMessageUpdate, onGuildMemberUpdate, onMessageReactionAdd } from "./partialEvents.js";
 import { runWeeklyRecap } from "./progression.js";
 import { tournamentTick } from "./tournamentAutomation.js";
 import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
 import { handleMessageXp, tickVoiceXp, VOICE_TICK_MS } from "./xpEvents.js";
 import { endDueGiveaways } from "./giveaway.js";
 import { tickReminders } from "./reminders.js";
+import { removeOpenTicket } from "./tickets.js";
 
 const client = new Client({
   intents: [
@@ -47,9 +49,14 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
+  // Sans partials, discord.js n'émet ni modification, ni réaction, ni départ pour un message
+  // ou un membre absent du cache (antérieur au dernier redémarrage, par exemple). Les
+  // handlers concernés rechargent ou ignorent ces objets partiels (./partialEvents.js).
+  partials: [Partials.Message, Partials.Reaction, Partials.GuildMember],
 });
 
-// Etat partage : map nom_de_role -> Role, rafraichie au demarrage.
+// Etat partage : map nom_de_role -> Role, remplie au demarrage puis rafraichie EN PLACE a
+// chaque refresh global (refreshRankRoles) : ne jamais la reassigner.
 const ctx = { rolesByName: new Map() };
 
 // Suivi des boucles périodiques pour pouvoir les arrêter proprement à l'extinction.
@@ -60,48 +67,50 @@ function every(fn, ms) {
   return h;
 }
 
-// Garde anti-chevauchement : un refresh est séquentiel (await par membre) et peut, sur
-// beaucoup de liaisons, dépasser l'intervalle. On évite qu'un second cycle se superpose.
-let refreshing = false;
-
+// Refresh automatique : même point d'entrée, donc même verrou anti-chevauchement, que
+// /refresh, le bouton « Actualiser les rôles » et le dashboard (syncAllMembers). Avec deux
+// verrous distincts, deux passes lisaient le même état précédent et annonçaient deux fois
+// chaque promotion. Revérifie aussi les rôles gérés et le rôle « n°1 du serveur ».
 async function refreshAllMembers(guild) {
-  if (refreshing) {
-    console.log("Refresh auto ignoré : un cycle est déjà en cours.");
+  const total = Object.keys(await getAllLinks()).length;
+  if (total === 0) return;
+  if (isSyncingAll()) {
+    console.log("Refresh auto ignoré : une actualisation est déjà en cours.");
     return;
   }
-  refreshing = true;
+  console.log(`Refresh auto : ${total} membre(s) lie(s)...`);
+  const r = await syncAllMembers(guild, ctx.rolesByName);
+  console.log(`Refresh auto termine : ${r.ok}/${r.total} mis a jour.`);
+  if (r.top) console.log(`Role n°1 du serveur : <@${r.top.topId}> (${r.top.rating}).`);
+}
+
+// Rôles de rank : (re)crée les rôles gérés et met à jour ctx.rolesByName. Vrai si réussi.
+async function prepareRankRoles(guild) {
   try {
-    const links = await getAllLinks();
-    const entries = Object.entries(links);
-    if (entries.length === 0) return;
-
-    console.log(`Refresh auto : ${entries.length} membre(s) lie(s)...`);
-    let ok = 0;
-    for (const [discordId, { brawlhallaId }] of entries) {
-      try {
-        const member = await guild.members.fetch(discordId).catch(() => null);
-        if (!member) continue;
-        await syncMember(member, brawlhallaId, ctx.rolesByName);
-        ok++;
-      } catch (err) {
-        console.warn(`  refresh echoue pour ${discordId} : ${err.message}`);
-      }
-    }
-    console.log(`Refresh auto termine : ${ok}/${entries.length} mis a jour.`);
-
-    // Met a jour le role "n°1 du serveur" (plus haut rating 1v1 parmi les membres lies).
-    try {
-      const top = await updateTopServerRole(guild);
-      if (top) console.log(`Role n°1 du serveur : <@${top.topId}> (${top.rating}).`);
-    } catch (err) {
-      console.warn("Maj role n°1 du serveur echouee :", err.message);
-    }
-  } finally {
-    refreshing = false;
+    await refreshRankRoles(guild, ctx.rolesByName);
+    console.log(`${ctx.rolesByName.size} role(s) de rank prets.`);
+    return true;
+  } catch (err) {
+    console.error("Roles de rank non prets :", err.message);
+    return false;
   }
 }
 
 client.once(Events.ClientReady, async (c) => {
+  // Filet de sécurité : sans lui, une erreur Discord au démarrage était avalée par
+  // unhandledRejection et laissait un bot « online » mais sans aucune boucle, sans alerte.
+  try {
+    await onReady(c);
+  } catch (err) {
+    console.error("Demarrage incomplet :", err);
+    notifyAdmin(
+      `🛑 **Démarrage incomplet** : ${err?.message || err}. Certaines tâches de fond ne tournent pas : ` +
+        "redémarre le bot (`pm2 restart`) une fois le problème réglé.",
+    );
+  }
+});
+
+async function onReady(c) {
   console.log(`Connecte en tant que ${c.user.tag}`);
 
   // Surveillance : écouteurs de connexion Discord + boucle healthcheck API + alerte de démarrage.
@@ -109,8 +118,21 @@ client.once(Events.ClientReady, async (c) => {
   notifyAdmin(`🟢 **Bot démarré/redémarré** — connecté en tant que ${c.user.tag}.`);
 
   const guild = await client.guilds.fetch(config.guildId);
-  ctx.rolesByName = await ensureRoles(guild);
-  console.log(`${ctx.rolesByName.size} role(s) de rank prets.`);
+
+  // Une erreur Discord ici (5xx, permission manquante, limite de rôles atteinte) ne bloque
+  // plus le démarrage : les boucles partent quand même, et on retente toutes les 5 min (le
+  // refresh global revérifie aussi les rôles à chaque cycle).
+  if (!(await prepareRankRoles(guild))) {
+    notifyAdmin(
+      "⚠️ **Rôles de rank non prêts** (erreur Discord au démarrage) : les rôles ne sont pas attribués " +
+        "pour l'instant. Nouvel essai automatique toutes les 5 min.",
+    );
+    const retryRoles = every(async () => {
+      if (!(await prepareRankRoles(guild))) return;
+      clearInterval(retryRoles);
+      notifyAdmin("✅ **Rôles de rank prêts.**");
+    }, 5 * 60 * 1000);
+  }
 
   // Cree le role validateur s'il manque et le memorise comme validateur par defaut.
   try {
@@ -140,14 +162,14 @@ client.once(Events.ClientReady, async (c) => {
   // durer plusieurs minutes quand l'API Brawlhalla est lente). Le panel n'a besoin que du
   // client : les données sont récupérées à la demande. Évite l'attente au démarrage.
   try {
-    startWebServer(client);
+    startWebServer(client, ctx);
   } catch (err) {
     console.warn("Dashboard web non démarré :", err.message);
   }
 
   // Premier refresh EN ARRIÈRE-PLAN (non bloquant) : il peut durer plusieurs minutes si
-  // l'API est lente, mais ne doit pas retarder la mise en place des autres tâches. La garde
-  // anti-chevauchement (refreshing) empêche l'intervalle de se superposer au premier cycle.
+  // l'API est lente, mais ne doit pas retarder la mise en place des autres tâches. Le verrou
+  // de syncAllMembers empêche l'intervalle (ou un refresh admin) de se superposer au cycle.
   refreshAllMembers(guild).catch(console.error);
   const intervalMs = Math.max(5, config.refreshIntervalMinutes) * 60 * 1000;
   every(() => refreshAllMembers(guild).catch(console.error), intervalMs);
@@ -174,7 +196,8 @@ client.once(Events.ClientReady, async (c) => {
 
   // Recuperation en arriere-plan des profils/recherches qui ont echoue (API capricieuse) :
   // reessaie regulierement jusqu'a reussir, pour que la commande relancee marche a coup sur.
-  // Garde anti-chevauchement : un cycle peut durer jusqu'a ~25 s (budget de retry).
+  // Garde anti-chevauchement : en panne, un cycle peut durer plusieurs minutes (budget de
+  // retry de 30 s PAR élément, jusqu'à 5 profils + 5 recherches par cycle).
   let retrying = false;
   every(async () => {
     if (retrying) return;
@@ -182,6 +205,7 @@ client.once(Events.ClientReady, async (c) => {
     try {
       const r = await retryPending();
       if (r.recovered) console.log(`Récupération API : ${r.recovered} élément(s) chargé(s) en base.`);
+      if (r.abandoned) console.log(`Récupération API : ${r.abandoned} élément(s) introuvable(s) abandonné(s).`);
     } catch {
       /* best-effort */
     } finally {
@@ -195,7 +219,8 @@ client.once(Events.ClientReady, async (c) => {
   // Nettoie les salons vocaux temporaires laisses vides apres un redemarrage.
   await cleanupTempChannels(guild);
 
-  // Automatisation des matchs de tournoi (salons, timers AFK/forfait) chaque minute.
+  // Automatisation des matchs de tournoi chaque minute : création des salons, alerte staff
+  // (litige, aucune manche jouée après `alertMinutes`), nettoyage. Aucun forfait automatique.
   every(() => tournamentTick(client, guild).catch(() => {}), 60 * 1000);
 
   // Rappels automatiques (vocaux privés, règles...) postés dans un salon, chaque minute
@@ -226,7 +251,7 @@ client.once(Events.ClientReady, async (c) => {
     tickTikTok(client, guild.id, { notify: notifyAdmin }).catch((err) => console.warn("Poll TikTok échoué :", err.message));
   every(tiktokTick, 30 * 1000);
   tiktokTick();
-});
+}
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
@@ -284,24 +309,22 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 // Filtre de mots sur les messages modifiés (contournement « j'écris propre puis j'édite »).
-// Sans partials, discord.js n'émet cet événement que pour les messages en cache (récents).
-client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
-  try {
-    if (!newMessage.guild || newMessage.author?.bot) return;
-    // Mises à jour sans changement de texte (aperçu de lien ajouté par Discord…) : ignorées.
-    if (!oldMessage.partial && oldMessage.content === newMessage.content) return;
-    const msg = newMessage.partial ? await newMessage.fetch() : newMessage;
-    await handleWordFilter(msg, { edited: true });
-  } catch (err) {
-    console.warn("Filtre de mots (modification) :", err.message);
-  }
-});
+// Logique extraite dans ./partialEvents.js (messages hors cache = partiels).
+client.on(Events.MessageUpdate, (oldMessage, newMessage) => onMessageUpdate(oldMessage, newMessage));
 
 // ---------- Salons vocaux temporaires ("rejoindre pour creer") ----------
 // Logique extraite dans ./voiceManager.js (handleTempVoice, cleanupTempChannels).
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   handleTempVoice(oldState, newState).catch((e) => console.warn("Erreur tempvoice :", e.message));
+});
+
+// ---------- Tickets : salon supprimé à la main ----------
+// Un ticket supprimé sans passer par « Fermer » resterait « ouvert » en base et bloquerait
+// son auteur (« Tu as déjà un ticket ouvert »). On purge l'entrée (sans effet hors ticket).
+client.on(Events.ChannelDelete, (channel) => {
+  if (!channel.guild) return;
+  removeOpenTicket(channel.guild.id, channel.id).catch((e) => console.warn("Tickets (salon supprimé) :", e.message));
 });
 
 // ---------- Bienvenue / Au revoir / Auto-role ----------
@@ -333,23 +356,12 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 // ---------- Section LoL : accueil quand le rôle LoL est attribué ----------
-// Couvre toutes les sources d'attribution : onboarding Discord, reaction-role,
-// ou ajout manuel par le staff. On transmet les rôles d'avant la mise à jour :
-// lol.js compare avec le rôle configuré pour n'accueillir qu'au vrai ajout.
+// Logique extraite dans ./partialEvents.js (membre hors cache = partiel, ignoré).
 
-client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
-  try {
-    const before = oldMember?.roles?.cache;
-    if (!before) return; // membre partiel : on ne peut pas comparer, on ignore
-    const previousRoleIds = [...before.keys()];
-    // Rien à faire si aucun rôle n'a été ajouté (pseudo, timeout, boost…).
-    if (newMember.roles.cache.every((_r, id) => before.has(id))) return;
-    await handleLolRole(newMember, { previousRoleIds });
-  } catch (err) {
-    console.warn("Erreur accueil LoL :", err.message);
-  }
-});
+client.on(Events.GuildMemberUpdate, (oldMember, newMember) => onGuildMemberUpdate(oldMember, newMember));
 
+// Un membre hors cache arrive ici en partiel (Partials.GuildMember) : l'utilisateur est
+// connu, ce qui suffit au message d'au revoir.
 client.on(Events.GuildMemberRemove, async (member) => {
   try {
     const cfg = await getWelcomeConfig(member.guild.id);
@@ -362,48 +374,10 @@ client.on(Events.GuildMemberRemove, async (member) => {
   }
 });
 
-// ---------- Devine ton rang : un seul vote (emoji de rank) par membre ----------
+// ---------- Clips (épinglage auto) + Devine ton rang (un seul vote par membre) ----------
+// Logique extraite dans ./partialEvents.js (réaction sur un message hors cache = partielle).
 
-client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  try {
-    if (user.bot) return;
-    if (reaction.partial) await reaction.fetch().catch(() => {});
-    const message = reaction.message;
-    const guild = message.guild;
-    if (!guild) return;
-
-    // Épinglage auto du meilleur clip (seuil de réactions), indépendant du Guess Rank.
-    try {
-      if (message.partial) await message.fetch().catch(() => {});
-      await handleClipReaction(message);
-    } catch {
-      /* best-effort */
-    }
-
-    const cfg = await getGuessRankConfig(guild.id);
-    if (!cfg.enabled || !cfg.singleVote) return;
-    if (!cfg.channelIds.includes(message.channelId)) return;
-
-    const rankKeys = new Set(cfg.reactions.map(reactionStoredKey));
-    const addedKey = reaction.emoji.id || reaction.emoji.name;
-    if (!rankKeys.has(addedKey)) return; // pas un emoji de rank : on ignore
-
-    // Retire les autres votes de rank de ce membre sur ce message.
-    if (message.partial) await message.fetch().catch(() => {});
-    for (const r of message.reactions.cache.values()) {
-      const key = r.emoji.id || r.emoji.name;
-      if (!rankKeys.has(key) || key === addedKey) continue;
-      try {
-        await r.users.fetch();
-        if (r.users.cache.has(user.id)) await r.users.remove(user.id);
-      } catch {
-        /* best-effort */
-      }
-    }
-  } catch (err) {
-    console.warn("Erreur vote rank :", err.message);
-  }
-});
+client.on(Events.MessageReactionAdd, (reaction, user) => onMessageReactionAdd(reaction, user));
 
 // ---------- Automatisation des matchs de tournoi ----------
 // Extraite dans ./tournamentAutomation.js (tournamentTick).

@@ -24,7 +24,7 @@ git push origin main
 
 ### 2. Côté serveur — déployer
 
-Se connecter puis lancer `update.sh` (git pull → npm install → lint+tests → npm run deploy → pm2 restart) :
+Se connecter puis lancer `update.sh` (instantané `backups/pre-update_*.db` → git pull → npm install → lint+tests → npm run deploy → pm2 restart) :
 
 ```bash
 ssh $SSH_CIBLE

@@ -113,11 +113,12 @@ function saveUserRow(guildId, userId, u) {
 // ---------- Migration unique : doc kv "levels".users -> table xp ----------
 migrateUsersToTable();
 function migrateUsersToTable() {
-  if (!runOnce("levelsXpTable")) return;
-  const doc = loadDoc(KEY, { guilds: {} });
-  if (!doc.guilds) return;
   let migrated = 0;
-  const tx = db.transaction(() => {
+  // Sans try/catch, volontairement : un échec annule tout (drapeau compris) et empêche le
+  // démarrage, plutôt que de laisser tourner le bot avec une table xp vide. Rejouée ensuite.
+  runOnce("levelsXpTable", () => {
+    const doc = loadDoc(KEY, { guilds: {} });
+    if (!doc.guilds) return;
     for (const [gid, g] of Object.entries(doc.guilds)) {
       const users = g.users || {};
       for (const [uid, u] of Object.entries(users)) {
@@ -134,10 +135,9 @@ function migrateUsersToTable() {
       }
       delete g.users; // la config seule reste dans le doc kv
     }
+    saveDoc(KEY, doc);
+    cache = null; // force le rechargement de la version nettoyée
   });
-  tx();
-  saveDoc(KEY, doc);
-  cache = null; // force le rechargement de la version nettoyée
   if (migrated) console.log(`Migration XP -> table xp (${migrated} membre(s)).`);
 }
 

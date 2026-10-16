@@ -40,7 +40,7 @@ export const DEFAULT_TOURNAMENT = {
   modAlertChannelId: "", // salon des alertes/litiges
   createVoice: false, // créer aussi un vocal éphémère par match
   alertMinutes: 7, // délai avant alerte mod si un joueur ne répond pas
-  forfeitMinutes: 10, // délai avant forfait auto
+  forfeitMinutes: 10, // NON appliqué (aucun forfait automatique) ; conservé pour les données existantes
   // --- Cast / hall of fame ---
   castFromTopN: 0, // a partir de ce "top N" (8 = top 8), les matchs sont VERROUILLES jusqu'a deblocage staff (pour caster). 0 = off
   hallOfFameChannelId: "", // salon ou poster le recap (podium + MVP) a l'archivage
@@ -131,14 +131,16 @@ export async function registerEntrant(guildId, { members, name }) {
   return entry;
 }
 
+// Désinscrit l'entrée (joueur ou équipe entière) du membre. Renvoie l'entrée retirée.
 export async function unregisterEntrant(guildId, userId) {
   const t = await getTournament(guildId);
   if (!t) throw new Error("Aucun tournoi en cours.");
   if (t.status !== "registration" && t.status !== "checkin") throw new Error("Trop tard pour se désinscrire.");
-  const before = t.participants.length;
-  t.participants = t.participants.filter((p) => !p.members.includes(userId));
-  if (t.participants.length === before) throw new Error("Tu n'es pas inscrit.");
+  const entry = findEntrantByUser(t, userId);
+  if (!entry) throw new Error("Tu n'es pas inscrit.");
+  t.participants = t.participants.filter((p) => p !== entry);
   await setTournament(guildId, t);
+  return entry;
 }
 
 export async function checkInEntrant(guildId, userId) {
@@ -188,6 +190,12 @@ function seedOrder(size) {
 export async function generateBracket(guildId, { onlyCheckedIn = true } = {}) {
   const t = await getTournament(guildId);
   if (!t) throw new Error("Aucun tournoi.");
+  // Régénérer écraserait t.matches : les salons des matchs en cours deviendraient orphelins
+  // et les résultats déjà joués seraient perdus.
+  const hasMatchChannel = Object.values(t.matches || {}).some((m) => m.channelId || m.voiceChannelId);
+  if (t.status === "running" || hasMatchChannel) {
+    throw new Error("Le tournoi est déjà lancé : le bracket ne peut pas être régénéré (archive ou supprime le tournoi pour recommencer).");
+  }
   let players = [...t.participants];
   if (t.checkInEnabled && onlyCheckedIn) players = players.filter((p) => p.checkedIn);
   if (players.length < 2) throw new Error("Il faut au moins 2 participants (check-in inclus).");
@@ -530,7 +538,10 @@ export async function markAlerted(guildId, matchId) {
 // ---------- Score manche par manche ----------
 
 // Enregistre le gagnant d'une manche ("a" ou "b"). Termine le match si le seuil est atteint.
-export async function reportGame(guildId, matchId, side) {
+// `expectedGames` (optionnel) = nombre de manches déjà jouées quand le joueur a demandé la
+// confirmation : si le score a bougé depuis (clic rejoué, double confirmation), on refuse
+// au lieu de compter un second point.
+export async function reportGame(guildId, matchId, side, expectedGames = null) {
   const t = await getTournament(guildId);
   if (!t) throw new Error("Aucun tournoi.");
   const m = t.matches[matchId];
@@ -538,6 +549,9 @@ export async function reportGame(guildId, matchId, side) {
   if (m.status === "done") throw new Error("Match déjà terminé.");
   if (side !== "a" && side !== "b") throw new Error("Manche invalide.");
   m.gameLog = m.gameLog || [];
+  if (expectedGames !== null && m.gameLog.length !== expectedGames) {
+    throw new Error("Le score a changé entre-temps : vérifie le scoreboard du salon avant de recliquer.");
+  }
   if (side === "a") m.scoreA++;
   else m.scoreB++;
   m.gameLog.push(side);

@@ -15,24 +15,30 @@ import { db, DATA_DIR, runOnce } from "./db.js";
 
 const getStmt = db.prepare("SELECT ts, last_access AS lastAccess, data FROM profiles WHERE brawlhalla_id = ?");
 const touchStmt = db.prepare("UPDATE profiles SET last_access = ? WHERE brawlhalla_id = ?");
+// Une mise à jour du cache (refresh, warm, file de récupération) ne compte PAS comme un
+// accès : `last_access` n'est posé qu'à la création puis par getProfileEntry. Sinon chaque
+// warm « réchauffait » le profil et il restait chaud pour toujours.
 const upsertStmt = db.prepare(`
   INSERT INTO profiles (brawlhalla_id, ts, last_access, data)
   VALUES (@id, @ts, @lastAccess, @data)
   ON CONFLICT(brawlhalla_id) DO UPDATE SET
-    ts = excluded.ts, last_access = excluded.last_access, data = excluded.data
+    ts = excluded.ts, data = excluded.data
 `);
-const warmStmt = db.prepare("SELECT brawlhalla_id AS id FROM profiles WHERE last_access >= ?");
+const warmStmt = db.prepare(
+  "SELECT brawlhalla_id AS id FROM profiles WHERE last_access >= ? ORDER BY last_access DESC LIMIT ?",
+);
 
 // ---------- Migration unique : ancien data/profiles.json -> table profiles ----------
 migrateFromJson();
 function migrateFromJson() {
-  if (!runOnce("profilesTable")) return;
   const p = resolve(DATA_DIR, "profiles.json");
-  if (!existsSync(p)) return;
-  let migrated = 0;
+  let migrated = null;
   try {
-    const old = JSON.parse(readFileSync(p, "utf-8"));
-    const tx = db.transaction(() => {
+    // Un échec annule tout, drapeau compris (voir runOnce) : nouvel essai au prochain démarrage.
+    runOnce("profilesTable", () => {
+      if (!existsSync(p)) return;
+      const old = JSON.parse(readFileSync(p, "utf-8"));
+      let n = 0;
       for (const [id, entry] of Object.entries(old || {})) {
         if (!entry || typeof entry !== "object" || entry.data === undefined) continue;
         const ts = Number(entry.ts) || Date.now();
@@ -42,19 +48,21 @@ function migrateFromJson() {
           lastAccess: Number(entry.lastAccess) || ts,
           data: JSON.stringify(entry.data),
         });
-        migrated++;
+        n++;
       }
+      migrated = n;
     });
-    tx();
-    try {
-      renameSync(p, `${p}.migrated`);
-    } catch {
-      /* best-effort : la donnée est déjà en base */
-    }
-    console.log(`Migration profiles.json -> table profiles (${migrated} profil(s)).`);
   } catch (e) {
-    console.warn(`Migration de profiles.json échouée (laissée en JSON) : ${e.message}`);
+    console.warn(`Migration de profiles.json échouée (laissée en JSON, nouvel essai au prochain démarrage) : ${e.message}`);
+    return;
   }
+  if (migrated === null) return;
+  try {
+    renameSync(p, `${p}.migrated`);
+  } catch {
+    /* best-effort : la donnée est déjà en base */
+  }
+  console.log(`Migration profiles.json -> table profiles (${migrated} profil(s)).`);
 }
 
 export async function getProfileEntry(brawlhallaId) {
@@ -79,8 +87,9 @@ export async function setProfileEntry(brawlhallaId, data) {
   });
 }
 
-// Renvoie les ids des profils a garder chauds (accedes recemment).
-export async function getWarmIds(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+// Renvoie les ids des profils a garder chauds (accedes recemment), les plus recents d'abord.
+// `limit` < 0 = sans limite.
+export async function getWarmIds(maxAgeMs = 7 * 24 * 60 * 60 * 1000, limit = -1) {
   const cutoff = Date.now() - maxAgeMs;
-  return warmStmt.all(cutoff).map((r) => r.id);
+  return warmStmt.all(cutoff, Math.floor(limit)).map((r) => r.id);
 }
