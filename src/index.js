@@ -37,6 +37,7 @@ import { handleTempVoice, cleanupTempChannels } from "./voiceManager.js";
 import { handleMessageXp, tickVoiceXp, VOICE_TICK_MS } from "./xpEvents.js";
 import { endDueGiveaways } from "./giveaway.js";
 import { tickReminders } from "./reminders.js";
+import { removeOpenTicket } from "./tickets.js";
 
 const client = new Client({
   intents: [
@@ -302,6 +303,14 @@ client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   handleTempVoice(oldState, newState).catch((e) => console.warn("Erreur tempvoice :", e.message));
+});
+
+// ---------- Tickets : salon supprimé à la main ----------
+// Un ticket supprimé sans passer par « Fermer » resterait « ouvert » en base et bloquerait
+// son auteur (« Tu as déjà un ticket ouvert »). On purge l'entrée (sans effet hors ticket).
+client.on(Events.ChannelDelete, (channel) => {
+  if (!channel.guild) return;
+  removeOpenTicket(channel.guild.id, channel.id).catch((e) => console.warn("Tickets (salon supprimé) :", e.message));
 });
 
 // ---------- Bienvenue / Au revoir / Auto-role ----------

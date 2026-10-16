@@ -48,6 +48,10 @@ function v2Card(color, ...nodes) {
 }
 const SEP = { __sep: true };
 
+// Réponses publiques qui recopient un pseudo saisi par le membre : aucune mention autorisée
+// (sinon `/carte pseudo:@everyone` pingerait tout le serveur via le bot).
+const NO_MENTIONS = { parse: [] };
+
 // ---------- /top ----------
 
 export async function handleTop(interaction, ctx) {
@@ -284,7 +288,7 @@ export async function handleCarte(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "carte", 8000))) return;
   await interaction.deferReply();
   const target = await resolveTarget(interaction);
-  if (target.error) return interaction.editReply(target.error);
+  if (target.error) return interaction.editReply({ content: target.error, allowedMentions: NO_MENTIONS });
 
   let profile;
   try {
@@ -342,7 +346,7 @@ export async function handleProgression(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "progression", 6000))) return;
   await interaction.deferReply();
   const target = await resolveTarget(interaction);
-  if (target.error) return interaction.editReply(target.error);
+  if (target.error) return interaction.editReply({ content: target.error, allowedMentions: NO_MENTIONS });
 
   let profile = null;
   try {
@@ -444,9 +448,9 @@ export async function handleVersus(interaction, ctx) {
   if (!(await enforceCooldown(interaction, "versus", 8000))) return;
   await interaction.deferReply();
   const a = await resolveVersusSide(interaction, "1", true);
-  if (a.error) return interaction.editReply(a.error);
+  if (a.error) return interaction.editReply({ content: a.error, allowedMentions: NO_MENTIONS });
   const b = await resolveVersusSide(interaction, "2", false);
-  if (b.error) return interaction.editReply(b.error);
+  if (b.error) return interaction.editReply({ content: b.error, allowedMentions: NO_MENTIONS });
   if (String(a.brawlhallaId) === String(b.brawlhallaId)) {
     return interaction.editReply("Choisis deux joueurs **différents** 😅");
   }
@@ -510,7 +514,7 @@ async function respondProfile(interaction, view) {
   // Cas direct : Brawlhalla ID, ou membre/soi-meme lie -> profil direct (aucune recherche).
   if (idOpt || !pseudo) {
     const target = await resolveTarget(interaction);
-    if (target.error) return interaction.editReply({ components: [tdc(target.error)], flags: V2 });
+    if (target.error) return interaction.editReply({ components: [tdc(target.error)], flags: V2, allowedMentions: NO_MENTIONS });
     return showProfile(interaction, view, target.brawlhallaId);
   }
 
@@ -519,10 +523,14 @@ async function respondProfile(interaction, view) {
   try {
     players = await searchPlayers(pseudo);
   } catch (err) {
-    return interaction.editReply({ components: [tdc(err.pending ? err.message : `Erreur API : ${err.message}`)], flags: V2 });
+    return interaction.editReply({
+      components: [tdc(err.pending ? err.message : `Erreur API : ${err.message}`)],
+      flags: V2,
+      allowedMentions: NO_MENTIONS,
+    });
   }
   if (!players.length)
-    return interaction.editReply({ components: [tdc(`Aucun joueur classé trouvé pour **${pseudo}**.`)], flags: V2 });
+    return interaction.editReply({ components: [tdc(`Aucun joueur classé trouvé pour **${pseudo}**.`)], flags: V2, allowedMentions: NO_MENTIONS });
   if (players.length === 1) return showProfile(interaction, view, players[0].id);
 
   // Plusieurs joueurs (memes pseudos / pseudos proches) : on affiche un sélecteur.
@@ -540,6 +548,7 @@ async function respondProfile(interaction, view) {
   return interaction.editReply({
     components: [tdc(`Plusieurs joueurs correspondent à **${pseudo}**. Choisis le bon :`), row],
     flags: V2,
+    allowedMentions: NO_MENTIONS,
   });
 }
 

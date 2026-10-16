@@ -319,8 +319,10 @@ export async function searchPlayers(name, limit = 5) {
     if (cached) return cached.results.slice(0, limit);
     // 3c) Rien en base : on programme une recuperation en arriere-plan (marchera au prochain essai).
     addPendingSearch(name);
+    // `query` (nettoyé) et non `name` : ce message est recopié dans des réponses publiques,
+    // la saisie brute pourrait y glisser des mentions (@everyone, <@id>…).
     const e = new Error(
-      `🔎 Je cherche **${name}**… l'API Brawlhalla fait des siennes en ce moment.\n` +
+      `🔎 Je cherche **${query}**… l'API Brawlhalla fait des siennes en ce moment.\n` +
         `💡 Astuce : pour une **première** recherche fiable, utilise plutôt l'option **\`id\`** ` +
         `(le Brawlhalla ID, visible sur corehalla.com ou l'appli Brawlhalla).\n` +
         `Sinon je récupère le profil en arrière-plan — réessaie dans ~30 s 👍`,

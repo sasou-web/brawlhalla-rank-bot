@@ -196,7 +196,18 @@ export async function handleTicketsButton(interaction, ctx) {
     if (!cfg.enabled) {
       return interaction.reply({ content: "Active d'abord le système (bouton 🔴/🟢).", flags: EPHEMERAL });
     }
-    await interaction.channel.send(buildTicketPanelPayload(cfg)).catch(() => null);
+    const sent = await interaction.channel.send(buildTicketPanelPayload(cfg)).catch((err) => {
+      console.warn("Tickets : publication du panneau refusée :", err.message);
+      return null;
+    });
+    if (!sent) {
+      return interaction.reply({
+        content:
+          "❌ Le panneau n'a pas pu être publié ici. Vérifie que le bot peut écrire dans ce salon, " +
+          "et les images (bannière, vignette) définies dans le dashboard.",
+        flags: EPHEMERAL,
+      });
+    }
     return interaction.reply({ content: "📨 Panneau de tickets publié dans ce salon. ✅", flags: EPHEMERAL });
   }
 
@@ -411,7 +422,7 @@ async function createTicketChannel(interaction, topicId, subject) {
     new ButtonBuilder().setCustomId("tck_close").setLabel("Fermer").setEmoji("🔒").setStyle(ButtonStyle.Danger),
   );
 
-  await channel
+  const sent = await channel
     .send({
       components: [
         new TextDisplayBuilder().setContent(`<@${interaction.user.id}> <@&${cfg.staffRoleId}>`),
@@ -421,7 +432,18 @@ async function createTicketChannel(interaction, topicId, subject) {
       flags: MessageFlags.IsComponentsV2,
       allowedMentions: { users: [interaction.user.id], roles: [cfg.staffRoleId] },
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn(`Tickets : message de contrôle du ticket #${number} refusé :`, err.message);
+      return null;
+    });
+
+  // Sans ce message, le salon n'aurait aucun bouton (impossible à fermer) et l'entrée resterait
+  // « ouverte », bloquant le membre (« Tu as déjà un ticket ouvert »). On annule proprement.
+  if (!sent) {
+    await removeOpenTicket(guild.id, channel.id);
+    await channel.delete("Ticket : message de contrôle impossible à envoyer").catch(() => {});
+    return interaction.editReply("❌ Impossible de préparer ton ticket (message du bot refusé). Préviens le staff.");
+  }
 
   await logAudit(guild, `🎫 <@${interaction.user.id}> a ouvert le **ticket #${number}** (${topic ? topic.label : "Général"}) → <#${channel.id}>`);
   return interaction.editReply(`Ton ticket a été créé : <#${channel.id}> ✅`);
@@ -467,17 +489,26 @@ async function sendTranscriptNow(interaction) {
     return interaction.reply({ content: "Réservé à l'auteur du ticket ou au staff.", flags: EPHEMERAL });
   }
   await interaction.deferReply({ flags: EPHEMERAL });
-  const file = await buildTranscript(interaction.channel, t);
   const logCh = cfg.logChannelId
     ? await interaction.guild.channels.fetch(cfg.logChannelId).catch(() => null)
     : null;
   if (logCh?.isTextBased?.()) {
-    await logCh
-      .send({ content: `📄 Transcript du ticket #${t.number} (demandé par <@${interaction.user.id}>)`, files: [file] })
-      .catch(() => {});
-    return interaction.editReply(`Transcript envoyé dans <#${cfg.logChannelId}>. ✅`);
+    const res = await deliverTranscript(interaction.channel, t, (file) =>
+      logCh.send({ content: `📄 Transcript du ticket #${t.number} (demandé par <@${interaction.user.id}>)`, files: [file] }),
+    );
+    if (!res.ok) {
+      return interaction.editReply(
+        `❌ Le transcript n'a pas pu être envoyé dans <#${cfg.logChannelId}> (permissions du bot ou fichier trop lourd).`,
+      );
+    }
+    return interaction.editReply(
+      `Transcript envoyé dans <#${cfg.logChannelId}>${res.light ? " (sans les images intégrées : fichier trop lourd)" : ""}. ✅`,
+    );
   }
-  return interaction.editReply({ content: "📄 Transcript du ticket :", files: [file] });
+  const res = await deliverTranscript(interaction.channel, t, (file) =>
+    interaction.editReply({ content: "📄 Transcript du ticket :", files: [file] }),
+  );
+  if (!res.ok) return interaction.editReply("❌ Le transcript de ce ticket n'a pas pu être généré ou envoyé.");
 }
 
 async function askCloseTicket(interaction) {
@@ -495,12 +526,43 @@ async function askCloseTicket(interaction) {
   return interaction.reply({ content: "⚠️ Fermer ce ticket ? Le salon sera supprimé.", components: [row], flags: EPHEMERAL });
 }
 
+// Les images intégrées (base64) gonflent le fichier et peuvent dépasser la limite d'upload du
+// serveur (10 Mo sans boost) : au-delà de ce seuil, ou si l'envoi est refusé, on se replie
+// sur un transcript sans images intégrées (elles restent en liens vers le CDN Discord).
+const TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
+
+function transcriptBytes(file) {
+  const data = file?.attachment;
+  if (Buffer.isBuffer(data)) return data.length;
+  if (typeof data === "string") return Buffer.byteLength(data);
+  return 0; // taille inconnue : on tente l'envoi, le repli couvre un refus
+}
+
+async function tryDeliver(deliver, file) {
+  try {
+    return Boolean(await deliver(file));
+  } catch {
+    return false;
+  }
+}
+
+// Génère le transcript et le remet via `deliver(file)` (renvoie le message envoyé).
+// Renvoie { ok, light } : `light` = repli sans images intégrées. Ne lève jamais.
+async function deliverTranscript(channel, ticket, deliver) {
+  const full = await buildTranscript(channel, ticket).catch(() => null);
+  if (full && transcriptBytes(full) <= TRANSCRIPT_MAX_BYTES && (await tryDeliver(deliver, full))) {
+    return { ok: true, light: false };
+  }
+  const light = await buildTranscript(channel, ticket, { saveImages: false }).catch(() => null);
+  return { ok: Boolean(light) && (await tryDeliver(deliver, light)), light: true };
+}
+
 // Génère un transcript HTML du salon de ticket via discord-html-transcripts.
 // Retourne un AttachmentBuilder (fichier .html) prêt à être envoyé.
-async function buildTranscript(channel, ticket) {
+async function buildTranscript(channel, ticket, { saveImages = true } = {}) {
   const options = {
     filename: `ticket-${String(ticket.number).padStart(4, "0")}.html`,
-    saveImages: true, // intègre les images dans le fichier
+    saveImages, // true : intègre les images dans le fichier
     poweredBy: false,
     footerText: `Ticket #${ticket.number} • {number} message(s)`,
   };
@@ -558,10 +620,11 @@ async function closeTicket(interaction) {
 
   const channel = interaction.channel;
 
-  // Transcript -> salon de logs (best-effort).
+  // Transcript -> salon de logs (best-effort : le salon est supprimé quoi qu'il arrive, mais
+  // un échec est signalé dans le salon d'audit au lieu de passer inaperçu).
   if (cfg.logChannelId) {
+    let delivered = false;
     try {
-      const file = await buildTranscript(channel, t);
       const logEmbed = new EmbedBuilder()
         .setTitle(`🎫 Ticket #${t.number} fermé`)
         .setColor(0xe74c3c)
@@ -573,9 +636,18 @@ async function closeTicket(interaction) {
         )
         .setTimestamp();
       const logCh = await interaction.guild.channels.fetch(cfg.logChannelId).catch(() => null);
-      if (logCh?.isTextBased?.()) await logCh.send({ embeds: [logEmbed], files: [file] }).catch(() => {});
+      if (logCh?.isTextBased?.()) {
+        const res = await deliverTranscript(channel, t, (file) => logCh.send({ embeds: [logEmbed], files: [file] }));
+        delivered = res.ok;
+      }
     } catch {
       /* transcript best-effort */
+    }
+    if (!delivered) {
+      await logAudit(
+        interaction.guild,
+        `⚠️ Transcript du **ticket #${t.number}** impossible à envoyer dans <#${cfg.logChannelId}> (permissions du bot ou fichier trop lourd).`,
+      );
     }
   }
 

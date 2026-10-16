@@ -2,8 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PermissionFlagsBits } from "discord.js";
 import { requirePermission, requireManageGuild } from "../src/commands/shared.js";
-import { handleChatInput, MANAGE_GUILD_COMMANDS, MANAGE_MESSAGES_COMMANDS, commandsData } from "../src/commands.js";
+import {
+  handleChatInput, handleButton, handleSelect, handleModal, isAdminComponent,
+  MANAGE_GUILD_COMMANDS, MANAGE_MESSAGES_COMMANDS, commandsData,
+} from "../src/commands.js";
 import { setRoleTimeoutConfig } from "../src/roleTimeout.js";
+import { getSettings, setSetting } from "../src/settings.js";
 
 // Fabrique une interaction factice. `hasPerm` contrôle memberPermissions.has().
 // Les méthodes de réponse enregistrent leurs appels ; deferReply jette volontairement
@@ -116,4 +120,87 @@ test("dispatch : /timeout atteint son handler (refus propre à /timeout, pas « 
   assert.equal(it._calls.reply.length, 1);
   assert.doesNotMatch(it._calls.reply[0].content, /Réservé/);
   assert.match(it._calls.reply[0].content, /permission d'utiliser \/timeout/);
+});
+
+// ---------- Composants et modals des panneaux admin (défense en profondeur) ----------
+
+// Composant factice : seule `reply` est permise. Tout autre appel (update, showModal, defer,
+// envoi…) signifierait que le handler du panneau a été atteint malgré le refus.
+function mockComponent(customId, { hasPerm = false, values = [] } = {}) {
+  const calls = { reply: [], other: [] };
+  const forbidden = (name) => async () => {
+    calls.other.push(name);
+    throw new Error(`${name} : handler atteint`);
+  };
+  return {
+    customId,
+    values,
+    user: { id: `perm-${customId}` },
+    message: { id: "m-perm" },
+    guild: { id: "perm-guild", channels: { fetch: forbidden("channels.fetch") } },
+    member: { roles: { cache: new Map() } },
+    memberPermissions: { has: () => hasPerm },
+    channel: { send: forbidden("channel.send") },
+    client: { users: { fetch: forbidden("users.fetch") } },
+    fields: { getTextInputValue: () => "x" },
+    deferred: false,
+    replied: false,
+    reply: async (p) => { calls.reply.push(p); },
+    update: forbidden("update"),
+    showModal: forbidden("showModal"),
+    deferReply: forbidden("deferReply"),
+    deferUpdate: forbidden("deferUpdate"),
+    editReply: forbidden("editReply"),
+    _calls: calls,
+  };
+}
+
+test("préfixes admin : panneaux de config couverts, composants publics exclus", () => {
+  for (const id of ["lvl_toggle_enabled", "tt_toggle", "clp_toggle", "gr_toggle", "tv_toggle", "tckcfg_publish", "gwcfg_toggle", "setup_role"]) {
+    assert.ok(isAdminComponent(id), `${id} doit être réservé aux admins`);
+  }
+  for (const id of ["tckopen_btn", "tckopen_select", "tck_close", "tck_create_modal:", "gw_enter:abc", "gw_ended:abc", "vc_rename", "trn_join", "lnkp_open", "cbp_open"]) {
+    assert.ok(!isAdminComponent(id), `${id} doit rester public`);
+  }
+});
+
+test("composants admin : un non-admin est refusé avant le handler", async () => {
+  const cases = [
+    [handleButton, "tckcfg_publish"],
+    [handleButton, "gwcfg_toggle"],
+    [handleButton, "lvl_toggle_enabled"],
+    [handleSelect, "tv_category"],
+    [handleModal, "tt_feed_modal"],
+  ];
+  for (const [route, id] of cases) {
+    const it = mockComponent(id);
+    await assert.doesNotReject(route(it, ctx), `${id} ne doit pas atteindre son handler`);
+    assert.deepEqual(it._calls.other, [], `${id} : aucun effet attendu`);
+    assert.equal(it._calls.reply.length, 1, `${id} : un refus`);
+    assert.match(it._calls.reply[0].content, /Réservé/);
+  }
+});
+
+test("/setup : un menu forgé par un non-admin ne change aucun réglage", async () => {
+  const before = (await getSettings()).reviewerRoleId;
+  const it = mockComponent("setup_role", { values: ["role-pirate"] });
+  await handleSelect(it, ctx);
+  assert.match(it._calls.reply[0].content, /Réservé/);
+  assert.equal((await getSettings()).reviewerRoleId, before);
+});
+
+test("/setup : un admin modifie toujours le réglage", async () => {
+  const before = (await getSettings()).autoApproveTier;
+  const it = mockComponent("setup_threshold", { hasPerm: true, values: ["Gold"] });
+  await handleSelect(it, ctx);
+  assert.match(it._calls.reply[0].content, /Gold/);
+  assert.equal((await getSettings()).autoApproveTier, "Gold");
+  await setSetting("autoApproveTier", before);
+});
+
+test("modal de refus de liaison : revérifie le validateur (aucun MP envoyé sinon)", async () => {
+  const it = mockComponent("rm:victim:123:chan:msg");
+  await handleModal(it, ctx);
+  assert.deepEqual(it._calls.other, [], "ni édition du message ni MP");
+  assert.match(it._calls.reply[0].content, /permission de refuser/);
 });

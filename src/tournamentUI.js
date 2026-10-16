@@ -95,7 +95,9 @@ export async function tournamentAnnounce(client, guildId, content, embeds) {
   if (!chId) return;
   try {
     const ch = await client.channels.fetch(chId);
-    if (ch?.isTextBased?.()) await ch.send({ content, embeds, allowedMentions: { parse: ["users"] } });
+    // Aucune mention : les annonces recopient des noms d'équipe saisis par les membres
+    // (un nom « <@id> » pingerait la personne).
+    if (ch?.isTextBased?.()) await ch.send({ content, embeds, allowedMentions: { parse: [] } });
   } catch {
     /* ignore */
   }

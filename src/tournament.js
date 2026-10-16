@@ -530,7 +530,10 @@ export async function markAlerted(guildId, matchId) {
 // ---------- Score manche par manche ----------
 
 // Enregistre le gagnant d'une manche ("a" ou "b"). Termine le match si le seuil est atteint.
-export async function reportGame(guildId, matchId, side) {
+// `expectedGames` (optionnel) = nombre de manches déjà jouées quand le joueur a demandé la
+// confirmation : si le score a bougé depuis (clic rejoué, double confirmation), on refuse
+// au lieu de compter un second point.
+export async function reportGame(guildId, matchId, side, expectedGames = null) {
   const t = await getTournament(guildId);
   if (!t) throw new Error("Aucun tournoi.");
   const m = t.matches[matchId];
@@ -538,6 +541,9 @@ export async function reportGame(guildId, matchId, side) {
   if (m.status === "done") throw new Error("Match déjà terminé.");
   if (side !== "a" && side !== "b") throw new Error("Manche invalide.");
   m.gameLog = m.gameLog || [];
+  if (expectedGames !== null && m.gameLog.length !== expectedGames) {
+    throw new Error("Le score a changé entre-temps : vérifie le scoreboard du salon avant de recliquer.");
+  }
   if (side === "a") m.scoreA++;
   else m.scoreB++;
   m.gameLog.push(side);
