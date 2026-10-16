@@ -18,6 +18,14 @@ import {
 } from "../tournamentUI.js";
 import { renderBracketImage } from "../bracketImage.js";
 import { EPHEMERAL, logAudit } from "./shared.js";
+import {
+  collectProofFiles,
+  isImageFile,
+  readTextField,
+  sendWithFilesFallback,
+  showUploadModal,
+  buildDisputeModal,
+} from "../proofUpload.js";
 
 // ====================================================================
 // Tournoi : panneau d'inscription + interactions des membres
@@ -186,12 +194,10 @@ export async function handleTournamentButton(interaction, ctx) {
           flags: EPHEMERAL,
         });
       }
+      // Litige : le modal (raison + capture facultative) fait office de confirmation.
       if (action === "trn_dispute") {
-        return interaction.reply({
-          content: "⚠️ Signaler un **litige** sur ce match ? Le staff sera alerté.",
-          components: [{ type: 1, components: [{ type: 2, style: 4, label: "Oui, signaler", custom_id: `trn_disputeok:${matchId}` }] }],
-          flags: EPHEMERAL,
-        });
+        if (m.status === "done") return interaction.reply({ content: "Ce match est déjà terminé : contacte le staff.", flags: EPHEMERAL });
+        return showUploadModal(interaction, buildDisputeModal(`trn_dispute_modal:${matchId}`));
       }
       // --- Action directe : annuler le dernier point ---
       if (action === "trn_undo") {
@@ -220,15 +226,9 @@ export async function handleTournamentButton(interaction, ctx) {
         }
         return interaction.editReply({ content: `✅ Point attribué (${r.match.scoreA}-${r.match.scoreB}).`, components: [] });
       }
+      // Ancienne confirmation de litige (avant le modal), encore affichée chez certains joueurs.
       if (action === "trn_disputeok") {
-        await interaction.update({ content: "⏳ Signalement du litige…", components: [] });
-        const t3 = await disputeMatch(guildId, matchId);
-        if (t3.modAlertChannelId) {
-          const ch = await interaction.guild.channels.fetch(t3.modAlertChannelId).catch(() => null);
-          if (ch?.isTextBased?.()) await ch.send(buildModAlert(t3, matchId, `Litige signalé par ${interaction.user.username}`)).catch(() => {});
-        }
-        await refreshMatchMessage(interaction.client, guildId, matchId);
-        return interaction.editReply({ content: "⚠️ Litige signalé, le staff a été prévenu.", components: [] });
+        return interaction.update({ content: "Cette confirmation a expiré : reclique sur **Litige** dans le salon du match.", components: [] });
       }
     } catch (e) {
       return replyTournamentError(interaction, e);
@@ -338,7 +338,56 @@ export async function handleTournamentSelect(interaction, ctx) {
   }
 }
 
+// Soumission du modal de litige : enregistre la raison, alerte le staff avec les captures.
+async function handleDisputeModal(interaction) {
+  const matchId = interaction.customId.split(":")[1];
+  const guildId = interaction.guild.id;
+  const t = await getTournament(guildId);
+  const m = t?.matches?.[matchId];
+  if (!m) return interaction.reply({ content: "Match introuvable.", flags: EPHEMERAL });
+  const entrant = userEntrant(t, interaction.user.id);
+  const isPlayer = entrant && [m.aId, m.bId].includes(entrant.id);
+  const isMod = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) || (t.modRoleId && interaction.member?.roles?.cache?.has(t.modRoleId));
+  if (!isPlayer && !isMod) return interaction.reply({ content: "Réservé aux joueurs de ce match.", flags: EPHEMERAL });
+
+  // Accusé avant le téléchargement des captures et les appels Discord (fenêtre de 3 s).
+  await interaction.deferReply({ flags: EPHEMERAL });
+  const reason = readTextField(interaction, "reason").slice(0, 500) || "Non précisée";
+  const collected = await collectProofFiles(interaction, { maxFiles: 3, allowVideo: true, required: false });
+  const files = collected.ok ? collected.files : [];
+  try {
+    const t3 = await disputeMatch(guildId, matchId, {
+      reason,
+      by: interaction.user.id,
+      byName: entrant?.name || interaction.member?.displayName || interaction.user.username,
+      files: files.length,
+    });
+    let alerted = false;
+    let filesPosted = false;
+    if (t3.modAlertChannelId) {
+      const ch = await interaction.guild.channels.fetch(t3.modAlertChannelId).catch(() => null);
+      if (ch?.isTextBased?.()) {
+        const imageName = files.find((f) => isImageFile(f.name))?.name;
+        const payload = buildModAlert(t3, matchId, reason, { by: interaction.user.id, imageName, files: files.length });
+        const sent = await sendWithFilesFallback(ch, payload, files).catch(() => null);
+        alerted = Boolean(sent);
+        filesPosted = Boolean(sent?.filesPosted);
+      }
+    }
+    await refreshMatchMessage(interaction.client, guildId, matchId);
+    // La raison (texte libre du joueur) reste hors du journal : logAudit n'encadre pas les mentions.
+    await logAudit(interaction.guild, `⚠️ Litige tournoi signalé par <@${interaction.user.id}> sur le match \`${matchId}\`${files.length ? ` (${files.length} capture(s))` : ""}.`);
+    const lines = [alerted ? "⚠️ Litige signalé, le staff a été prévenu." : "⚠️ Litige enregistré. Aucun salon d'alerte staff n'est configuré : préviens un modérateur."];
+    if (!collected.ok) lines.push(`📎 Capture non jointe : ${collected.error} Poste-la dans le salon du match.`);
+    else if (files.length && alerted && !filesPosted) lines.push("📎 Ta capture n'a pas pu être jointe à l'alerte : poste-la dans le salon du match.");
+    return interaction.editReply({ content: lines.join("\n") });
+  } catch (e) {
+    return replyTournamentError(interaction, e);
+  }
+}
+
 export async function handleTournamentModal(interaction, ctx) {
+  if (interaction.customId.startsWith("trn_dispute_modal:")) return handleDisputeModal(interaction);
   if (interaction.customId.startsWith("trn_team_modal:")) {
     const partnerId = interaction.customId.split(":")[1];
     const guildId = interaction.guild.id;

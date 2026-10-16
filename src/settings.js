@@ -40,9 +40,18 @@ export async function getSettings() {
     // Salon hôte des fils de preuve. DOIT être visible par les membres (sinon Discord refuse
     // de les ajouter au fil privé). Vide = salon où /lier a été lancé.
     proofChannelId: s.proofChannelId || "",
+    // Capture envoyée par formulaire (modal d'upload) : nombre de fichiers max (1-3) et
+    // vidéos MP4/MOV acceptées en plus des images.
+    proofMaxFiles: clampProofMaxFiles(s.proofMaxFiles),
+    proofAllowVideo: s.proofAllowVideo === true,
     // Token développeur start.gg (Personal Access Token) pour le seeding automatique des tournois.
     startggToken: s.startggToken || "",
   };
+}
+
+export function clampProofMaxFiles(v) {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 3) : 3;
 }
 
 export async function setSetting(key, value) {

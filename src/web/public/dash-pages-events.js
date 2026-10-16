@@ -238,6 +238,14 @@ async function renderTournamentCurrent(host, ctx) {
   } else host.append(participants);
 }
 
+// Raison saisie dans le modal de litige (absente pour un litige né de scores contradictoires).
+function disputeReason(d) {
+  if (!d || !d.reason) return null;
+  const who = d.byName ? `${d.byName} : ` : "";
+  const files = d.files ? ` · ${plural(d.files, "capture envoyée", "captures envoyées")} au salon d'alerte` : "";
+  return el("div", { class: "list-item-meta" }, `${who}« ${d.reason} »${files}`);
+}
+
 function disputesPanel(t, disputes, byId, reload) {
   const rows = disputes.map(([mid, m]) => {
     const A = byId[m.aId] || { name: "?" };
@@ -264,7 +272,13 @@ function disputesPanel(t, disputes, byId, reload) {
       "div",
       { class: "list-item warn wrap" },
       icon("alert-triangle", 16),
-      el("div", { class: "list-item-main" }, el("div", { class: "list-item-title" }, `${A.name} contre ${B.name} · ${roundName(t, m.round)}`), el("div", { class: "list-item-meta" }, `${A.name} déclare ${report(ra)}, ${B.name} déclare ${report(rb)}`)),
+      el(
+        "div",
+        { class: "list-item-main" },
+        el("div", { class: "list-item-title" }, `${A.name} contre ${B.name} · ${roundName(t, m.round)}`),
+        el("div", { class: "list-item-meta" }, `${A.name} déclare ${report(ra)}, ${B.name} déclare ${report(rb)}`),
+        disputeReason(m.dispute),
+      ),
       el("div", { class: "row" }, win(A, B, m.aId), win(B, A, m.bId), m.channelId ? linkButton("Salon", discordChannelUrl(m.channelId), { variant: "ghost", size: "sm", external: true }) : null),
     );
   });
