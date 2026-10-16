@@ -25,6 +25,8 @@ import { compileFilter, findMatches, maskText, matchedTerms, STARTER_TERMS } fro
 import { validateRoleTimeoutPatch } from "../src/roleTimeoutRules.js";
 // Routes du Combo Lab (module pur, sans Discord ni base) : identiques à la prod.
 import { mountComboLab } from "../src/web/comboLab.js";
+// Règles réelles des tournois récurrents (module pur) : créneaux, validation, chevauchements.
+import { normalizeSchedule, nextOccurrence, schedulesOverlap, occurrenceTimes, formatOccurrence, DEFAULT_SCHEDULE } from "../src/tournamentScheduleRules.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -319,6 +321,16 @@ function report(t, id, a, b) {
   advance(t, id, a > b ? m.aId : m.bId);
 }
 
+function makeSchedule(now) {
+  const t = makeTournament("draft");
+  const template = Object.fromEntries(
+    ["format", "region", "maxParticipants", "bestOf", "finalsBestOf", "rulesText", "prizeText", "mapPool", "checkInEnabled", "signupChannelId", "announceChannelId", "participantRoleId", "pingRoleId", "matchCategoryId", "modRoleId", "modAlertChannelId", "createVoice", "alertMinutes", "castFromTopN", "hallOfFameChannelId"].map((k) => [k, t[k]]),
+  );
+  const s = { ...DEFAULT_SCHEDULE, id: "s1", name: "Friday Night 1v1", template, weekday: 5, hour: 21, minute: 0, lastFired: { open: 0, checkin: 0, start: 0 } };
+  s.nextRunAt = nextOccurrence(s, now);
+  return s;
+}
+
 function makeState() {
   const now = Date.now();
   const empty = scenario === "empty";
@@ -341,6 +353,7 @@ function makeState() {
   return {
     config: baseConfig(),
     tournament: empty ? null : makeTournament("running"),
+    schedules: empty ? [] : [makeSchedule(now)],
     history: empty
       ? []
       : [
@@ -523,7 +536,7 @@ app.use("/api", async (req, res, next) => {
   if (req.path === "/me") return next();
   if (loggedOut || scenario === "loggedout" || scenario === "expired") return res.status(401).json({ error: "non authentifié" });
   if (scenario === "bootfail" && req.path === "/guild") return res.status(500).json({ error: "Discord API: Service Unavailable" });
-  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose", "/guilde/status"].includes(req.path)) {
+  if (scenario === "errors" && ["/stats", "/metrics", "/logs", "/giveaway/list", "/tournament/history", "/combos", "/wordfilter/status", "/roletimeout/status", "/tiktok/status", "/tiktok/diagnose", "/guilde/status", "/tournament/schedules"].includes(req.path)) {
     return res.status(500).json({ error: "Erreur interne simulée" });
   }
   next();
@@ -783,6 +796,53 @@ app.get("/api/tournament/history/:id", (req, res) => {
 app.delete("/api/tournament/history/:id", (req, res) => {
   state.history = state.history.filter((h) => h.id !== req.params.id);
   ok(res);
+});
+
+// ---- Tournois récurrents ----
+const scheduleView = (s) => ({ ...s, ...occurrenceTimes(s), running: !!T() && T().scheduleId === s.id && T().scheduleRunAt === s.nextRunAt });
+const findSchedule = (req) => state.schedules.find((s) => s.id === req.params.id);
+function scheduleOverlap(candidate, selfId) {
+  if (!candidate.enabled) return null;
+  return state.schedules.find((o) => o.id !== selfId && o.enabled && schedulesOverlap(candidate, o)) || null;
+}
+app.get("/api/tournament/schedules", (req, res) =>
+  res.json({ schedules: state.schedules.map(scheduleView), canCreateEvents: true, tournament: T() ? { name: T().name, status: T().status } : null }),
+);
+app.post("/api/tournament/schedules", (req, res) => {
+  const v = normalizeSchedule(req.body, DEFAULT_SCHEDULE);
+  if (!v.ok) return fail(res, v.error);
+  const other = scheduleOverlap(v.value);
+  if (other) return fail(res, `Chevauchement avec « ${other.name} » : un seul tournoi peut exister à la fois.`);
+  const s = { ...DEFAULT_SCHEDULE, ...v.value, id: "s" + nextId(), lastFired: { open: 0, checkin: 0, start: 0 } };
+  s.nextRunAt = s.enabled ? nextOccurrence(s, Date.now()) : 0;
+  state.schedules.push(s);
+  res.json(scheduleView(s));
+});
+app.put("/api/tournament/schedules/:id", (req, res) => {
+  const s = findSchedule(req);
+  if (!s) return fail(res, "Modèle introuvable.", 404);
+  const v = normalizeSchedule(req.body, s);
+  if (!v.ok) return fail(res, v.error);
+  const other = scheduleOverlap(v.value, s.id);
+  if (other) return fail(res, `Chevauchement avec « ${other.name} » : un seul tournoi peut exister à la fois.`);
+  const running = scheduleView(s).running;
+  Object.assign(s, v.value);
+  if (!running) s.nextRunAt = s.enabled ? nextOccurrence(s, Date.now()) : 0;
+  res.json(scheduleView(s));
+});
+app.delete("/api/tournament/schedules/:id", (req, res) => {
+  if (!findSchedule(req)) return fail(res, "Modèle introuvable.", 404);
+  state.schedules = state.schedules.filter((s) => s.id !== req.params.id);
+  ok(res);
+});
+app.post("/api/tournament/schedules/:id/run-now", (req, res) => {
+  const s = findSchedule(req);
+  if (!s) return fail(res, "Modèle introuvable.", 404);
+  if (T()) return fail(res, "Un tournoi existe déjà : archive-le ou supprime-le avant d'ouvrir ce modèle.");
+  if (!s.nextRunAt) s.nextRunAt = nextOccurrence(s, Date.now());
+  s.lastFired = { ...s.lastFired, open: s.nextRunAt };
+  state.tournament = { ...makeTournament("draft"), ...s.template, name: s.name, startTime: formatOccurrence(s.nextRunAt), status: "registration", participants: [], matches: {}, rounds: 0, signupMessageId: "m" + nextId(), scheduleId: s.id, scheduleRunAt: s.nextRunAt };
+  res.json(T());
 });
 
 // ---- start.gg ----

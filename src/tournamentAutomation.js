@@ -10,12 +10,14 @@ import {
   markAlerted,
 } from "./tournament.js";
 import { buildMatchPayload, buildModAlert } from "./tournamentUI.js";
+import { tickSchedules, closeScheduledOccurrence } from "./tournamentSchedule.js";
 
 /**
  * Automatisation des matchs de tournoi (extrait d'index.js) :
  * - création des salons texte/vocal par match (avec permissions par joueur/modo),
  * - timers : alerte staff sur litige ou inactivité,
- * - nettoyage des salons des matchs terminés.
+ * - nettoyage des salons des matchs terminés,
+ * - tournois récurrents (ouverture, check-in, bracket : tournamentSchedule.js).
  *
  * Point d'entrée : `tournamentTick(client, guild)` (appelé périodiquement).
  * `teardownTournament(guild, t)` : nettoyage complet en fin de tournoi.
@@ -133,6 +135,8 @@ async function cleanupMatchChannels(guild) {
  */
 export async function teardownTournament(guild, t) {
   if (!guild || !t) return;
+  // Tournoi récurrent : événement Discord fermé, modèle passé au créneau suivant.
+  await closeScheduledOccurrence(guild, t).catch((err) => console.warn("Tournoi récurrent : fin incomplète :", err.message));
   for (const m of Object.values(t.matches || {})) {
     for (const id of [m.channelId, m.voiceChannelId]) {
       if (!id) continue;
@@ -150,6 +154,8 @@ export async function teardownTournament(guild, t) {
 
 export async function tournamentTick(client, guild) {
   try {
+    // En premier : un bracket lancé par un modèle a ses salons de match dès ce tick.
+    await tickSchedules(client, guild);
     await ensureMatchChannels(client, guild);
     await tickMatchTimers(guild);
     await cleanupMatchChannels(guild);

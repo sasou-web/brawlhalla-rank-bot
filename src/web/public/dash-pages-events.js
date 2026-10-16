@@ -57,6 +57,7 @@ function renderTournament(ctx) {
   ctx.root.append(pageHeader({ title: "Tournois", description: "Inscriptions, bracket et résultats du tournoi en cours.", hasTabs: true }));
   pageTabs(ctx, (tab, host) => {
     if (tab === "archives") renderTournamentArchives(host, ctx);
+    else if (tab === "recurring") renderTournamentSchedules(host, ctx);
     else if (tab === "startgg") renderStartgg(host);
     else renderTournamentCurrent(host, ctx);
   });
@@ -449,7 +450,8 @@ function scoreDialog(t, id, m, byId, onDone) {
 }
 
 // ═══════════════════ Tournoi : création / réglages ═══════════════════
-function tournamentFormFields(cfg) {
+// recurring : formulaire d'un modèle récurrent (la date de début est calculée par le bot).
+function tournamentFormFields(cfg, { recurring = false } = {}) {
   return el(
     "div",
     { class: "stack", style: "gap:24px" },
@@ -464,7 +466,7 @@ function tournamentFormFields(cfg) {
         ),
         fieldRow(
           field("Places", numberInput(cfg, "maxParticipants", { min: 2, max: 256 }), { help: "Idéalement 8, 16 ou 32." }),
-          field("Début", textInput(cfg, "startTime", { placeholder: "Sam. 21 h" }), { help: "Texte libre affiché aux joueurs.", optional: true }),
+          recurring ? null : field("Début", textInput(cfg, "startTime", { placeholder: "Sam. 21 h" }), { help: "Texte libre affiché aux joueurs.", optional: true }),
         ),
       ),
       settingsGroup(
@@ -582,6 +584,242 @@ function startggImportDialog(onDone) {
           }
           const r = await api("/api/tournament/seed-startgg", "POST", { url: s.url, token: s.token || undefined });
           toast(r.message || "Seeds start.gg appliqués", "ok");
+          onDone();
+        },
+      },
+    ],
+  });
+}
+
+// ═══════════════════ Tournoi : modèles récurrents ═══════════════════
+// Le bot ouvre, passe en check-in et lance seul chaque occurrence (src/tournamentSchedule.js).
+// Toutes les heures sont celles de Paris, quel que soit le fuseau du navigateur.
+const SCHEDULE_DAYS = [
+  { value: 1, label: "Lundi" },
+  { value: 2, label: "Mardi" },
+  { value: 3, label: "Mercredi" },
+  { value: 4, label: "Jeudi" },
+  { value: 5, label: "Vendredi" },
+  { value: 6, label: "Samedi" },
+  { value: 0, label: "Dimanche" },
+];
+const PARIS_DATE_FMT = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+
+function fmtParis(ts) {
+  return ts ? PARIS_DATE_FMT.format(new Date(ts)) : "—";
+}
+
+function scheduleClock(s) {
+  return `${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")}`;
+}
+
+function scheduleSlot(s) {
+  const day = SCHEDULE_DAYS.find((d) => d.value === s.weekday);
+  return `Chaque ${day ? day.label.toLowerCase() : "semaine"} à ${scheduleClock(s)}`;
+}
+
+async function renderTournamentSchedules(host, ctx) {
+  const reload = () => {
+    if (!host.isConnected) return;
+    clearNode(host);
+    renderTournamentSchedules(host, ctx);
+  };
+  host.append(panel(skelLines(4)));
+  let data;
+  try {
+    data = await api("/api/tournament/schedules");
+  } catch (e) {
+    if (host.isConnected) clearNode(host).append(panel(inlineError("Impossible de charger les tournois récurrents : " + e.message, reload)));
+    return;
+  }
+  if (!ctx.alive() || !host.isConnected) return;
+  const list = data.schedules || [];
+  const busy = data.tournament;
+  clearNode(host);
+
+  const create = () => openScheduleDrawer(null, reload);
+  host.append(
+    toolbar("Chaque semaine, le bot ouvre les inscriptions, lance le check-in puis le bracket à l'heure dite et crée un événement Discord. Le staff ne gère que les litiges.", list.length ? [button("Nouveau modèle", { variant: "primary", icon: "plus", onClick: create })] : []),
+  );
+  if (data.canCreateEvents === false && list.some((s) => s.createEvent)) {
+    const note = callout("warn", "Le bot n'a pas la permission « Créer des événements » : les tournois s'ouvrent normalement, mais sans événement Discord. Ajoute-la à son rôle dans les paramètres du serveur.");
+    note.style.marginBottom = "24px";
+    host.append(note);
+  }
+
+  const runNow = async (s) => {
+    const ok = await confirmDialog({
+      title: "Ouvrir les inscriptions maintenant ?",
+      message: ["Le prochain « ", el("strong", {}, s.name), " » est créé tout de suite : panneau publié dans ", channelRef(s.template.signupChannelId), " et ouverture annoncée. Le check-in et le bracket gardent les horaires du modèle."],
+      confirmLabel: "Ouvrir les inscriptions",
+    });
+    if (!ok) return;
+    const t = await api(`/api/tournament/schedules/${encodeURIComponent(s.id)}/run-now`, "POST", {});
+    toast(`Inscriptions ouvertes · début ${t.startTime}`, "ok");
+    reload();
+  };
+  const toggle = async (s) => {
+    await api(`/api/tournament/schedules/${encodeURIComponent(s.id)}`, "PUT", { enabled: !s.enabled });
+    toast(s.enabled ? "Modèle mis en pause" : "Modèle réactivé", "ok");
+    reload();
+  };
+  const remove = async (s) => {
+    const ok = await confirmDialog({
+      title: "Supprimer ce modèle ?",
+      message: ["« ", el("strong", {}, s.name), " » ne programmera plus aucun tournoi.", s.running ? " Le tournoi déjà ouvert continue, mais le bot ne le fera plus avancer : check-in et bracket seront à lancer à la main." : ""],
+      confirmLabel: "Supprimer le modèle",
+      danger: true,
+    });
+    if (!ok) return;
+    await api(`/api/tournament/schedules/${encodeURIComponent(s.id)}`, "DELETE");
+    toast("Modèle supprimé", "ok");
+    reload();
+  };
+
+  host.append(
+    dataTable({
+      label: "Tournois récurrents",
+      rows: list,
+      empty: emptyState({
+        icon: "clock",
+        title: "Aucun tournoi récurrent",
+        text: "Crée un modèle, par exemple un 1v1 tous les vendredis à 21 h avec inscriptions ouvertes 48 h avant : le bot s'occupe du reste.",
+        actions: [button("Nouveau modèle", { variant: "primary", icon: "plus", onClick: create })],
+        compact: true,
+      }),
+      columns: [
+        {
+          key: "name",
+          label: "Tournoi",
+          primary: true,
+          render: (s) => cellTitle(s.name, [s.template.format || "1v1", s.template.region, `${fmtNum(s.template.maxParticipants || TOURNAMENT_DEFAULTS.maxParticipants)} places`].filter(Boolean).join(" · ")),
+        },
+        { key: "slot", label: "Créneau", meta: true, render: (s) => scheduleSlot(s) },
+        {
+          key: "nextRunAt",
+          label: "Prochain tournoi",
+          meta: true,
+          render: (s) => {
+            if (!s.nextRunAt) return el("span", { class: "text-3" }, "Aucun, modèle en pause");
+            const sub = s.running ? "Inscriptions ouvertes" : s.openAt <= Date.now() ? "Ouverture des inscriptions imminente" : "Inscriptions le " + fmtParis(s.openAt);
+            return cellTitle(fmtParis(s.nextRunAt), sub);
+          },
+        },
+        { key: "enabled", label: "État", meta: true, render: (s) => (s.running ? statusDot("info", "Tournoi ouvert") : s.enabled ? statusDot("ok", "Actif") : statusDot("neutral", "En pause")) },
+        {
+          key: "actions",
+          label: "",
+          render: (s) =>
+            rowActions(
+              button("Modifier", { size: "sm", onClick: () => openScheduleDrawer(s, reload) }),
+              menuButton(
+                [
+                  {
+                    label: "Ouvrir les inscriptions maintenant",
+                    icon: "play",
+                    disabled: !!busy,
+                    hint: busy ? "Un tournoi existe déjà" : null,
+                    onSelect: () => runNow(s),
+                  },
+                  { label: s.enabled ? "Mettre en pause" : "Réactiver", icon: s.enabled ? "pause" : "play", onSelect: () => toggle(s) },
+                  "-",
+                  { label: "Supprimer le modèle", icon: "trash", danger: true, onSelect: () => remove(s) },
+                ],
+                { size: "sm", label: `Actions pour ${s.name}` },
+              ),
+            ),
+        },
+      ],
+    }),
+  );
+}
+
+function scheduleTimeInput(obj, key) {
+  const i = el("input", { class: "input w-sm", type: "time", step: "60", required: true });
+  i.value = obj[key] || "";
+  i.addEventListener("input", () => {
+    obj[key] = i.value;
+  });
+  return i;
+}
+
+function schedulePlanningGroup(cfg) {
+  return settingsGroup(
+    "Planification",
+    "Heure de Paris, changements d'heure compris. Un seul tournoi existe à la fois : deux modèles ne peuvent pas se chevaucher.",
+    fieldRow(field("Jour", selectInput(cfg, "weekday", SCHEDULE_DAYS)), field("Heure du début", scheduleTimeInput(cfg, "time"))),
+    fieldRow(
+      field("Ouverture des inscriptions", numberInput(cfg, "openHoursBefore", { min: 1, max: 144, suffix: "h avant" })),
+      field("Ouverture du check-in", numberInput(cfg, "checkinMinutesBefore", { min: 5, max: 720, suffix: "min avant" }), { help: "Si le check-in est obligatoire." }),
+    ),
+    switchField("Bracket automatique", cfg, "autoBracket", { help: "À l'heure du début, dès 2 joueurs prêts. Sinon le staff est alerté et décide." }),
+    switchField("Événement Discord", cfg, "createEvent", { help: "Créé à l'ouverture des inscriptions : visible en haut du serveur, avec rappel pour les intéressés." }),
+    switchField("Modèle actif", cfg, "enabled", { help: "En pause, plus aucun tournoi ne s'ouvre ; celui déjà ouvert va au bout." }),
+  );
+}
+
+function openScheduleDrawer(s, onDone) {
+  const tpl = (s && s.template) || {};
+  const initial = s
+    ? { name: s.name, enabled: s.enabled, weekday: s.weekday, time: scheduleClock(s), openHoursBefore: s.openHoursBefore, checkinMinutesBefore: s.checkinMinutesBefore, autoBracket: s.autoBracket, createEvent: s.createEvent }
+    : { name: "Tournoi du vendredi", enabled: true, weekday: 5, time: "21:00", openHoursBefore: 48, checkinMinutesBefore: 30, autoBracket: true, createEvent: true };
+  const templateKeys = TOURNAMENT_KEYS.filter((k) => k !== "name" && k !== "startTime");
+  for (const k of templateKeys) initial[k] = tpl[k] ?? TOURNAMENT_DEFAULTS[k];
+  const form = createForm({ initial, register: false });
+  const cfg = form.data;
+  openDialog({
+    kind: "drawer",
+    title: s ? "Modifier le tournoi récurrent" : "Nouveau tournoi récurrent",
+    description: s
+      ? s.running
+        ? "Le tournoi déjà ouvert garde ses horaires et ses réglages : les changements valent pour les suivants."
+        : "Les changements valent dès le prochain tournoi."
+      : "Le bot ouvre les inscriptions, lance le check-in puis le bracket, chaque semaine.",
+    body: el("div", { class: "stack", style: "gap:24px" }, groups(schedulePlanningGroup(cfg)), tournamentFormFields(cfg, { recurring: true })),
+    beforeClose: async () => !formDirty(form) || confirmLeave(),
+    actions: [
+      { label: "Annuler", onClick: async (dlg) => { await dlg.requestClose(); return false; } },
+      {
+        label: s ? "Enregistrer" : "Créer le modèle",
+        variant: "primary",
+        onClick: async () => {
+          if (!String(cfg.name || "").trim()) {
+            toast("Donne un nom au tournoi.", "err");
+            return false;
+          }
+          if (!/^\d{2}:\d{2}$/.test(cfg.time || "")) {
+            toast("Choisis l'heure du début.", "err");
+            return false;
+          }
+          if (!cfg.signupChannelId) {
+            toast("Choisis le salon d'inscription : sans lui, personne ne peut s'inscrire.", "err");
+            return false;
+          }
+          const [hour, minute] = cfg.time.split(":").map(Number);
+          const body = {
+            name: cfg.name,
+            enabled: cfg.enabled,
+            weekday: cfg.weekday,
+            hour,
+            minute,
+            openHoursBefore: cfg.openHoursBefore,
+            checkinMinutesBefore: cfg.checkinMinutesBefore,
+            autoBracket: cfg.autoBracket,
+            createEvent: cfg.createEvent,
+            template: Object.fromEntries(templateKeys.map((k) => [k, cfg[k]])),
+          };
+          const saved = s ? await api(`/api/tournament/schedules/${encodeURIComponent(s.id)}`, "PUT", body) : await api("/api/tournament/schedules", "POST", body);
+          // Ouverture déjà passée pour ce créneau (ex. modèle du vendredi créé le jeudi) : le bot
+          // ouvre les inscriptions au prochain passage de l'automatisation, dans la minute.
+          const soon = saved.nextRunAt && !saved.running && saved.openAt <= Date.now();
+          toast(
+            !saved.nextRunAt
+              ? "Modèle enregistré, en pause"
+              : soon
+                ? `Modèle enregistré · inscriptions ouvertes dans la minute pour le ${fmtParis(saved.nextRunAt)}`
+                : `Modèle enregistré · prochain tournoi ${fmtParis(saved.nextRunAt)}`,
+            "ok",
+          );
           onDone();
         },
       },
