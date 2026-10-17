@@ -53,7 +53,8 @@ import {
   parseDuration,
 } from "../giveaway.js";
 import { listGiveaways, listActiveGiveaways, getGiveaway, countEntries } from "../giveawayStore.js";
-import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload } from "../welcome.js";
+import { getWelcomeConfig, setWelcomeConfig, buildWelcomePayload, pingRoleId } from "../welcome.js";
+import { buildStaffAlertPayload, channelUrl } from "../welcomeStaff.js";
 import { getLolConfig, setLolConfig, buildLolWelcomePayload, resetGreeted, greetedCount } from "../lol.js";
 import { getGuildConfig, setGuildConfig, getGuildStatus, syncGuild } from "../guild.js";
 import { getLfgConfig, setLfgConfig } from "../lfg.js";
@@ -556,6 +557,23 @@ export function startWebServer(client, ctx = null) {
       const member = await guild.members.fetch(req.session.id);
       const ch = await guild.channels.fetch(cfg.channelId);
       await ch.send(buildWelcomePayload(member, guild, cfg, { test: true }));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Alerte staff de test : l'admin connecté joue le nouveau membre, personne n'est notifié.
+  app.post("/api/welcome/staff-test", requireAdmin, async (req, res) => {
+    try {
+      const cfg = await getWelcomeConfig(config.guildId);
+      if (!cfg.staffChannelId) return res.status(400).json({ error: "Aucun salon staff défini." });
+      const guild = await client.guilds.fetch(config.guildId);
+      const ch = await guild.channels.fetch(cfg.staffChannelId).catch(() => null);
+      if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon staff introuvable ou non textuel." });
+      const url = channelUrl(guild.id, cfg.staffChatChannelId || guild.systemChannelId);
+      const alert = { roleId: pingRoleId(guild, cfg.staffRoleId), members: [{ id: req.session.id, url }], helpers: [] };
+      await ch.send(buildStaffAlertPayload(alert, { test: true }));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

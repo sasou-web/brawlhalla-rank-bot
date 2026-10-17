@@ -110,6 +110,7 @@ import { handleTimeout } from "./commands/moderation.js";
 import { handleDevineTop } from "./commands/guesstop.js";
 import { handleGuilde, handleGuildButton } from "./commands/guild.js";
 import { handleLfg, handleLfgButton } from "./commands/lfg.js";
+import { STAFF_GO_ID, handleStaffAlertButton } from "./welcomeStaff.js";
 import { handleDefi, handleLadder, handleLadderButton, handleLadderModal } from "./commands/ladder.js";
 import { handleReportModal, handleReportButton } from "./commands/contextMenus.js";
 import { EPHEMERAL, logAudit, dmUser, requirePermission, requireManageGuild } from "./commands/shared.js";
@@ -681,6 +682,7 @@ async function routeButton(interaction, ctx) {
   if (id.startsWith("trn_")) return handleTournamentButton(interaction, ctx);
   if (id.startsWith("gld_")) return handleGuildButton(interaction, ctx);
   if (id.startsWith("lfg_")) return handleLfgButton(interaction, ctx);
+  if (id === STAFF_GO_ID) return handleStaffAlertButton(interaction);
   if (id.startsWith("lad_")) return handleLadderButton(interaction);
   if (id.startsWith("castgo:")) return handleCastGo(interaction, ctx);
   if (id.startsWith("pick:")) return handlePick(interaction, ctx);

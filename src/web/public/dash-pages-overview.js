@@ -19,7 +19,7 @@ const MODULES = [
   { section: "roletimeout", label: "Timeout par rôle", page: "roletimeout" },
   { section: "tiktok", label: "TikTok", page: "tiktok" },
   { section: "levels", label: "Niveaux", page: "levels" },
-  { section: "welcome", label: "Accueil", page: "welcome", on: (c) => c.enabled || c.goodbyeEnabled || c.autoRoleEnabled },
+  { section: "welcome", label: "Accueil", page: "welcome", on: (c) => c.enabled || c.goodbyeEnabled || c.autoRoleEnabled || c.staffEnabled },
   { section: "tickets", label: "Tickets", page: "tickets" },
   { section: "giveaway", label: "Giveaways", page: "giveaway" },
   { section: "tempvoice", label: "Vocaux temporaires", page: "voice", tab: "temp" },
@@ -72,6 +72,7 @@ function configWarnings() {
   if (wl.enabled && !wl.channelId) add("Le message d'arrivée est actif sans salon.", "welcome", "arrival");
   if (wl.goodbyeEnabled && !wl.goodbyeChannelId) add("Le message de départ est actif sans salon.", "welcome", "goodbye");
   if (wl.autoRoleEnabled && !(wl.autoRoleIds || []).length) add("L'auto-rôle est actif sans rôle sélectionné.", "welcome", "autorole");
+  if (wl.staffEnabled && !wl.staffChannelId) add("L'alerte staff est active sans salon.", "welcome", "staff");
   const lol = c("lol");
   if (lol.enabled && (!lol.roleId || !lol.channelId)) add("L'accueil League of Legends est actif sans rôle ou salon.", "lol");
   return w;

@@ -31,6 +31,7 @@ import { handleWordFilter } from "./wordfilter.js";
 import { handleGuessRankMessage, tickGuessReveals } from "./guessrank.js";
 import { startWebServer } from "./web/server.js";
 import { getWelcomeConfig, buildWelcomePayload, buildGoodbyePayload } from "./welcome.js";
+import { queueStaffAlert, markStaffAlertLeft } from "./welcomeStaff.js";
 import { handleLolRole } from "./lol.js";
 import { onMessageUpdate, onGuildMemberUpdate, onMessageReactionAdd } from "./partialEvents.js";
 import { runWeeklyRecap } from "./progression.js";
@@ -378,10 +379,13 @@ client.on(Events.GuildMemberAdd, async (member) => {
       if (roles.length) await member.roles.add(roles, "Auto-role à l'arrivée").catch(() => {});
     }
     // Message de bienvenue
+    let welcomeUrl = "";
     if (cfg.enabled && cfg.channelId) {
       const ch = await member.guild.channels.fetch(cfg.channelId).catch(() => null);
-      if (ch?.isTextBased?.()) await ch.send(buildWelcomePayload(member, member.guild, cfg)).catch(() => {});
+      if (ch?.isTextBased?.()) welcomeUrl = (await ch.send(buildWelcomePayload(member, member.guild, cfg)).catch(() => null))?.url || "";
     }
+    // Alerte staff : lien de secours vers l'accueil du bot si Discord n'a pas posté le sien.
+    await queueStaffAlert(member, { welcomeUrl }).catch((e) => console.warn("Alerte staff :", e.message));
   } catch (err) {
     console.warn("Erreur bienvenue :", err.message);
   }
@@ -403,6 +407,7 @@ client.on(Events.GuildMemberUpdate, (oldMember, newMember) => onGuildMemberUpdat
 // Un membre hors cache arrive ici en partiel (Partials.GuildMember) : l'utilisateur est
 // connu, ce qui suffit au message d'au revoir.
 client.on(Events.GuildMemberRemove, async (member) => {
+  markStaffAlertLeft(member).catch(() => {});
   try {
     const cfg = await getWelcomeConfig(member.guild.id);
     if (cfg.goodbyeEnabled && cfg.goodbyeChannelId) {
