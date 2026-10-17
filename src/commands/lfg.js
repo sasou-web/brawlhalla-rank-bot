@@ -12,6 +12,8 @@ import {
   canJoin,
   canPublish,
   modeFromRoleMentions,
+  lfgChannelFor,
+  isLfgChannelFor,
   noteFromMessage,
   joinPost,
   leavePost,
@@ -50,14 +52,15 @@ export async function handleLfg(interaction) {
   const guildId = interaction.guildId;
   const userId = interaction.user.id;
   const cfg = await getLfgConfig(guildId);
-  if (!cfg.enabled || !cfg.channelId) {
+  const mode = interaction.options.getString("mode", true);
+  const channelId = lfgChannelFor(cfg, mode);
+  if (!cfg.enabled || !channelId) {
     return interaction.reply({ content: "Le LFG n'est pas activé sur ce serveur.", flags: EPHEMERAL });
   }
   const wait = peekCooldown("lfg", userId, LFG_COOLDOWN_MS);
   if (wait > 0) {
     return interaction.reply({ content: `⏳ Doucement ! Tu pourras republier dans **${Math.ceil(wait / 1000)}s**.`, flags: EPHEMERAL });
   }
-  const mode = interaction.options.getString("mode", true);
   const existing = findOpenPostByAuthor(guildId, userId, mode);
   if (existing) return interaction.reply({ content: alreadyActive(guildId, existing), flags: EPHEMERAL });
   const link = await getLink(userId);
@@ -76,7 +79,7 @@ export async function handleLfg(interaction) {
   }
 
   await interaction.deferReply({ flags: EPHEMERAL });
-  const channel = await interaction.guild.channels.fetch(cfg.channelId).catch(() => null);
+  const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased?.()) return interaction.editReply("Le salon LFG est introuvable : préviens le staff.");
 
   const pingCooldownMs = cfg.pingCooldownMinutes * 60 * 1000;
@@ -161,10 +164,11 @@ export async function handleLfgMention(message) {
   // Un message qui pingue @everyone/@here (annonce du staff) n'est pas une recherche.
   if (message.mentions?.everyone) return false;
   const cfg = await getLfgConfig(guildId);
-  // Salon LFG uniquement : un fil a son propre identifiant de salon, il est donc ignoré.
-  if (!cfg.enabled || !cfg.channelId || message.channelId !== cfg.channelId) return false;
+  if (!cfg.enabled) return false;
   const mode = modeFromRoleMentions(cfg, [...(message.mentions?.roles?.keys?.() ?? [])]);
-  if (!mode) return false;
+  // Salon de ce mode ou salon par défaut uniquement : un fil a son propre identifiant de
+  // salon, il est donc ignoré, comme le salon d'un autre mode.
+  if (!mode || !isLfgChannelFor(cfg, mode, message.channelId)) return false;
 
   const userId = message.author.id;
   const link = await getLink(userId);
