@@ -24,7 +24,8 @@ const KEY = "lfg";
  *   config: DEFAULT_LFG_CONFIG,
  *   posts: { [id]: { id, authorId, mode, region, text, tier, rating, members: [authorId, ...],
  *     channelId, messageId, createdAt, expiresAt, status: "open"|"full"|"closed"|"expired",
- *     closedReason, endedAt, fullAt, voiceChannelId, messageGone } }
+ *     pingRoleId, closedReason, endedAt, fullAt, voiceChannelId, messageGone } },
+ *   pingedAt: { [userId]: ts }   // dernier ping du rôle de recherche (anti-spam, persistant)
  * } } }
  * Faible écriture (quelques annonces par heure) : le doc kv suffit.
  */
@@ -36,6 +37,12 @@ export const DEFAULT_LFG_CONFIG = {
   maxTierGap: 2,
   createVoice: false,
   voiceCategoryId: "",
+  // Rôle pingé à la publication, par mode (vide : pas de ping), et délai entre deux pings
+  // d'un même membre (anti-spam ; 0 : à chaque annonce).
+  pingRole1v1: "",
+  pingRole2v2: "",
+  pingRole3v3: "",
+  pingCooldownMinutes: 15,
 };
 
 // `rank` : mode ranked dont on affiche le rank (le 1v1 « entraînement » montre le rank 1v1).
@@ -75,6 +82,7 @@ function getState(guildId) {
   const g = c.guilds[guildId] || {};
   g.config = { ...DEFAULT_LFG_CONFIG, ...(g.config || {}) };
   if (!g.posts || typeof g.posts !== "object") g.posts = {};
+  if (!g.pingedAt || typeof g.pingedAt !== "object") g.pingedAt = {};
   c.guilds[guildId] = g;
   return g;
 }
@@ -100,7 +108,7 @@ const clampInt = (v, min, max, def) => {
 export async function setLfgConfig(guildId, patch = {}) {
   const g = getState(guildId);
   const next = { ...g.config };
-  for (const k of ["channelId", "voiceCategoryId"]) {
+  for (const k of ["channelId", "voiceCategoryId", "pingRole1v1", "pingRole2v2", "pingRole3v3"]) {
     if (!(k in patch)) continue;
     const v = String(patch[k] ?? "").trim();
     if (v && !/^\d{5,25}$/.test(v)) throw badRequest(`Valeur invalide pour ${k}.`);
@@ -108,6 +116,7 @@ export async function setLfgConfig(guildId, patch = {}) {
   }
   for (const k of ["enabled", "requireLink", "createVoice"]) if (k in patch) next[k] = Boolean(patch[k]);
   if ("ttlMinutes" in patch) next.ttlMinutes = clampInt(patch.ttlMinutes, TTL_MIN, TTL_MAX, DEFAULT_LFG_CONFIG.ttlMinutes);
+  if ("pingCooldownMinutes" in patch) next.pingCooldownMinutes = clampInt(patch.pingCooldownMinutes, 0, TTL_MAX, DEFAULT_LFG_CONFIG.pingCooldownMinutes);
   if ("maxTierGap" in patch) next.maxTierGap = clampInt(patch.maxTierGap, 0, TIERS.length - 1, DEFAULT_LFG_CONFIG.maxTierGap);
   g.config = next;
   await saveLfg();
@@ -128,7 +137,7 @@ export function findOpenPostByAuthor(guildId, userId) {
  * Réserve une annonce (synchrone : la vérification « une annonce active par membre » et
  * l'insertion ne sont séparées par aucun `await`, deux /lfg simultanés ne passent pas).
  */
-export function reservePost(guildId, { authorId, mode, region, text, tier, rating, channelId, ttlMinutes }, now = Date.now()) {
+export function reservePost(guildId, { authorId, mode, region, text, tier, rating, channelId, ttlMinutes, pingRoleId }, now = Date.now()) {
   const existing = findOpenPostByAuthor(guildId, authorId);
   if (existing) return { error: "already", post: existing };
   const id = `${now.toString(36)}${randomBytes(2).toString("hex")}`;
@@ -141,6 +150,7 @@ export function reservePost(guildId, { authorId, mode, region, text, tier, ratin
     tier: tier ?? null,
     rating: rating || 0,
     members: [authorId],
+    pingRoleId: pingRoleId || "",
     channelId,
     messageId: null,
     createdAt: now,
@@ -151,12 +161,42 @@ export function reservePost(guildId, { authorId, mode, region, text, tier, ratin
   return { post };
 }
 
+/** Délai anti-spam restant (ms) avant que `userId` puisse de nouveau pinger le rôle de recherche. */
+export function pingCooldownLeft(guildId, userId, cooldownMs, now = Date.now()) {
+  const last = getState(guildId).pingedAt[userId] ?? 0;
+  return Math.max(0, cooldownMs - (now - last));
+}
+
+/** Note le ping (persisté avec le prochain `saveLfg`). */
+export function markPinged(guildId, userId, now = Date.now()) {
+  getState(guildId).pingedAt[userId] = now;
+}
+
 export async function deletePost(guildId, id) {
   delete getState(guildId).posts[id];
   await saveLfg();
 }
 
 // ---------- Fonctions pures ----------
+
+/** Rôle à pinger pour une annonce de ce mode (config du dashboard), ou "". */
+export function pingRoleFor(cfg, mode) {
+  return LFG_MODES[mode] ? cfg?.[`pingRole${mode}`] || "" : "";
+}
+
+/**
+ * Faut-il pinger le rôle de recherche ? `role` : le rôle Discord (ou null s'il a été
+ * supprimé), `botCanMentionAll` : permission « Mentionner @everyone… » du bot dans le salon,
+ * `cooldownLeftMs` : délai anti-spam restant pour l'auteur. Renvoie { roleId, reason } :
+ * roleId vide = pas de ping, reason dit pourquoi (null si aucun rôle n'est configuré).
+ */
+export function pingDecision(roleId, { role, botCanMentionAll = false, cooldownLeftMs = 0 } = {}) {
+  if (!roleId) return { roleId: "", reason: null };
+  if (!role) return { roleId: "", reason: "missing" };
+  if (!role.mentionable && !botCanMentionAll) return { roleId: "", reason: "not_mentionable" };
+  if (cooldownLeftMs > 0) return { roleId: "", reason: "cooldown" };
+  return { roleId, reason: null };
+}
 
 export function lfgCapacity(mode) {
   return LFG_MODES[mode]?.capacity ?? 2;
@@ -265,6 +305,14 @@ function rankLabel(link, mode, fallback = {}) {
   return `${emoji ? `${emoji} ` : ""}**${tier}**${rating ? ` (${fmt(rating)})` : ""}`;
 }
 
+// En 2v2/3v3, le rank du mode peut être très différent du niveau réel : on montre aussi le 1v1.
+function playerLabel(link, mode, fallback = {}) {
+  const main = rankLabel(link, mode, fallback);
+  const rankMode = LFG_MODES[mode]?.rank ?? mode;
+  if (rankMode === "1v1" || !link) return main;
+  return `${rankMode} ${main} · 1v1 ${rankLabel(link, "1v1")}`;
+}
+
 const STATUS_VIEW = {
   open: { accent: 0x5865f2, title: (m) => `## 🔎 Cherche ${m === "3v3" ? "équipe" : "partenaire"} ${LFG_MODES[m]?.label ?? m}` },
   full: { accent: 0x2ecc71, title: (m) => `## ✅ Équipe complète · ${LFG_MODES[m]?.label ?? m}` },
@@ -273,20 +321,23 @@ const STATUS_VIEW = {
 };
 
 /**
- * Carte de l'annonce. `links` : { [discordUserId]: link } (getAllLinks). Les mentions ne
- * notifient jamais (allowedMentions vide) : le ping d'équipe complète est un message à part.
+ * Carte de l'annonce. `links` : { [discordUserId]: link } (getAllLinks). Seul l'envoi
+ * initial (`ping: true`) peut notifier, et uniquement le rôle de recherche du mode ; les
+ * éditions ne notifient personne. Le ping d'équipe complète est un message à part.
  */
-export function buildLfgCard(post, links = {}) {
+export function buildLfgCard(post, links = {}, { ping = false } = {}) {
   const view = STATUS_VIEW[post.status] ?? STATUS_VIEW.closed;
   const cap = lfgCapacity(post.mode);
   const card = new ContainerBuilder().setAccentColor(view.accent);
 
-  const head = [view.title(post.mode), `🌍 ${regionLabel(post.region)} · par <@${post.authorId}> · ${rankLabel(links[post.authorId], post.mode, post)}`];
+  const head = [view.title(post.mode)];
+  if (post.pingRoleId && post.status === "open") head.push(`🔔 <@&${post.pingRoleId}>`);
+  head.push(`🌍 ${regionLabel(post.region)} · par <@${post.authorId}> · ${playerLabel(links[post.authorId], post.mode, post)}`);
   if (post.text) head.push(`> ${escapeMarkdown(post.text).replace(/\n+/g, " ")}`);
   card.addTextDisplayComponents(text(head.join("\n")));
 
   card.addSeparatorComponents(sep());
-  const lines = post.members.map((id) => `• <@${id}> · ${rankLabel(links[id], post.mode, id === post.authorId ? post : {})}`);
+  const lines = post.members.map((id) => `• <@${id}> · ${playerLabel(links[id], post.mode, id === post.authorId ? post : {})}`);
   if (post.status === "open") for (let i = post.members.length; i < cap; i++) lines.push("• *place libre*");
   card.addTextDisplayComponents(text(`### Équipe ${post.members.length}/${cap}\n${lines.join("\n")}`));
 
@@ -308,7 +359,8 @@ export function buildLfgCard(post, links = {}) {
       ),
     );
   }
-  return { components: [card], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+  const allowedMentions = ping && post.pingRoleId ? { roles: [post.pingRoleId] } : { parse: [] };
+  return { components: [card], flags: MessageFlags.IsComponentsV2, allowedMentions };
 }
 
 // ---------- Tick (toutes les 60 s) ----------
@@ -348,7 +400,7 @@ async function alertStaff(guild, content) {
 export async function tickLfg(client, guild, now = Date.now()) {
   const g = getState(guild.id);
   const posts = g.posts;
-  if (!g.config.enabled && !Object.keys(posts).length) return;
+  if (!g.config.enabled && !Object.keys(posts).length && !Object.keys(g.pingedAt).length) return;
   let dirty = false;
 
   const channels = new Map();
@@ -410,5 +462,10 @@ export async function tickLfg(client, guild, now = Date.now()) {
   }
 
   if (purgePosts(posts, now)) dirty = true;
+  for (const [userId, ts] of Object.entries(g.pingedAt)) {
+    if (now - ts < TTL_MAX * 60 * 1000) continue;
+    delete g.pingedAt[userId];
+    dirty = true;
+  }
   if (dirty) await saveLfg();
 }

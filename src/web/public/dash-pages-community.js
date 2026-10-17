@@ -359,6 +359,16 @@ function renderLfg(ctx) {
         }),
       ),
       settingsGroup(
+        "Ping du rôle de recherche",
+        "À la publication, l'annonce pingue le rôle du mode choisi, comme les membres le faisaient à la main. Vide : pas de ping pour ce mode.",
+        field("Rôle 1v1", rolePicker(c, "pingRole1v1"), { optional: true }),
+        field("Rôle 2v2", rolePicker(c, "pingRole2v2"), { optional: true }),
+        field("Rôle 3v3", rolePicker(c, "pingRole3v3"), { optional: true }),
+        field("Délai entre deux pings d'un membre", numberInput(c, "pingCooldownMinutes", { min: 0, max: 1440, suffix: "min" }), {
+          help: "Anti-spam : pendant ce délai, ses annonces sont publiées sans ping. 0 : ping à chaque annonce. Le rôle doit être mentionnable, ou le bot doit avoir « Mentionner @everyone, @here et tous les rôles » dans le salon LFG.",
+        }),
+      ),
+      settingsGroup(
         "Vocal d'équipe",
         "Quand l'équipe est complète, un vocal temporaire peut être créé pour elle. Il disparaît quand il se vide.",
         switchField("Créer un vocal à l'équipe complète", c, "createVoice"),
