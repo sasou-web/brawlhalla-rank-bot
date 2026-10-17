@@ -22,25 +22,36 @@ const KEY = "linkpanel";
  * /lier (menu de sélection + carte de confirmation). Plus besoin de connaître la commande.
  *
  * Structure : { guilds: { [guildId]: { enabled, channelId, title, description,
- *   benefitsTitle, benefits, footerText, color, buttonLabel, thumbnailUrl, bannerUrl } } }
+ *   benefitsTitle, benefits, footerText, color, buttonLabel, thumbnailUrl, bannerUrl } },
+ *   posted: { [guildId]: { channelId, messageId } } }
+ * `posted` (dernier panneau publié) reste hors de la config éditable du dashboard.
  */
+// Textes du panneau (les mêmes que propose « Remettre le texte conseillé » du dashboard).
+// Courts, en étapes : ce que tu fais, puis ce que tu gagnes. N'y citer que ce que la liaison
+// apporte vraiment (rôles 1v1/2v2/3v3, région et Top 100, /top, contrôle de rank du LFG).
+export const DEFAULT_TEXTS = {
+  title: "🔗 Lie ton compte Brawlhalla",
+  description:
+    "**3 étapes**, 10 secondes ⏱️\n" +
+    "**1.** Clique sur **Lier mon compte** en bas 👇\n" +
+    "**2.** Mets ton **Brawlhalla ID** (ou ton pseudo)\n" +
+    "**3.** Confirme que c'est bien toi ✅",
+  benefitsTitle: "🎁 Ce que tu gagnes",
+  benefits:
+    "🎖️ **Ton rank en rôle** en 1v1, 2v2 et 3v3, mis à jour tout seul\n" +
+    "🌍 **Ta région** + le rôle **Top 100** si tu y es\n" +
+    "👑 **Classement du serveur** avec `/top`\n" +
+    "🔍 **LFG 2v2 et 3v3** : trouve des mates de ton niveau\n" +
+    "📊 **Tes stats** avec `/stats` et `/carte`",
+  footerText: "💡 Ton **ID** est sur **corehalla.com** (tape ton pseudo). Plus sûr que la recherche par pseudo.",
+  buttonLabel: "Lier mon compte",
+};
+
 const DEFAULT_CONFIG = {
   enabled: false,
   channelId: "",
-  title: "🔗 Lier ton compte Brawlhalla",
-  description: "Relie ton compte en 10 secondes et reçois automatiquement tes rôles selon ton rang.",
-  benefitsTitle: "✨ Pourquoi lier ton compte ?",
-  benefits:
-    "🎖️ **Rôles de rank automatiques** en 1v1, 2v2 & 3v3\n" +
-    "🔄 **Mise à jour auto** de tes rôles à chaque changement de rang\n" +
-    "🌍 **Rôle de région** (EU, US, BRZ...)\n" +
-    "🏆 **Classement du serveur** + rôle « 👑 N°1 du serveur »\n" +
-    "📊 Tes stats accessibles via `/stats` et `/rank`",
-  footerText:
-    "💡 Le plus fiable : ton **Brawlhalla ID** (sur corehalla.com ou dans l'appli). " +
-    "Le pseudo marche aussi, mais l'API est parfois capricieuse.",
+  ...DEFAULT_TEXTS,
   color: "#4ea1ff",
-  buttonLabel: "Lier mon compte",
   thumbnailUrl: "",
   bannerUrl: "",
 };
@@ -50,8 +61,9 @@ let writeChain = Promise.resolve();
 
 async function load() {
   if (cache) return cache;
-  cache = loadDoc(KEY, { guilds: {} });
+  cache = loadDoc(KEY, { guilds: {}, posted: {} });
   if (!cache.guilds) cache.guilds = {};
+  if (!cache.posted) cache.posted = {};
   return cache;
 }
 
@@ -79,10 +91,44 @@ export async function setLinkPanelConfig(guildId, patch) {
   if ("benefitsTitle" in clean) clean.benefitsTitle = String(clean.benefitsTitle || "").slice(0, 256);
   if ("benefits" in clean) clean.benefits = String(clean.benefits || "").slice(0, 2000);
   if ("footerText" in clean) clean.footerText = String(clean.footerText || "").slice(0, 1000);
-  if ("buttonLabel" in clean) clean.buttonLabel = String(clean.buttonLabel || "Lier mon compte").slice(0, 80);
+  if ("buttonLabel" in clean) clean.buttonLabel = String(clean.buttonLabel || DEFAULT_TEXTS.buttonLabel).slice(0, 80);
   Object.assign(g, clean);
   await save();
   return getLinkPanelConfig(guildId);
+}
+
+/** Remet les textes conseillés (titre, accroche, avantages, conseil, bouton). Garde salon et apparence. */
+export async function resetLinkPanelTexts(guildId) {
+  return setLinkPanelConfig(guildId, { ...DEFAULT_TEXTS });
+}
+
+/** Dernier panneau publié ({ channelId, messageId }) ou null. */
+export async function getLinkPanelPosted(guildId) {
+  const c = await load();
+  return c.posted[guildId] || null;
+}
+
+export async function setLinkPanelPosted(guildId, posted) {
+  const c = await load();
+  if (posted) c.posted[guildId] = { channelId: String(posted.channelId), messageId: String(posted.messageId) };
+  else delete c.posted[guildId];
+  await save();
+}
+
+/** Vrai si un des composants (imbriqués, Components V2 compris) porte ce customId (PURE). */
+export function hasCustomId(components, customId) {
+  for (const comp of components || []) {
+    if (!comp) continue;
+    if ((comp.customId ?? comp.custom_id ?? comp.data?.custom_id) === customId) return true;
+    if (hasCustomId(comp.components, customId)) return true;
+    if (comp.accessory && hasCustomId([comp.accessory], customId)) return true;
+  }
+  return false;
+}
+
+/** Vrai si ce message est un panneau de liaison posté par le bot (PURE). */
+export function isLinkPanelMessage(msg, botId) {
+  return !!msg && msg.author?.id === botId && hasCustomId(msg.components, "lnkp_open");
 }
 
 // Couleur hex ("#4ea1ff") ou nombre -> entier. Repli sur le bleu du bot.
@@ -111,7 +157,7 @@ export function buildLinkPanelPayload(cfg) {
   }
 
   // En-tête : titre + description, avec la vignette à droite si fournie.
-  const head = `## ${cfg.title || "🔗 Lier ton compte Brawlhalla"}\n${cfg.description || ""}`.slice(0, 4000);
+  const head = `## ${cfg.title || DEFAULT_TEXTS.title}\n${cfg.description || ""}`.slice(0, 4000);
   if (cfg.thumbnailUrl) {
     container.addSectionComponents(
       new SectionBuilder()
@@ -127,7 +173,7 @@ export function buildLinkPanelPayload(cfg) {
     container.addSeparatorComponents(divider());
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${cfg.benefitsTitle || "✨ Pourquoi lier ton compte ?"}\n${cfg.benefits.trim()}`.slice(0, 4000),
+        `### ${cfg.benefitsTitle || DEFAULT_TEXTS.benefitsTitle}\n${cfg.benefits.trim()}`.slice(0, 4000),
       ),
     );
   }
@@ -146,7 +192,7 @@ export function buildLinkPanelPayload(cfg) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("lnkp_open")
-        .setLabel((cfg.buttonLabel || "Lier mon compte").slice(0, 80))
+        .setLabel((cfg.buttonLabel || DEFAULT_TEXTS.buttonLabel).slice(0, 80))
         .setEmoji("🔗")
         .setStyle(ButtonStyle.Primary),
     ),

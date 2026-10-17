@@ -727,8 +727,9 @@ function publishDialog({ title, description, initialChannel = "", channelKind = 
             return false;
           }
           if (pending) await saveAllForms({ rerender: false, quiet: true });
-          await onPublish(state.channelId);
-          toast(`Publié dans ${channelName(state.channelId)}`, "ok");
+          const r = await onPublish(state.channelId);
+          const where = channelName(state.channelId);
+          toast(r?.updated ? `Mis à jour dans ${where}` : r?.removedOld ? `Publié dans ${where}, ancien panneau retiré` : `Publié dans ${where}`, "ok");
           if (pending) rerenderPage();
         },
       },

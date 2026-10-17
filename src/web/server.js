@@ -33,7 +33,15 @@ import { getClipsConfig, setClipsConfig } from "../clips.js";
 import { getGuessRankConfig, setGuessRankConfig } from "../guessrank.js";
 import { getTempConfig, setTempConfig } from "../tempvoice.js";
 import { getRemindersConfig, setRemindersConfig, sendReminderNow } from "../reminders.js";
-import { getLinkPanelConfig, setLinkPanelConfig, buildLinkPanelPayload } from "../linkpanel.js";
+import {
+  getLinkPanelConfig,
+  setLinkPanelConfig,
+  resetLinkPanelTexts,
+  buildLinkPanelPayload,
+  getLinkPanelPosted,
+  setLinkPanelPosted,
+  isLinkPanelMessage,
+} from "../linkpanel.js";
 import { getTicketConfig, setTicketConfig, buildTicketPanelPayload } from "../tickets.js";
 import {
   getGiveawayConfig,
@@ -692,7 +700,8 @@ export function startWebServer(client, ctx = null) {
     }
   });
 
-  // Publie le panneau de liaison (embed + bouton) dans le salon configure.
+  // Publie le panneau de liaison. Déjà publié dans ce salon : mis à jour sur place (même
+  // message, même lien). Ailleurs : nouveau message, puis l'ancien panneau est retiré.
   app.post("/api/linkpanel/publish", requireAdmin, async (req, res) => {
     try {
       const cfg = await getLinkPanelConfig(config.guildId);
@@ -700,8 +709,38 @@ export function startWebServer(client, ctx = null) {
       if (!channelId) return res.status(400).json({ error: "Choisis d'abord un salon." });
       const ch = await guildTextChannel(channelId);
       if (!ch) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
-      await ch.send(buildLinkPanelPayload(cfg));
-      res.json({ ok: true });
+      const payload = buildLinkPanelPayload(cfg);
+
+      const posted = await getLinkPanelPosted(config.guildId);
+      let previous = null;
+      if (posted) {
+        const oldCh = posted.channelId === ch.id ? ch : await guildTextChannel(posted.channelId);
+        previous = (await oldCh?.messages.fetch(posted.messageId).catch(() => null)) || null;
+      } else {
+        // Panneau publié avant ce suivi : on le cherche parmi les derniers messages du salon.
+        const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+        previous = recent?.find((m) => isLinkPanelMessage(m, client.user.id)) || null;
+      }
+      if (!isLinkPanelMessage(previous, client.user.id)) previous = null;
+
+      if (previous && previous.channelId === ch.id) {
+        await previous.edit(payload);
+        await setLinkPanelPosted(config.guildId, { channelId: ch.id, messageId: previous.id });
+        return res.json({ ok: true, updated: true });
+      }
+      const sent = await ch.send(payload);
+      await setLinkPanelPosted(config.guildId, { channelId: ch.id, messageId: sent.id });
+      const removedOld = previous ? await previous.delete().then(() => true, () => false) : false;
+      res.json({ ok: true, updated: false, removedOld });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Remet les textes conseillés du panneau (salon et apparence gardés).
+  app.post("/api/linkpanel/reset-texts", requireAdmin, async (req, res) => {
+    try {
+      res.json(await resetLinkPanelTexts(config.guildId));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

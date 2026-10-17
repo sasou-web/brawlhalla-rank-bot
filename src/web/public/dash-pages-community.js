@@ -159,12 +159,26 @@ function validationTab(host, s) {
 function linkPanelTab(host, c) {
   host.append(
     toolbar("Message public avec un bouton « Lier mon compte » : un formulaire lance la liaison sans taper /lier.", [
+      button("Remettre le texte conseillé", {
+        icon: "refresh",
+        onClick: async () => {
+          const ok = await confirmDialog({
+            title: "Remettre le texte conseillé ?",
+            message: "Titre, accroche, avantages, conseil et bouton reprennent le texte du bot. Le salon, la couleur et les images sont gardés. Les modifications non enregistrées de cette page sont perdues.",
+            confirmLabel: "Remettre le texte",
+          });
+          if (!ok) return;
+          CONFIG.linkpanel = await api("/api/linkpanel/reset-texts", "POST", {});
+          toast("Texte conseillé remis. Publie le panneau pour mettre à jour Discord.", "ok");
+          rerenderPage();
+        },
+      }),
       button("Publier le panneau", {
         icon: "send",
         onClick: () =>
           publishDialog({
             title: "Publier le panneau de liaison",
-            description: "Le panneau est publié tel qu'il apparaît dans l'aperçu.",
+            description: "Le panneau est publié tel qu'il apparaît dans l'aperçu. S'il est déjà dans ce salon, il est mis à jour sur place ; sinon l'ancien panneau est retiré.",
             initialChannel: c.channelId,
             onPublish: (channelId) => api("/api/linkpanel/publish", "POST", { channelId }),
           }),
@@ -195,9 +209,9 @@ function linkPanelTab(host, c) {
     discordMessage(
       containerPreview(c.color || "#4ea1ff", [
         safeUrl(c.bannerUrl) ? { banner: safeUrl(c.bannerUrl) } : null,
-        { text: `## ${c.title || "Lier ton compte Brawlhalla"}\n${c.description || ""}`, thumb: safeUrl(c.thumbnailUrl) },
+        { text: `## ${c.title || "Lie ton compte Brawlhalla"}\n${c.description || ""}`, thumb: safeUrl(c.thumbnailUrl) },
         c.benefits && c.benefits.trim() ? "sep" : null,
-        c.benefits && c.benefits.trim() ? { text: `### ${c.benefitsTitle || "Pourquoi lier ton compte ?"}\n${c.benefits.trim()}` } : null,
+        c.benefits && c.benefits.trim() ? { text: `### ${c.benefitsTitle || "Ce que tu gagnes"}\n${c.benefits.trim()}` } : null,
         c.footerText && c.footerText.trim() ? "sep" : null,
         c.footerText && c.footerText.trim() ? { text: `-# ${c.footerText.trim()}` } : null,
         "sep",
