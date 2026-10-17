@@ -376,8 +376,8 @@ const buttonLabels = (payload) =>
     .flatMap((row) => row.components.map((b) => b.label));
 
 test("bouton vocal : libellé explicite selon l'état, absent une fois l'annonce terminée", () => {
-  assert.ok(buttonLabels(buildLfgCard(post(), {})).includes("Passer sans vocal"));
-  assert.ok(buttonLabels(buildLfgCard(post({ voice: false }), {})).includes("Repasser en vocal"));
+  assert.ok(buttonLabels(buildLfgCard(post(), {})).includes("Jouer sans voc"));
+  assert.ok(buttonLabels(buildLfgCard(post({ voice: false }), {})).includes("Jouer avec voc"));
   assert.deepEqual(buttonIds(buildLfgCard(post({ status: "full" }), {})), []);
 });
 

@@ -436,8 +436,8 @@ export function buildLfgCard(post, links = {}, { ping = false, ladder = {} } = {
         new ButtonBuilder().setCustomId(`lfg_close:${post.id}`).setLabel("Fermer").setStyle(ButtonStyle.Danger),
         // Réservé à l'auteur ; le libellé dit ce que fait le clic, pas l'état (affiché plus haut).
         post.voice === false
-          ? new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Repasser en vocal").setEmoji("🎙️").setStyle(ButtonStyle.Secondary)
-          : new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Passer sans vocal").setEmoji("🔇").setStyle(ButtonStyle.Secondary),
+          ? new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Jouer avec voc").setEmoji("🎙️").setStyle(ButtonStyle.Secondary)
+          : new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Jouer sans voc").setEmoji("🔇").setStyle(ButtonStyle.Secondary),
       ),
     );
   }
