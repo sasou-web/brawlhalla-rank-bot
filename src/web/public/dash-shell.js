@@ -139,11 +139,12 @@ const NAV_GROUPS = [
         id: "welcome",
         label: "Accueil",
         icon: "user-plus",
-        keywords: "bienvenue arrivée départ au revoir auto-rôle",
+        keywords: "bienvenue arrivée départ au revoir auto-rôle alerte staff helpeur",
         tabs: [
           { id: "arrival", label: "Arrivée" },
           { id: "goodbye", label: "Départ" },
           { id: "autorole", label: "Auto-rôle" },
+          { id: "staff", label: "Alerte staff" },
         ],
         render: (ctx) => renderWelcome(ctx),
       },

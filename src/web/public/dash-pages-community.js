@@ -504,7 +504,58 @@ function renderLevels(ctx) {
   );
 }
 
-// ═══════════════════ Accueil (arrivée, départ, auto-rôle) ═══════════════════
+// ═══════════════════ Accueil (arrivée, départ, auto-rôle, alerte staff) ═══════════════════
+// Rôle choisi que le bot ne pourra pas notifier (non mentionnable, sans permission du bot).
+function roleMentionWarning(c, key) {
+  return showWhen(
+    callout("warn", "Active « Autoriser tout le monde à @mentionner ce rôle » dans ses réglages Discord, ou donne au bot la permission « Mentionner @everyone, @here et tous les rôles ».", {
+      title: "Ce rôle s'affichera sans notifier personne",
+    }),
+    () => {
+      const r = c[key] && (GUILD.roles || []).find((x) => x.id === c[key]);
+      return Boolean(r && r.mentionable === false && !GUILD.botCanMentionAll);
+    },
+  );
+}
+
+// Aperçu de l'alerte staff (même texte que welcomeStaff.js, avec l'admin en nouveau membre).
+function staffAlertPreview(c) {
+  const role = c.staffRoleId && (GUILD.roles || []).find((r) => r.id === c.staffRoleId);
+  const lines = [
+    `${role ? "{role} " : ""}🚨 **Nouveau membre !** Allez lui dire **bienvenue** 👋`,
+    "➜ {user} · [**Dire bienvenue** 💬](https://discord.com)",
+    "-# Clique sur **👋 J'y vais** pour montrer que tu t'en occupes.",
+  ];
+  const mentions = role ? { ...defaultMentions(), "{role}": "@" + role.name } : defaultMentions();
+  return discordMessage(dcText(lines.join("\n"), { mentions }), el("span", { class: "dc-btn" }, el("span", { "aria-hidden": "true" }, "👋"), "J'y vais"));
+}
+
+function staffAlertTab(c) {
+  return [
+    toolbar("Publiée dans le salon staff à chaque arrivée.", [button("Envoyer un test", { icon: "send", onClick: () => sendTest("/api/welcome/staff-test", "Alerte de test envoyée dans le salon staff") })]),
+    splitLayout(
+      groups(
+        settingsGroup(
+          "Alerte staff",
+          "Prévient l'équipe à chaque arrivée, avec un lien vers le message de bienvenue de Discord du nouveau membre, pour aller lui dire bonjour dans le chat.",
+          switchField("Prévenir le staff à chaque arrivée", c, "staffEnabled"),
+          field("Salon staff", channelPicker(c, "staffChannelId", "text"), { help: "Salon où l'alerte est publiée. Les nouveaux membres n'y sont jamais notifiés." }),
+          field("Rôle à mentionner", rolePicker(c, "staffRoleId"), { optional: true, help: "Ex. Helpeur. Seul ce rôle est notifié." }),
+          roleMentionWarning(c, "staffRoleId"),
+          field("Délai entre deux pings du rôle", numberInput(c, "staffPingCooldownMin", { min: 0, max: 240, suffix: "min" }), {
+            help: "Anti-spam : pendant ce délai, les nouvelles alertes affichent le rôle sans le notifier. Les arrivées des 5 minutes suivantes sont ajoutées à la même alerte. 0 : ping à chaque alerte.",
+          }),
+          field("Salon de discussion", channelPicker(c, "staffChatChannelId", "text"), {
+            optional: true,
+            help: "Lien utilisé quand le message de bienvenue de Discord est introuvable (messages d'arrivée désactivés dans les réglages du serveur). Vide : salon des messages système.",
+          }),
+        ),
+      ),
+      livePreview(() => staffAlertPreview(c)),
+    ),
+  ];
+}
+
 function greetingFields(c, { textPlaceholder } = {}) {
   const wantText = () => c.mode === "text" || c.mode === "both";
   const wantEmbed = () => c.mode !== "text";
@@ -518,15 +569,7 @@ function greetingFields(c, { textPlaceholder } = {}) {
         optional: true,
         help: "Ses membres reçoivent une notification. Place-le avec {role} dans le message, sinon il est ajouté automatiquement. Le bouton de test l'affiche sans le notifier.",
       }),
-      showWhen(
-        callout("warn", "Active « Autoriser tout le monde à @mentionner ce rôle » dans ses réglages Discord, ou donne au bot la permission « Mentionner @everyone, @here et tous les rôles ».", {
-          title: "Ce rôle s'affichera sans notifier personne",
-        }),
-        () => {
-          const r = c.pingRoleId && (GUILD.roles || []).find((x) => x.id === c.pingRoleId);
-          return Boolean(r && r.mentionable === false && !GUILD.botCanMentionAll);
-        },
-      ),
+      roleMentionWarning(c, "pingRoleId"),
     ),
     showWhen(settingsGroup("Texte", null, field("Message", textArea(c, "text", { rows: 3, maxLength: 2000, placeholder: textPlaceholder })), varsHint(GREETING_ROLE_VARS)), wantText),
     showWhen(
@@ -550,9 +593,11 @@ function greetingFields(c, { textPlaceholder } = {}) {
 function renderWelcome(ctx) {
   const f = configForm("welcome", { normalize: (d) => { if (!d.embed || typeof d.embed !== "object") d.embed = {}; } });
   const c = f.data;
-  ctx.root.append(pageHeader({ title: "Accueil", description: "Message d'arrivée, message de départ et rôles attribués aux nouveaux membres.", hasTabs: true }));
+  ctx.root.append(pageHeader({ title: "Accueil", description: "Message d'arrivée, message de départ, rôles attribués aux nouveaux membres et alerte staff.", hasTabs: true }));
   pageTabs(ctx, (tab, host) => {
-    if (tab === "goodbye") {
+    if (tab === "staff") {
+      host.append(...staffAlertTab(c));
+    } else if (tab === "goodbye") {
       host.append(
         splitLayout(
           groups(

@@ -233,6 +233,11 @@ function baseConfig() {
       goodbyeEnabled: false,
       goodbyeChannelId: "",
       goodbyeText: "{username} a quitté le serveur.",
+      staffEnabled: true,
+      staffChannelId: byName(text, "alertes"),
+      staffRoleId: roleId("Staff"),
+      staffChatChannelId: byName(text, "général"),
+      staffPingCooldownMin: 10,
     },
     lol: { enabled: false, roleId: roleId("League of Legends"), channelId: byName(text, "lol-discussion"), oncePerMember: true, mode: "embed", pingUser: true, pingRoleId: "", text: "", embed: { color: "#c8aa6e", title: "Bienvenue sur la section LoL, {username} !", description: "Présente-toi et trouve des duos ici.", thumbnailUser: true, image: "", footer: "{server} · Section LoL", footerIcon: true } },
   };
@@ -679,7 +684,7 @@ app.get("/api/logs", (req, res) => {
 });
 
 // ---- Tests / publications (aucun effet : simulation) ----
-for (const p of ["/api/welcome/test", "/api/lol/test", "/api/tiktok/test", "/api/reminders/test", "/api/levels/test", "/api/linkpanel/publish", "/api/tickets/publish", "/api/combos/publish"]) {
+for (const p of ["/api/welcome/test", "/api/welcome/staff-test", "/api/lol/test", "/api/tiktok/test", "/api/reminders/test", "/api/levels/test", "/api/linkpanel/publish", "/api/tickets/publish", "/api/combos/publish"]) {
   app.post(p, (req, res) => ok(res));
 }
 // ---- Filtre de mots ----

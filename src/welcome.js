@@ -38,6 +38,13 @@ const DEFAULT_CONFIG = {
   goodbyeEnabled: false,
   goodbyeChannelId: "",
   goodbyeText: "**{username}** a quitté le serveur. À bientôt 👋  (on est maintenant {membercount})",
+  // Alerte staff (./welcomeStaff.js) : prévient un salon staff à chaque arrivée, avec un
+  // lien vers le message de bienvenue de Discord. Rôle notifié au plus une fois par délai.
+  staffEnabled: false,
+  staffChannelId: "",
+  staffRoleId: "",
+  staffChatChannelId: "",
+  staffPingCooldownMin: 10,
 };
 
 let cache = null;
