@@ -11,6 +11,8 @@ import {
   saveLfg,
   canJoin,
   canPublish,
+  modeFromRoleMentions,
+  noteFromMessage,
   joinPost,
   leavePost,
   closePost,
@@ -126,6 +128,71 @@ function pingNote(ping, guildId, userId, pingCooldownMs) {
   }
   if (ping.reason) return "\n🔕 Le rôle de recherche n'a pas pu être pingé : préviens le staff.";
   return "";
+}
+
+// ---------- Annonce par ping du rôle de recherche ----------
+
+// Réponse courte au message d'origine, retirée au bout de 20 s (refus visibles sans encombrer).
+async function replyBriefly(message, content) {
+  const r = await message.reply({ content, allowedMentions: { repliedUser: true, parse: [] } }).catch(() => null);
+  if (r) setTimeout(() => r.delete().catch(() => {}), 20_000).unref?.();
+}
+
+/**
+ * Un membre pingue « 🔍 Recherche 1v1/2v2 » (ou le rôle 3v3) dans le salon LFG : la carte
+ * est créée en réponse à son message, avec les valeurs par défaut (vocal oui, durée du
+ * dashboard) et son texte comme note. Le rôle n'est pas repingé (il vient de l'être) et le
+ * délai anti-spam du ping ne s'applique pas. Mêmes règles d'accès que /lfg. Appelé après le
+ * filtre de mots : un message retiré ne crée rien.
+ */
+export async function handleLfgMention(message) {
+  const guildId = message.guild?.id;
+  if (!guildId || message.author?.bot) return false;
+  const cfg = await getLfgConfig(guildId);
+  if (!cfg.enabled || !cfg.channelId || message.channelId !== cfg.channelId) return false;
+  const mode = modeFromRoleMentions(cfg, [...(message.mentions?.roles?.keys?.() ?? [])]);
+  if (!mode) return false;
+
+  const userId = message.author.id;
+  const existing = findOpenPostByAuthor(guildId, userId);
+  if (existing) {
+    await replyBriefly(message, `Tu as déjà une annonce active${existing.messageId ? ` : ${postUrl(guildId, existing)}` : "."} Ferme-la avant d'en publier une autre.`);
+    return false;
+  }
+  const link = await getLink(userId);
+  const allowed = canPublish(mode, link, cfg);
+  if (!allowed.ok) {
+    await replyBriefly(message, JOIN_REFUSALS.not_linked);
+    return false;
+  }
+
+  const res = reservePost(guildId, {
+    authorId: userId,
+    mode,
+    region: link?.region ?? "",
+    text: noteFromMessage(message.content),
+    tier: memberTier(link, mode),
+    rating: memberRating(link, mode),
+    channelId: message.channelId,
+    ttlMinutes: cfg.ttlMinutes,
+  });
+  if (res.error) return false;
+  const post = res.post;
+  try {
+    const card = await renderLfgCard(guildId, post);
+    const sent = await message.channel.send({
+      ...card,
+      reply: { messageReference: message.id, failIfNotExists: false },
+      allowedMentions: { parse: [], repliedUser: false },
+    });
+    post.messageId = sent.id;
+  } catch (err) {
+    await deletePost(guildId, post.id);
+    console.warn("LFG : annonce par ping impossible :", err.message);
+    return false;
+  }
+  await saveLfg();
+  return true;
 }
 
 // ---------- Boutons lfg_join / lfg_leave / lfg_close ----------

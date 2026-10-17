@@ -42,6 +42,7 @@ import { tickReminders } from "./reminders.js";
 import { removeOpenTicket } from "./tickets.js";
 import { syncGuild } from "./guild.js";
 import { tickLfg } from "./lfg.js";
+import { handleLfgMention } from "./commands/lfg.js";
 import { tickLadder } from "./commands/ladder.js";
 
 const client = new Client({
@@ -335,6 +336,9 @@ client.on(Events.MessageCreate, async (message) => {
     return false;
   });
   if (filtered) return;
+
+  // Ping du rôle « 🔍 Recherche … » dans le salon LFG → annonce créée automatiquement.
+  handleLfgMention(message).catch((err) => console.warn("LFG (ping) :", err.message));
 
   // Reactions auto + moderation des clips (best-effort, n'empeche pas l'XP).
   handleClipMessage(message).catch(() => {});

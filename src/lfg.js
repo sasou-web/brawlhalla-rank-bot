@@ -202,6 +202,29 @@ export function pingDecision(roleId, { role, botCanMentionAll = false, cooldownL
   return { roleId, reason: null };
 }
 
+/**
+ * Annonce par ping : mode dont le rôle de recherche est mentionné (`roleIds` dans l'ordre du
+ * message), ou null. Le premier rôle de recherche mentionné l'emporte.
+ */
+export function modeFromRoleMentions(cfg, roleIds = []) {
+  for (const id of roleIds) {
+    if (!id) continue;
+    const mode = Object.keys(LFG_MODES).find((m) => pingRoleFor(cfg, m) === id);
+    if (mode) return mode;
+  }
+  return null;
+}
+
+/** Texte d'un message de ping réutilisé comme note : sans mentions de rôle ni @everyone/@here. */
+export function noteFromMessage(content) {
+  return String(content ?? "")
+    .replace(/<@&\d+>/g, " ")
+    .replace(/@(everyone|here)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, LFG_TEXT_MAX);
+}
+
 export function lfgCapacity(mode) {
   return LFG_MODES[mode]?.capacity ?? 2;
 }
