@@ -346,8 +346,14 @@ function renderLfg(ctx) {
     groups(
       settingsGroup(
         "Annonces",
-        "Une annonce active par membre, 2 minutes entre deux publications. Le message libre passe par le filtre de mots.",
-        field("Salon LFG", channelPicker(c, "channelId", "text"), { help: "Les cartes y sont publiées. Le bot doit pouvoir y écrire. Salon supprimé : le module se désactive et le staff est alerté." }),
+        "Une annonce active par membre et par mode, 2 minutes entre deux publications. Le message libre passe par le filtre de mots.",
+        field("Salon LFG", channelPicker(c, "channelId", "text"), { help: "Salon par défaut : les cartes des modes sans salon dédié y sont publiées. Le bot doit pouvoir y écrire. Salon supprimé : le module se désactive et le staff est alerté." }),
+        field("Salon 1v1", channelPicker(c, "channel1v1", "text", { noneLabel: "Salon LFG par défaut" }), { optional: true }),
+        field("Salon 2v2", channelPicker(c, "channel2v2", "text", { noneLabel: "Salon LFG par défaut" }), { optional: true }),
+        field("Salon 3v3", channelPicker(c, "channel3v3", "text", { noneLabel: "Salon LFG par défaut" }), {
+          optional: true,
+          help: "Pour chaque mode qui a son salon : ses annonces y sont publiées, et pinger son rôle de recherche y crée l'annonce (le salon par défaut marche aussi). Salon supprimé : le mode repasse sur le salon par défaut.",
+        }),
         field("Durée d'une annonce", numberInput(c, "ttlMinutes", { min: 10, max: 1440, suffix: "min" }), { help: "Ensuite la carte passe en « Expirée », puis disparaît du salon 24 h plus tard." }),
       ),
       settingsGroup(
@@ -360,7 +366,7 @@ function renderLfg(ctx) {
       ),
       settingsGroup(
         "Ping du rôle de recherche",
-        "À la publication avec /lfg, l'annonce pingue le rôle du mode choisi. Dans le salon LFG, pinger directement l'un de ces rôles crée aussi l'annonce, en réponse au message. Vide : ni ping ni annonce par ping pour ce mode.",
+        "À la publication avec /lfg, l'annonce pingue le rôle du mode choisi. Dans le salon LFG (ou celui du mode), pinger directement l'un de ces rôles crée aussi l'annonce, en réponse au message. Vide : ni ping ni annonce par ping pour ce mode.",
         field("Rôle 1v1", rolePicker(c, "pingRole1v1"), { optional: true }),
         field("Rôle 2v2", rolePicker(c, "pingRole2v2"), { optional: true }),
         field("Rôle 3v3", rolePicker(c, "pingRole3v3"), { optional: true }),

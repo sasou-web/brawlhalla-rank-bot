@@ -24,24 +24,24 @@ import { setLink } from "../src/store.js";
 const G = "g_lfg_cmd";
 const CHANNEL = "444444";
 
-function fakeInteraction(userId, mode, { vocal = null } = {}) {
+function fakeInteraction(userId, mode, { vocal = null, guildId = G, channelIds = [CHANNEL] } = {}) {
   const sent = [];
   const replies = [];
-  const channel = {
-    id: CHANNEL,
+  const makeChannel = (id) => ({
+    id,
     isTextBased: () => true,
     permissionsFor: () => ({ has: () => false }),
     send: async (payload) => {
-      sent.push(payload);
-      return { id: `m_${userId}`, url: `https://discord.com/channels/${G}/${CHANNEL}/m_${userId}` };
+      sent.push({ ...payload, channelId: id });
+      return { id: `m_${userId}`, url: `https://discord.com/channels/${guildId}/${id}/m_${userId}` };
     },
-  };
+  });
   const interaction = {
-    guildId: G,
+    guildId,
     user: { id: userId },
     guild: {
-      id: G,
-      channels: { fetch: async (id) => (id === CHANNEL ? channel : null) },
+      id: guildId,
+      channels: { fetch: async (id) => (channelIds.includes(id) ? makeChannel(id) : null) },
       roles: { cache: new Map() },
       members: { me: {} },
     },
@@ -108,14 +108,14 @@ test("noteFromMessage : retire les mentions de rôle et @everyone", () => {
   assert.equal(noteFromMessage(`<@&${ROLE_1V1}>`), "");
 });
 
-function fakeMessage(userId, roleIds, { channelId = CHANNEL, content = "", id = `msg_${userId}`, sendFails = null, ...extra } = {}) {
+function fakeMessage(userId, roleIds, { channelId = CHANNEL, content = "", id = `msg_${userId}`, sendFails = null, guildId = G, ...extra } = {}) {
   const sent = [];
   const replies = [];
   const message = {
     id,
     content: content || roleIds.map((r) => `<@&${r}>`).join(" "),
     author: { id: userId, bot: false },
-    guild: { id: G },
+    guild: { id: guildId },
     channelId,
     mentions: { roles: new Map(roleIds.map((r) => [r, { id: r }])), everyone: false },
     channel: {
@@ -315,4 +315,60 @@ test("bouton vocal : refusé à un autre membre et sur une annonce terminée", a
   await handleLfgButton(late.interaction);
   assert.equal(post.voice, true);
   assert.equal(late.updates.length, 0);
+});
+
+// ---------- Un salon par mode ----------
+
+const GM = "g_lfg_modes";
+const DEFAULT_CH = "700000";
+const CH_1V1 = "700001";
+const CH_2V2 = "700002";
+
+test("salon par mode : /lfg publie dans le salon du mode, sinon dans le salon par défaut", async () => {
+  await setLfgConfig(GM, { enabled: true, channelId: DEFAULT_CH, channel1v1: CH_1V1, channel2v2: CH_2V2, requireLink: false });
+  const solo = fakeInteraction("u_mode_1v1", "1v1", { guildId: GM, channelIds: [DEFAULT_CH, CH_1V1, CH_2V2] });
+  await handleLfg(solo.interaction);
+  assert.equal(solo.sent[0].channelId, CH_1V1);
+  assert.equal(findOpenPostByAuthor(GM, "u_mode_1v1").channelId, CH_1V1);
+  const trio = fakeInteraction("u_mode_3v3", "3v3", { guildId: GM, channelIds: [DEFAULT_CH, CH_1V1, CH_2V2] });
+  await handleLfg(trio.interaction);
+  assert.equal(trio.sent[0].channelId, DEFAULT_CH, "3v3 sans salon dédié : salon par défaut");
+});
+
+test("salon par mode : /lfg fonctionne sans salon par défaut si le mode a le sien", async () => {
+  const GX = "g_lfg_modes_only";
+  await setLfgConfig(GX, { enabled: true, channelId: "", channel1v1: CH_1V1, requireLink: false });
+  const ok = fakeInteraction("u_only_1v1", "1v1", { guildId: GX, channelIds: [CH_1V1] });
+  await handleLfg(ok.interaction);
+  assert.equal(ok.sent[0]?.channelId, CH_1V1);
+  const none = fakeInteraction("u_only_2v2", "2v2", { guildId: GX, channelIds: [CH_1V1] });
+  await handleLfg(none.interaction);
+  assert.equal(none.sent.length, 0);
+  assert.match(none.replies[0].content, /pas activé/);
+});
+
+test("salon par mode : le ping crée la carte dans le salon du mode ou le salon par défaut, pas ailleurs", async () => {
+  await setLfgConfig(GM, { pingRole1v1: ROLE_1V1, pingRole2v2: ROLE_2V2 });
+  const inMode = fakeMessage("u_pm_mode", [ROLE_1V1], { guildId: GM, channelId: CH_1V1 });
+  assert.equal(await handleLfgMention(inMode.message), true);
+  assert.equal(findOpenPostByAuthor(GM, "u_pm_mode").channelId, CH_1V1);
+  const inDefault = fakeMessage("u_pm_default", [ROLE_1V1], { guildId: GM, channelId: DEFAULT_CH });
+  assert.equal(await handleLfgMention(inDefault.message), true);
+  assert.equal(findOpenPostByAuthor(GM, "u_pm_default").channelId, DEFAULT_CH);
+  const wrong = fakeMessage("u_pm_wrong", [ROLE_1V1], { guildId: GM, channelId: CH_2V2 });
+  assert.equal(await handleLfgMention(wrong.message), false, "rôle 1v1 pingé dans le salon 2v2 : ignoré");
+  assert.equal(wrong.sent.length + wrong.replies.length, 0);
+  const elsewhere = fakeMessage("u_pm_else", [ROLE_1V1], { guildId: GM, channelId: "799999" });
+  assert.equal(await handleLfgMention(elsewhere.message), false);
+});
+
+test("salon par mode : les garde-fous restent (une annonce par mode, délai anti-spam)", async () => {
+  const first = fakeMessage("u_pm_guard", [ROLE_1V1], { guildId: GM, channelId: CH_1V1, id: "pm_g1" });
+  assert.equal(await handleLfgMention(first.message), true);
+  const again = fakeMessage("u_pm_guard", [ROLE_1V1], { guildId: GM, channelId: DEFAULT_CH, id: "pm_g2" });
+  assert.equal(await handleLfgMention(again.message), false, "même mode depuis le salon par défaut : refusé");
+  assert.match(again.replies[0].content, /déjà une annonce/);
+  const other = fakeMessage("u_pm_guard", [ROLE_2V2], { guildId: GM, channelId: CH_2V2, id: "pm_g3" });
+  assert.equal(await handleLfgMention(other.message), false, "autre mode pendant le délai anti-spam : refusé");
+  assert.equal(other.sent.length, 0);
 });

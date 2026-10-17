@@ -33,6 +33,10 @@ const KEY = "lfg";
 export const DEFAULT_LFG_CONFIG = {
   enabled: false,
   channelId: "",
+  // Salon propre à un mode (vide : salon LFG par défaut ci-dessus).
+  channel1v1: "",
+  channel2v2: "",
+  channel3v3: "",
   ttlMinutes: 60,
   requireLink: true,
   maxTierGap: 2,
@@ -111,7 +115,7 @@ const clampInt = (v, min, max, def) => {
 export async function setLfgConfig(guildId, patch = {}) {
   const g = getState(guildId);
   const next = { ...g.config };
-  for (const k of ["channelId", "voiceCategoryId", "pingRole1v1", "pingRole2v2", "pingRole3v3"]) {
+  for (const k of ["channelId", "channel1v1", "channel2v2", "channel3v3", "voiceCategoryId", "pingRole1v1", "pingRole2v2", "pingRole3v3"]) {
     if (!(k in patch)) continue;
     const v = String(patch[k] ?? "").trim();
     if (v && !/^\d{5,25}$/.test(v)) throw badRequest(`Valeur invalide pour ${k}.`);
@@ -203,6 +207,20 @@ export async function deletePost(guildId, id) {
 }
 
 // ---------- Fonctions pures ----------
+
+/** Salon où publier une annonce de ce mode : son salon dédié, sinon le salon LFG par défaut ("" si aucun). */
+export function lfgChannelFor(cfg, mode) {
+  return (LFG_MODES[mode] && cfg?.[`channel${mode}`]) || cfg?.channelId || "";
+}
+
+/**
+ * Le ping du rôle de recherche de `mode` envoyé dans `channelId` crée-t-il une annonce ?
+ * Oui dans le salon de ce mode et dans le salon par défaut ; pas dans le salon d'un autre mode.
+ */
+export function isLfgChannelFor(cfg, mode, channelId) {
+  if (!channelId) return false;
+  return channelId === lfgChannelFor(cfg, mode) || channelId === cfg?.channelId;
+}
 
 /** Rôle à pinger pour une annonce de ce mode (config du dashboard), ou "". */
 export function pingRoleFor(cfg, mode) {
@@ -490,6 +508,14 @@ export async function tickLfg(client, guild, now = Date.now()) {
     g.config.enabled = false;
     dirty = true;
     await alertStaff(guild, "⚠️ Le salon LFG a été supprimé : le module LFG est désactivé. Choisis un nouveau salon dans le dashboard (Communauté › LFG) puis réactive-le.");
+  }
+  // Salon d'un mode supprimé : ce mode repasse sur le salon par défaut.
+  for (const mode of Object.keys(LFG_MODES)) {
+    const key = `channel${mode}`;
+    if (!g.config.enabled || !g.config[key] || (await channelOf(g.config[key])) !== null) continue;
+    g.config[key] = "";
+    dirty = true;
+    await alertStaff(guild, `⚠️ Le salon LFG ${LFG_MODES[mode].label} a été supprimé : ces annonces sont maintenant publiées dans le salon LFG par défaut.`);
   }
 
   const changed = [];

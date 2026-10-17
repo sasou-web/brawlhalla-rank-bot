@@ -13,6 +13,8 @@ import {
   reservePost,
   findOpenPostByAuthor,
   toggleVoice,
+  lfgChannelFor,
+  isLfgChannelFor,
   getLfgConfig,
   setLfgConfig,
   tickLfg,
@@ -389,4 +391,32 @@ test("toggleVoice : bascule une annonce ouverte, refuse une annonce terminée", 
   const done = post({ status: "full", voice: true });
   assert.equal(toggleVoice(done), false);
   assert.equal(done.voice, true);
+});
+
+test("lfgChannelFor / isLfgChannelFor : salon du mode, sinon salon par défaut", () => {
+  const c = { ...DEFAULT_LFG_CONFIG, channelId: "100", channel1v1: "101" };
+  assert.equal(lfgChannelFor(c, "1v1"), "101");
+  assert.equal(lfgChannelFor(c, "2v2"), "100");
+  assert.equal(lfgChannelFor(c, "4v4"), "100");
+  assert.equal(lfgChannelFor({ ...DEFAULT_LFG_CONFIG }, "2v2"), "");
+  assert.equal(isLfgChannelFor(c, "1v1", "101"), true);
+  assert.equal(isLfgChannelFor(c, "1v1", "100"), true, "salon par défaut accepté pour tous les modes");
+  assert.equal(isLfgChannelFor(c, "2v2", "101"), false, "salon d'un autre mode refusé");
+  assert.equal(isLfgChannelFor({ ...DEFAULT_LFG_CONFIG }, "2v2", ""), false);
+});
+
+test("setLfgConfig : salons par mode validés", async () => {
+  const G = "g_lfg_cfg_modes";
+  const cfg = await setLfgConfig(G, { channel2v2: "123456789012345678" });
+  assert.equal(cfg.channel2v2, "123456789012345678");
+  await assert.rejects(() => setLfgConfig(G, { channel3v3: "pas-un-id" }), /channel3v3/);
+});
+
+test("tickLfg : salon d'un mode supprimé → le mode repasse sur le salon par défaut", async () => {
+  const G = "g_lfg_mode_gone";
+  await setLfgConfig(G, { enabled: true, channelId: "444001", channel2v2: "444002" });
+  await tickLfg(null, fakeGuild(G, { channels: { "444001": true } }), Date.now());
+  const cfg = await getLfgConfig(G);
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg.channel2v2, "");
 });
