@@ -16,6 +16,7 @@ import {
   joinPost,
   leavePost,
   closePost,
+  toggleVoice,
   lfgCapacity,
   pingRoleFor,
   pingDecision,
@@ -221,7 +222,7 @@ export async function handleLfgMention(message) {
   return true;
 }
 
-// ---------- Boutons lfg_join / lfg_leave / lfg_close ----------
+// ---------- Boutons lfg_join / lfg_leave / lfg_close / lfg_voice ----------
 
 export async function handleLfgButton(interaction) {
   const [action, id] = interaction.customId.split(":");
@@ -250,6 +251,14 @@ export async function handleLfgButton(interaction) {
     return interaction.update(await renderLfgCard(guildId, post));
   }
 
+  if (action === "lfg_voice") {
+    if (userId !== post.authorId) return interaction.reply({ content: "Seul l'auteur de l'annonce peut changer le vocal.", flags: EPHEMERAL });
+    if (!toggleVoice(post)) return interaction.reply({ content: JOIN_REFUSALS.closed, flags: EPHEMERAL });
+    await saveLfg();
+    // Édition de la carte : allowedMentions vide, personne n'est notifié.
+    return interaction.update(await renderLfgCard(guildId, post));
+  }
+
   if (action === "lfg_close") {
     const staff = interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false;
     if (userId !== post.authorId && !staff) {
@@ -262,10 +271,10 @@ export async function handleLfgButton(interaction) {
   }
 }
 
-// Équipe complète : vocal d'équipe (option) puis ping des membres dans un message à part
-// (l'édition de la carte ne notifie personne).
+// Équipe complète : vocal d'équipe (option, sauf annonce « sans voc ») puis ping des membres
+// dans un message à part (l'édition de la carte ne notifie personne).
 async function onTeamFull(interaction, post, cfg) {
-  if (cfg.createVoice) {
+  if (cfg.createVoice && post.voice !== false) {
     const author = interaction.guild.members.cache.get(post.authorId);
     try {
       const voice = await createTempChannelFor(interaction.guild, {

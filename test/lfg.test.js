@@ -12,6 +12,7 @@ import {
   buildLfgCard,
   reservePost,
   findOpenPostByAuthor,
+  toggleVoice,
   getLfgConfig,
   setLfgConfig,
   tickLfg,
@@ -167,7 +168,7 @@ test("buildLfgCard : contient le tier, le rating, la région et l'expiration", (
   assert.match(txt, /\\\*\\\*go\\\*\\\*/, "message libre échappé");
   assert.match(txt, /Équipe 1\/2/);
   assert.deepEqual(payload.allowedMentions, { parse: [] });
-  assert.deepEqual(buttonIds(payload), ["lfg_join:p1", "lfg_leave:p1", "lfg_close:p1"]);
+  assert.deepEqual(buttonIds(payload), ["lfg_join:p1", "lfg_leave:p1", "lfg_close:p1", "lfg_voice:p1"]);
 });
 
 test("buildLfgCard : membre sans rank → « non classé », compte non lié → affiché", () => {
@@ -364,4 +365,28 @@ test("tickLfg : erreur réseau sur le salon → module laissé actif", async () 
   };
   await tickLfg(null, guild, Date.now());
   assert.equal((await getLfgConfig(G)).enabled, true);
+});
+
+const buttonLabels = (payload) =>
+  payload.components[0]
+    .toJSON()
+    .components.filter((c) => c.type === 1)
+    .flatMap((row) => row.components.map((b) => b.label));
+
+test("bouton vocal : libellé explicite selon l'état, absent une fois l'annonce terminée", () => {
+  assert.ok(buttonLabels(buildLfgCard(post(), {})).includes("Passer sans vocal"));
+  assert.ok(buttonLabels(buildLfgCard(post({ voice: false }), {})).includes("Repasser en vocal"));
+  assert.deepEqual(buttonIds(buildLfgCard(post({ status: "full" }), {})), []);
+});
+
+test("toggleVoice : bascule une annonce ouverte, refuse une annonce terminée", () => {
+  const p = post();
+  assert.equal(toggleVoice(p), true);
+  assert.equal(p.voice, false);
+  assert.match(cardText(buildLfgCard(p, {})), /🔇 Sans voc/);
+  assert.equal(toggleVoice(p), true);
+  assert.equal(p.voice, true);
+  const done = post({ status: "full", voice: true });
+  assert.equal(toggleVoice(done), false);
+  assert.equal(done.voice, true);
 });
