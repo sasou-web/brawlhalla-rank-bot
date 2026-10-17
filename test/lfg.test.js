@@ -226,6 +226,12 @@ test("buildLfgCard : non classé → Elo de ladder s'il en a un", () => {
   assert.doesNotMatch(ranked, /ladder/, "joueur classé : le rank suffit");
 });
 
+test("buildLfgCard : affiche si l'on joue en vocal (oui par défaut)", () => {
+  assert.match(cardText(buildLfgCard(post({ voice: true }), {})), /🎙️ Voc/);
+  assert.match(cardText(buildLfgCard(post({ voice: false }), {})), /🔇 Sans voc/);
+  assert.match(cardText(buildLfgCard(post(), {})), /🎙️ Voc/, "annonce sans le champ : en vocal");
+});
+
 // ---------- Ping du rôle de recherche ----------
 
 test("pingRoleFor : rôle du mode, vide si non configuré ou mode inconnu", () => {

@@ -25,7 +25,7 @@ const KEY = "lfg";
  *   config: DEFAULT_LFG_CONFIG,
  *   posts: { [id]: { id, authorId, mode, region, text, tier, rating, members: [authorId, ...],
  *     channelId, messageId, createdAt, expiresAt, status: "open"|"full"|"closed"|"expired",
- *     pingRoleId, closedReason, endedAt, fullAt, voiceChannelId, messageGone } },
+ *     pingRoleId, voice, closedReason, endedAt, fullAt, voiceChannelId, messageGone } },
  *   pingedAt: { [userId]: ts }   // dernier ping du rôle de recherche (anti-spam, persistant)
  * } } }
  * Faible écriture (quelques annonces par heure) : le doc kv suffit.
@@ -140,7 +140,7 @@ export function findOpenPostByAuthor(guildId, userId) {
  * Réserve une annonce (synchrone : la vérification « une annonce active par membre » et
  * l'insertion ne sont séparées par aucun `await`, deux /lfg simultanés ne passent pas).
  */
-export function reservePost(guildId, { authorId, mode, region, text, tier, rating, channelId, ttlMinutes, pingRoleId }, now = Date.now()) {
+export function reservePost(guildId, { authorId, mode, region, text, tier, rating, channelId, ttlMinutes, pingRoleId, voice = true }, now = Date.now()) {
   const existing = findOpenPostByAuthor(guildId, authorId);
   if (existing) return { error: "already", post: existing };
   const id = `${now.toString(36)}${randomBytes(2).toString("hex")}`;
@@ -154,6 +154,7 @@ export function reservePost(guildId, { authorId, mode, region, text, tier, ratin
     rating: rating || 0,
     members: [authorId],
     pingRoleId: pingRoleId || "",
+    voice: voice !== false,
     channelId,
     messageId: null,
     createdAt: now,
@@ -214,6 +215,17 @@ export function memberTier(link, mode) {
 export function memberRating(link, mode) {
   const rankMode = LFG_MODES[mode]?.rank ?? mode;
   return Number(link?.[`rating${rankMode}`]) || 0;
+}
+
+/**
+ * Le membre (compte lié `link`, ou null) peut-il publier une annonce de ce mode ?
+ * « Exiger un compte lié » ne vaut que pour le 2v2/3v3 : le 1v1 entraînement (`openJoin`)
+ * est ouvert à tous, pour publier comme pour rejoindre.
+ */
+export function canPublish(mode, link, cfg = DEFAULT_LFG_CONFIG) {
+  if (!LFG_MODES[mode]) return { ok: false, reason: "mode" };
+  if (cfg.requireLink && !link && !LFG_MODES[mode].openJoin) return { ok: false, reason: "not_linked" };
+  return { ok: true };
 }
 
 /**
@@ -334,7 +346,9 @@ export function buildLfgCard(post, links = {}, { ping = false, ladder = {} } = {
 
   const head = [view.title(post.mode)];
   if (post.pingRoleId && post.status === "open") head.push(`🔔 <@&${post.pingRoleId}>`);
-  head.push(`🌍 ${regionLabel(post.region)} · par <@${post.authorId}> · ${playerLabel(links[post.authorId], post.mode, post, ladder[post.authorId])}`);
+  // `voice` absent (annonces d'avant l'option) : en vocal, comme le défaut de /lfg.
+  const voiceLabel = post.voice === false ? "🔇 Sans voc" : "🎙️ Voc";
+  head.push(`🌍 ${regionLabel(post.region)} · ${voiceLabel} · par <@${post.authorId}> · ${playerLabel(links[post.authorId], post.mode, post, ladder[post.authorId])}`);
   if (post.text) head.push(`> ${escapeMarkdown(post.text).replace(/\n+/g, " ")}`);
   card.addTextDisplayComponents(text(head.join("\n")));
 

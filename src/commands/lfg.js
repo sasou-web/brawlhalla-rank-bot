@@ -10,6 +10,7 @@ import {
   deletePost,
   saveLfg,
   canJoin,
+  canPublish,
   joinPost,
   leavePost,
   closePost,
@@ -35,7 +36,7 @@ export const JOIN_REFUSALS = {
   author: "C'est ton annonce : attends qu'on te rejoigne.",
   already: "Tu fais déjà partie de cette équipe.",
   full: "L'équipe est déjà complète.",
-  not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : le LFG vérifie le rank de chacun.",
+  not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : en 2v2 et 3v3, le LFG vérifie le rank de chacun. Le 1v1 entraînement est ouvert à tous.",
   tier_gap: "L'écart de rank avec l'auteur est trop grand pour cette annonce.",
 };
 
@@ -57,13 +58,13 @@ export async function handleLfg(interaction) {
     const where = existing.messageId ? ` : ${postUrl(guildId, existing)}` : ".";
     return interaction.reply({ content: `Tu as déjà une annonce active${where}\nFerme-la avant d'en publier une autre.`, flags: EPHEMERAL });
   }
-  const link = await getLink(userId);
-  if (cfg.requireLink && !link) {
-    return interaction.reply({ content: JOIN_REFUSALS.not_linked, flags: EPHEMERAL });
-  }
-
   const mode = interaction.options.getString("mode", true);
-  if (!LFG_MODES[mode]) return interaction.reply({ content: "Mode inconnu.", flags: EPHEMERAL });
+  const link = await getLink(userId);
+  const allowed = canPublish(mode, link, cfg);
+  if (!allowed.ok) {
+    const content = allowed.reason === "not_linked" ? JOIN_REFUSALS.not_linked : "Mode inconnu.";
+    return interaction.reply({ content, flags: EPHEMERAL });
+  }
   const region = interaction.options.getString("region") ?? link?.region ?? "";
   const text = (interaction.options.getString("message") ?? "").replace(/\s+/g, " ").trim().slice(0, LFG_TEXT_MAX);
   if (text) {
@@ -98,6 +99,7 @@ export async function handleLfg(interaction) {
     channelId: channel.id,
     ttlMinutes: cfg.ttlMinutes,
     pingRoleId: ping.roleId,
+    voice: interaction.options.getBoolean?.("vocal") ?? true,
   });
   if (res.error) return interaction.editReply("Tu as déjà une annonce active. Ferme-la avant d'en publier une autre.");
 

@@ -414,6 +414,7 @@ export const commandsData = [
         .setRequired(false),
     )
     .addStringOption((o) => o.setName("message").setDescription("Un mot pour tes futurs coéquipiers.").setMaxLength(200).setRequired(false))
+    .addBooleanOption((o) => o.setName("vocal").setDescription("Tu joues en vocal ? (par défaut : oui)").setRequired(false))
     .toJSON(),
   // ---------- Ladder interne (défis 1v1, Elo du serveur) ----------
   new SlashCommandBuilder()
