@@ -20,9 +20,9 @@ import {
   markPinged,
   memberTier,
   memberRating,
-  buildLfgCard,
+  renderLfgCard,
 } from "../lfg.js";
-import { getLink, getAllLinks } from "../store.js";
+import { getLink } from "../store.js";
 import { getWordFilterConfig, checkWordFilterText } from "../wordfilter.js";
 import { createTempChannelFor } from "../voiceManager.js";
 import { checkCooldown, peekCooldown } from "./cooldowns.js";
@@ -36,7 +36,6 @@ export const JOIN_REFUSALS = {
   already: "Tu fais déjà partie de cette équipe.",
   full: "L'équipe est déjà complète.",
   not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : le LFG vérifie le rank de chacun.",
-  unranked: "Tu n'as pas de rank dans ce mode cette saison : l'écart de rank ne peut pas être vérifié.",
   tier_gap: "L'écart de rank avec l'auteur est trop grand pour cette annonce.",
 };
 
@@ -105,7 +104,7 @@ export async function handleLfg(interaction) {
   const post = res.post;
   let message;
   try {
-    message = await channel.send(buildLfgCard(post, await getAllLinks(), { ping: true }));
+    message = await channel.send(await renderLfgCard(guildId, post, { ping: true }));
   } catch (err) {
     await deletePost(guildId, post.id);
     return interaction.editReply(`Impossible de publier dans <#${channel.id}> (${err.message}). Préviens le staff.`);
@@ -143,7 +142,7 @@ export async function handleLfgButton(interaction) {
     if (!check.ok) return interaction.reply({ content: JOIN_REFUSALS[check.reason], flags: EPHEMERAL });
     joinPost(post, userId);
     await saveLfg();
-    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    await interaction.update(await renderLfgCard(guildId, post));
     if (post.status === "full") await onTeamFull(interaction, post, cfg);
     return;
   }
@@ -153,7 +152,7 @@ export async function handleLfgButton(interaction) {
     if (userId === post.authorId) return interaction.reply({ content: "Tu es l'auteur : utilise « Fermer » pour retirer l'annonce.", flags: EPHEMERAL });
     if (!leavePost(post, userId)) return interaction.reply({ content: "Tu ne fais pas partie de cette équipe.", flags: EPHEMERAL });
     await saveLfg();
-    return interaction.update(buildLfgCard(post, await getAllLinks()));
+    return interaction.update(await renderLfgCard(guildId, post));
   }
 
   if (action === "lfg_close") {
@@ -163,7 +162,7 @@ export async function handleLfgButton(interaction) {
     }
     if (!closePost(post, "closed")) return interaction.reply({ content: "Cette annonce est déjà terminée.", flags: EPHEMERAL });
     await saveLfg();
-    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    await interaction.update(await renderLfgCard(guildId, post));
     if (userId !== post.authorId) await logAudit(interaction.guild, `🔒 <@${userId}> a fermé l'annonce LFG de <@${post.authorId}>.`);
   }
 }
@@ -183,7 +182,7 @@ async function onTeamFull(interaction, post, cfg) {
       });
       post.voiceChannelId = voice.id;
       await saveLfg();
-      await interaction.editReply(buildLfgCard(post, await getAllLinks())).catch(() => {});
+      await interaction.editReply(await renderLfgCard(interaction.guildId, post)).catch(() => {});
     } catch (err) {
       console.warn("LFG : création du vocal d'équipe échouée :", err.message);
     }

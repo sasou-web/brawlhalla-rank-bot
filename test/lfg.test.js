@@ -77,7 +77,21 @@ test("canJoin : chaque refus", () => {
   assert.equal(canJoin(post(), link("Valhallan"), "b", cfg).reason, "tier_gap");
   assert.deepEqual(canJoin(post(), link("Diamond"), "b", cfg), { ok: true }, "écart de 2 paliers accepté");
   assert.equal(canJoin(post(), link("Tin"), "b", cfg).reason, "tier_gap");
-  assert.equal(canJoin(post(), { brawlhallaId: 1, tiers: { "2v2": null } }, "b", cfg).reason, "unranked");
+});
+
+test("canJoin : non classé libre, même avec requireLink (mais compte lié exigé)", () => {
+  assert.deepEqual(canJoin(post({ tier: "Valhallan" }), { brawlhallaId: 1, tiers: { "2v2": null } }, "b", cfg), { ok: true });
+  assert.deepEqual(canJoin(post({ tier: "Tin" }), { brawlhallaId: 1, tiers: {} }, "b", cfg), { ok: true });
+  assert.equal(canJoin(post(), null, "b", cfg).reason, "not_linked");
+});
+
+test("canJoin : annonce 1v1 entraînement ouverte à tous", () => {
+  const p = post({ mode: "1v1", tier: "Valhallan" });
+  assert.deepEqual(canJoin(p, null, "b", cfg), { ok: true }, "pas de compte lié exigé");
+  assert.deepEqual(canJoin(p, link("Tin", 800, "1v1"), "b", cfg), { ok: true }, "pas de contrôle d'écart");
+  assert.equal(canJoin(p, null, "a", cfg).reason, "author");
+  assert.equal(canJoin({ ...p, members: ["a", "c"] }, null, "b", cfg).reason, "full");
+  assert.match(cardText(buildLfgCard(p, {})), /ouvert à tous/);
 });
 
 test("canJoin : le rank comparé est celui du mode de l'annonce", () => {
@@ -200,6 +214,16 @@ test("buildLfgCard : en 2v2/3v3, le rank 1v1 s'affiche à côté du rank du mode
   assert.match(txt, /<@b> · 2v2 .*Silver.*· 1v1 \*non classé\*/, "membre qui rejoint aussi");
   const solo = cardText(buildLfgCard(post({ mode: "1v1" }), { a: both }));
   assert.doesNotMatch(solo, /· 1v1/, "en 1v1, pas de doublon");
+});
+
+test("buildLfgCard : non classé → Elo de ladder s'il en a un", () => {
+  const unranked = { brawlhallaId: 1, tiers: {} };
+  const p = post({ tier: null, rating: 0, members: ["a", "b"] });
+  const txt = cardText(buildLfgCard(p, { a: unranked, b: unranked }, { ladder: { b: 1042 } }));
+  assert.match(txt, /<@b> · 2v2 \*non classé\* · ladder 1[\s\u202f]042/);
+  assert.doesNotMatch(txt, /<@a> · 2v2 \*non classé\* · ladder/, "pas d'Elo inventé");
+  const ranked = cardText(buildLfgCard(post(), { a: link("Gold") }, { ladder: { a: 1200 } }));
+  assert.doesNotMatch(ranked, /ladder/, "joueur classé : le rank suffit");
 });
 
 // ---------- Ping du rôle de recherche ----------

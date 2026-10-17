@@ -353,9 +353,9 @@ function renderLfg(ctx) {
       settingsGroup(
         "Rank vérifié",
         "Le rank affiché vient du compte lié (/lier), pas d'une déclaration du joueur.",
-        switchField("Exiger un compte lié", c, "requireLink", { help: "Désactivé : un membre non lié peut publier ou rejoindre, affiché « compte non lié »." }),
+        switchField("Exiger un compte lié", c, "requireLink", { help: "Pour publier, et pour rejoindre une annonce 2v2 ou 3v3. Les annonces 1v1 entraînement restent ouvertes à tous. Désactivé : un membre non lié est affiché « compte non lié »." }),
         field("Écart de rank maximal", numberInput(c, "maxTierGap", { min: 0, max: 6, suffix: "paliers" }), {
-          help: "Écart entre le rank de l'auteur et celui de qui rejoint (Tin, Bronze, Silver, Gold, Platinum, Diamond, Valhallan). 6 : aucune limite.",
+          help: "2v2 et 3v3 uniquement : écart entre le rank de l'auteur et celui de qui rejoint (Tin, Bronze, Silver, Gold, Platinum, Diamond, Valhallan). Un joueur non classé dans le mode rejoint librement. 6 : aucune limite.",
         }),
       ),
       settingsGroup(

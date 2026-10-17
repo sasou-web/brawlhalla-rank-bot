@@ -15,6 +15,7 @@ import { REGION_LABELS, TIERS, tierIndex, tierEmojiText } from "./config.js";
 import { getAllLinks } from "./store.js";
 import { getSettings } from "./settings.js";
 import { removeTempChannel } from "./tempvoice.js";
+import { getLadderPlayer } from "./ladder.js";
 
 const KEY = "lfg";
 
@@ -46,10 +47,12 @@ export const DEFAULT_LFG_CONFIG = {
 };
 
 // `rank` : mode ranked dont on affiche le rank (le 1v1 « entraînement » montre le rank 1v1).
+// `openJoin` : n'importe qui rejoint, sans compte lié ni contrôle d'écart (choix d'ogsas,
+// 17/10/2026 : le rank vérifié ne sert qu'à former une équipe 2v2/3v3).
 export const LFG_MODES = {
   "2v2": { label: "2v2", capacity: 2, rank: "2v2" },
   "3v3": { label: "3v3", capacity: 3, rank: "3v3" },
-  "1v1": { label: "1v1 entraînement", capacity: 2, rank: "1v1" },
+  "1v1": { label: "1v1 entraînement", capacity: 2, rank: "1v1", openJoin: true },
 };
 
 export const LFG_COOLDOWN_MS = 2 * 60 * 1000;
@@ -216,23 +219,22 @@ export function memberRating(link, mode) {
 /**
  * Le membre `userId` (compte lié `link`, ou null) peut-il rejoindre `post` ?
  * Renvoie { ok: true } ou { ok: false, reason }. L'écart de rank se compare au tier de
- * l'auteur à la publication ; un membre sans rank dans le mode n'est accepté que si
- * `requireLink` est désactivé (l'écart ne peut pas être vérifié).
+ * l'auteur à la publication. « Non classé libre » (choix d'ogsas, 17/10/2026) : un membre
+ * sans rank dans le mode, ou un auteur non classé, ne subit aucun contrôle d'écart, même
+ * avec `requireLink` (qui n'exige alors que le compte lié). Annonce 1v1 entraînement
+ * (`openJoin`) : ouverte à tous, ni compte lié ni contrôle d'écart.
  */
 export function canJoin(post, link, userId, cfg = DEFAULT_LFG_CONFIG) {
   if (!post || post.status !== "open") return { ok: false, reason: "closed" };
   if (userId === post.authorId) return { ok: false, reason: "author" };
   if (post.members.includes(userId)) return { ok: false, reason: "already" };
   if (post.members.length >= lfgCapacity(post.mode)) return { ok: false, reason: "full" };
+  if (LFG_MODES[post.mode]?.openJoin) return { ok: true };
   if (cfg.requireLink && !link) return { ok: false, reason: "not_linked" };
   const authorIdx = tierIndex(post.tier);
   const joinIdx = tierIndex(memberTier(link, post.mode));
-  if (authorIdx >= 0) {
-    if (joinIdx < 0) {
-      if (cfg.requireLink) return { ok: false, reason: "unranked" };
-    } else if (Math.abs(authorIdx - joinIdx) > cfg.maxTierGap) {
-      return { ok: false, reason: "tier_gap" };
-    }
+  if (authorIdx >= 0 && joinIdx >= 0 && Math.abs(authorIdx - joinIdx) > cfg.maxTierGap) {
+    return { ok: false, reason: "tier_gap" };
   }
   return { ok: true };
 }
@@ -296,18 +298,18 @@ export function regionLabel(region) {
   return region ? REGION_LABELS[region] || region : "Toutes régions";
 }
 
-function rankLabel(link, mode, fallback = {}) {
+function rankLabel(link, mode, fallback = {}, ladderElo = null) {
   if (!link && !fallback.tier) return "*compte non lié*";
   const tier = memberTier(link, mode) ?? fallback.tier ?? null;
-  if (!tier) return "*non classé*";
+  if (!tier) return `*non classé*${ladderElo ? ` · ladder ${fmt(ladderElo)}` : ""}`;
   const rating = memberRating(link, mode) || fallback.rating || 0;
   const emoji = tierEmojiText(tier);
   return `${emoji ? `${emoji} ` : ""}**${tier}**${rating ? ` (${fmt(rating)})` : ""}`;
 }
 
 // En 2v2/3v3, le rank du mode peut être très différent du niveau réel : on montre aussi le 1v1.
-function playerLabel(link, mode, fallback = {}) {
-  const main = rankLabel(link, mode, fallback);
+function playerLabel(link, mode, fallback = {}, ladderElo = null) {
+  const main = rankLabel(link, mode, fallback, ladderElo);
   const rankMode = LFG_MODES[mode]?.rank ?? mode;
   if (rankMode === "1v1" || !link) return main;
   return `${rankMode} ${main} · 1v1 ${rankLabel(link, "1v1")}`;
@@ -325,25 +327,25 @@ const STATUS_VIEW = {
  * initial (`ping: true`) peut notifier, et uniquement le rôle de recherche du mode ; les
  * éditions ne notifient personne. Le ping d'équipe complète est un message à part.
  */
-export function buildLfgCard(post, links = {}, { ping = false } = {}) {
+export function buildLfgCard(post, links = {}, { ping = false, ladder = {} } = {}) {
   const view = STATUS_VIEW[post.status] ?? STATUS_VIEW.closed;
   const cap = lfgCapacity(post.mode);
   const card = new ContainerBuilder().setAccentColor(view.accent);
 
   const head = [view.title(post.mode)];
   if (post.pingRoleId && post.status === "open") head.push(`🔔 <@&${post.pingRoleId}>`);
-  head.push(`🌍 ${regionLabel(post.region)} · par <@${post.authorId}> · ${playerLabel(links[post.authorId], post.mode, post)}`);
+  head.push(`🌍 ${regionLabel(post.region)} · par <@${post.authorId}> · ${playerLabel(links[post.authorId], post.mode, post, ladder[post.authorId])}`);
   if (post.text) head.push(`> ${escapeMarkdown(post.text).replace(/\n+/g, " ")}`);
   card.addTextDisplayComponents(text(head.join("\n")));
 
   card.addSeparatorComponents(sep());
-  const lines = post.members.map((id) => `• <@${id}> · ${playerLabel(links[id], post.mode, id === post.authorId ? post : {})}`);
+  const lines = post.members.map((id) => `• <@${id}> · ${playerLabel(links[id], post.mode, id === post.authorId ? post : {}, ladder[id])}`);
   if (post.status === "open") for (let i = post.members.length; i < cap; i++) lines.push("• *place libre*");
   card.addTextDisplayComponents(text(`### Équipe ${post.members.length}/${cap}\n${lines.join("\n")}`));
 
   const ts = Math.floor(post.expiresAt / 1000);
   const footer = {
-    open: `-# Expire <t:${ts}:R> · écart de rank vérifié à l'entrée`,
+    open: `-# Expire <t:${ts}:R> · ${LFG_MODES[post.mode]?.openJoin ? "ouvert à tous" : "écart de rank vérifié à l'entrée"}`,
     full: post.voiceChannelId ? `-# 🎙️ Vocal d'équipe : <#${post.voiceChannelId}>` : "-# Bon jeu !",
     expired: "-# Personne n'a rejoint à temps. Relance /lfg pour republier.",
     closed: post.closedReason === "author_left" ? "-# L'auteur a quitté le serveur." : "-# Annonce fermée.",
@@ -361,6 +363,19 @@ export function buildLfgCard(post, links = {}, { ping = false } = {}) {
   }
   const allowedMentions = ping && post.pingRoleId ? { roles: [post.pingRoleId] } : { parse: [] };
   return { components: [card], flags: MessageFlags.IsComponentsV2, allowedMentions };
+}
+
+/**
+ * Carte prête à envoyer : comptes liés + Elo de ladder des membres qui y ont joué cette
+ * saison (affiché pour les joueurs non classés dans le mode).
+ */
+export async function renderLfgCard(guildId, post, { ping = false } = {}) {
+  const ladder = {};
+  for (const id of post.members) {
+    const row = getLadderPlayer(guildId, id);
+    if (row?.played > 0) ladder[id] = row.elo;
+  }
+  return buildLfgCard(post, await getAllLinks(), { ping, ladder });
 }
 
 // ---------- Tick (toutes les 60 s) ----------
@@ -425,11 +440,10 @@ export async function tickLfg(client, guild, now = Date.now()) {
 
   const editable = changed.filter((p) => p.messageId && !p.messageGone);
   if (editable.length) {
-    const links = await getAllLinks();
     for (const post of editable) {
       const ch = await channelOf(post.channelId);
       if (!ch) continue;
-      await ch.messages.edit(post.messageId, buildLfgCard(post, links)).catch((err) => {
+      await ch.messages.edit(post.messageId, await renderLfgCard(guild.id, post)).catch((err) => {
         if (err?.code === UNKNOWN_MESSAGE) post.messageGone = true;
       });
     }
