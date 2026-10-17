@@ -10,7 +10,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import { loadDoc, saveDoc } from "./db.js";
-import { applyVars } from "./welcome.js";
+import { applyVars, pingRoleId, greetingMentions } from "./welcome.js";
 
 /**
  * Section League of Legends.
@@ -29,6 +29,7 @@ const DEFAULT_CONFIG = {
   channelId: "",
   mode: "embed", // "embed" | "text" | "both"
   pingUser: true,
+  pingRoleId: "",
   oncePerMember: true,
   text: "{user} vient de rejoindre la section **League of Legends** 🎮",
   embed: {
@@ -122,16 +123,21 @@ function hexToInt(hex) {
 }
 
 /** Message d'accueil LoL (Components V2 en mode embed, texte simple sinon). */
-export function buildLolWelcomePayload(member, guild, cfg) {
+export function buildLolWelcomePayload(member, guild, cfg, { test = false } = {}) {
   const user = member.user || member;
   const mention = `<@${user.id}>`;
+  const roleId = pingRoleId(guild, cfg.pingRoleId);
+  const roleMention = roleId ? `<@&${roleId}>` : "";
+  const vars = (str) => applyVars(str, member, guild, { role: roleId });
+  const allowedMentions = greetingMentions(user.id, cfg, roleId, { test });
   const wantText = cfg.mode === "text" || cfg.mode === "both";
   const wantEmbed = cfg.mode === "embed" || cfg.mode === "both";
 
   if (!wantEmbed) {
-    let content = applyVars(cfg.text, member, guild);
+    let content = vars(cfg.text);
+    if (roleMention && !content.includes(roleMention)) content = `${roleMention} ${content}`;
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
-    return { content: content.slice(0, 2000), allowedMentions: { users: cfg.pingUser ? [user.id] : [] } };
+    return { content: content.slice(0, 2000), allowedMentions };
   }
 
   const e = cfg.embed || {};
@@ -140,10 +146,10 @@ export function buildLolWelcomePayload(member, guild, cfg) {
 
   const head = [];
   const title = e.title
-    ? applyVars(e.title, member, guild)
+    ? vars(e.title)
     : `🎮 Bienvenue sur la section LoL, ${member.displayName || user.username} !`;
   head.push(`## ${title}`.slice(0, 256));
-  if (e.description) head.push(applyVars(e.description, member, guild));
+  if (e.description) head.push(vars(e.description));
   const headText = head.join("\n").slice(0, 4000);
 
   if (e.thumbnailUser && avatar) {
@@ -163,14 +169,18 @@ export function buildLolWelcomePayload(member, guild, cfg) {
   }
 
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  const footerName = e.footer ? applyVars(e.footer, member, guild) : `${guild.name} • Section LoL`;
+  const footerName = e.footer ? vars(e.footer) : `${guild.name} • Section LoL`;
   const pingInside = cfg.pingUser && !wantText;
-  const footerLine = `-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>${pingInside ? ` • ${mention}` : ""}`;
+  // Rôle choisi sans {role} dans les textes : ajouté comme le ping du membre (texte, sinon pied).
+  const roleMissing = roleMention && !headText.includes(roleMention) && !footerName.includes(roleMention);
+  const roleInside = roleMissing && !wantText;
+  const footerLine = `-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>${pingInside ? ` • ${mention}` : ""}${roleInside ? ` • ${roleMention}` : ""}`;
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
 
   const components = [];
   if (wantText) {
-    let content = applyVars(cfg.text, member, guild);
+    let content = vars(cfg.text);
+    if (roleMissing && !content.includes(roleMention)) content = `${roleMention} ${content}`;
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
     components.push(new TextDisplayBuilder().setContent(content.slice(0, 2000)));
   }
@@ -179,7 +189,7 @@ export function buildLolWelcomePayload(member, guild, cfg) {
   return {
     components,
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { users: cfg.pingUser ? [user.id] : [] },
+    allowedMentions,
   };
 }
 

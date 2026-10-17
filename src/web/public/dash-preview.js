@@ -25,6 +25,7 @@ function sampleVars() {
     "{count}": GUILD ? fmtNum(GUILD.memberCount) : "0",
     "{date}": fmtDate(now, { day: "2-digit", month: "2-digit", year: "numeric" }),
     "{time}": fmtTime(now),
+    "{role}": "", // accueil sans rôle choisi : le bot vide la variable
   };
 }
 
@@ -126,7 +127,7 @@ function embedPreview(e, { thumbnail, mentions = defaultMentions() } = {}) {
   box.append(thumb ? el("img", { class: "dc-thumb", src: thumb, alt: "" }) : el("span"));
   if (safeUrl(e.image)) box.append(el("img", { class: "dc-image", src: safeUrl(e.image), alt: "" }));
   if (e.footer || e.timestamp) {
-    const parts = [e.footer ? discordHtml(e.footer).replace(/<\/?div[^>]*>/g, "") : "", e.timestamp ? "Aujourd'hui à " + fmtTime(Date.now()) : ""].filter(Boolean);
+    const parts = [e.footer ? discordHtml(e.footer, { mentions }).replace(/<\/?div[^>]*>/g, "") : "", e.timestamp ? "Aujourd'hui à " + fmtTime(Date.now()) : ""].filter(Boolean);
     box.append(el("div", { class: "dc-embed-footer" }, e.footerIcon && GUILD && GUILD.icon ? el("img", { src: GUILD.icon, alt: "" }) : null, el("span", { html: parts.join(" • ") })));
   }
   return box;
@@ -162,12 +163,22 @@ function greetingPreview(cfg) {
   const mode = cfg.mode || "embed";
   const kids = [];
   const wantText = mode === "text" || mode === "both";
-  if (wantText && cfg.text) kids.push(dcText(cfg.text, { mentions: defaultMentions() }));
-  else if (cfg.pingUser) kids.push(el("div", { class: "dc-content" }, el("span", { class: "dc-mention" }, "@" + (ME ? ME.username : "membre"))));
-  if (mode === "embed" || mode === "both") {
-    const e = cfg.embed || {};
-    kids.push(embedPreview(e, { thumbnail: e.thumbnailUser && ME && ME.avatar ? ME.avatar : null }));
-  }
+  const wantEmbed = mode === "embed" || mode === "both";
+  const e = cfg.embed || {};
+  const role = cfg.pingRoleId && GUILD ? (GUILD.roles || []).find((r) => r.id === cfg.pingRoleId) : null;
+  const mentions = role ? { ...defaultMentions(), "{role}": "@" + role.name } : defaultMentions();
+  // Comme le bot : rôle choisi mais absent des textes => ajouté en tête du message.
+  const used = [wantText ? cfg.text : "", wantEmbed ? `${e.title || ""} ${e.description || ""} ${e.footer || ""}` : ""].join(" ");
+  const lead = [];
+  if (cfg.pingUser && !(wantText && String(cfg.text || "").includes("{user}"))) lead.push("@" + (ME ? ME.username : "membre"));
+  if (role && !used.includes("{role}")) lead.push("@" + role.name);
+  const leadPills = lead.map((name) => el("span", { class: "dc-mention" }, name));
+  if (wantText && cfg.text) {
+    const body = dcText(cfg.text, { mentions });
+    if (leadPills.length) (body.firstElementChild || body).prepend(...leadPills.flatMap((p) => [p, " "]));
+    kids.push(body);
+  } else if (leadPills.length) kids.push(el("div", { class: "dc-content" }, ...leadPills.flatMap((p, i) => (i ? [" ", p] : [p]))));
+  if (wantEmbed) kids.push(embedPreview(e, { thumbnail: e.thumbnailUser && ME && ME.avatar ? ME.avatar : null, mentions }));
   if (!kids.length) kids.push(el("div", { class: "dc-content dc-sub" }, "Message vide."));
   return discordMessage(...kids);
 }

@@ -163,3 +163,58 @@ test("accueil LoL : titre absent => titre par defaut avec le nom du membre", () 
   const p = buildLolWelcomePayload(member(), GUILD, { mode: "embed", pingUser: false, embed: {} });
   assert.ok(JSON.stringify(p.components).includes("Kaya"), "le nom apparait dans le titre par defaut");
 });
+
+// ---------- Rôle à mentionner ({role}) ----------
+
+const ROLE = "333333333333333333";
+const GUILD_ROLES = { id: "999999999999999999", name: "Xray Brawl", memberCount: 1234, roles: { cache: new Set([ROLE]) } };
+
+test("{role} : mention du rôle choisi, seul rôle autorisé à pinger", () => {
+  for (const build of [buildWelcomePayload, buildLolWelcomePayload]) {
+    const cfg = { mode: "text", pingUser: true, pingRoleId: ROLE, text: "{user} arrive, {role} vous êtes prévenus" };
+    const p = build(member(), GUILD_ROLES, cfg);
+    assert.equal(p.content, `<@111> arrive, <@&${ROLE}> vous êtes prévenus`);
+    assert.deepEqual(p.allowedMentions, { users: ["111"], roles: [ROLE] });
+  }
+});
+
+test("{role} : un <@&id> collé à la main ou @everyone ne pingue pas", () => {
+  const cfg = { mode: "text", pingUser: false, pingRoleId: ROLE, text: "{role} <@&444444444444444444> @everyone" };
+  const p = buildLolWelcomePayload(member(), GUILD_ROLES, cfg);
+  assert.deepEqual(p.allowedMentions, { users: [], roles: [ROLE] });
+  assert.equal(p.allowedMentions.parse, undefined, "aucun parse : @everyone/@here restent inertes");
+});
+
+test("{role} : rôle choisi sans {role} => ajouté au message (texte, puis pied de la carte)", () => {
+  const text = buildLolWelcomePayload(member(), GUILD_ROLES, { mode: "text", pingUser: true, pingRoleId: ROLE, text: "Salut" });
+  assert.equal(text.content, `<@111> <@&${ROLE}> Salut`);
+  const card = buildWelcomePayload(member(), GUILD_ROLES, { mode: "embed", pingUser: false, pingRoleId: ROLE, embed: { title: "T" } });
+  assert.ok(JSON.stringify(card.components).includes(`<@&${ROLE}>`));
+  assert.deepEqual(card.allowedMentions.roles, [ROLE]);
+});
+
+test("{role} : rôle dans la carte en mode both => pas de doublon dans le texte", () => {
+  const cfg = { mode: "both", pingUser: false, pingRoleId: ROLE, text: "Salut", embed: { description: "Coucou {role}" } };
+  const dump = JSON.stringify(buildLolWelcomePayload(member(), GUILD_ROLES, cfg).components);
+  assert.equal(dump.split(`<@&${ROLE}>`).length - 1, 1);
+});
+
+test("{role} : aucun rôle, @everyone ou rôle supprimé => variable vidée, aucun ping de rôle", () => {
+  for (const pingRoleId of ["", GUILD_ROLES.id, "555555555555555555", "abc"]) {
+    const p = buildWelcomePayload(member(), GUILD_ROLES, { mode: "text", pingUser: false, pingRoleId, text: "Salut {role}!" });
+    assert.equal(p.content, "Salut !", `pingRoleId ${JSON.stringify(pingRoleId)}`);
+    assert.deepEqual(p.allowedMentions.roles, []);
+  }
+});
+
+test("{role} : le message de test affiche le rôle sans le notifier", () => {
+  const cfg = { mode: "text", pingUser: true, pingRoleId: ROLE, text: "{role}" };
+  const p = buildLolWelcomePayload(member(), GUILD_ROLES, cfg, { test: true });
+  assert.ok(p.content.includes(`<@&${ROLE}>`));
+  assert.deepEqual(p.allowedMentions, { users: ["111"], roles: [] });
+});
+
+test("{role} : le message de départ ne remplace pas {role}", () => {
+  const p = buildGoodbyePayload(member(), GUILD_ROLES, { goodbyeText: "{role}" });
+  assert.equal(p.content, "{role}");
+});

@@ -65,7 +65,7 @@ const roles = [
   ["Niveau 10+", "#6fb3ff"],
   ["Niveau 50+", "#ffb86b"],
   ["Membre", "#000000"],
-].map(([name, color]) => ({ id: nextId(), name, color }));
+].map(([name, color]) => ({ id: nextId(), name, color, mentionable: name !== "Staff" }));
 const roleId = (n) => roles.find((r) => r.name === n).id;
 
 const guild = {
@@ -76,6 +76,7 @@ const guild = {
   tiers: TIERS,
   channels: { text, voice, category, announcement, thread },
   roles,
+  botCanMentionAll: false,
   emojis: [
     { id: "1", name: "xk", animated: false, token: "<:xk:1>", url: "/favicon-32.png" },
     { id: "2", name: "kaya", animated: false, token: "<:kaya:2>", url: "/favicon-192.png" },
@@ -233,7 +234,7 @@ function baseConfig() {
       goodbyeChannelId: "",
       goodbyeText: "{username} a quitté le serveur.",
     },
-    lol: { enabled: false, roleId: roleId("League of Legends"), channelId: byName(text, "lol-discussion"), oncePerMember: true, mode: "embed", pingUser: true, text: "", embed: { color: "#c8aa6e", title: "Bienvenue sur la section LoL, {username} !", description: "Présente-toi et trouve des duos ici.", thumbnailUser: true, image: "", footer: "{server} · Section LoL", footerIcon: true } },
+    lol: { enabled: false, roleId: roleId("League of Legends"), channelId: byName(text, "lol-discussion"), oncePerMember: true, mode: "embed", pingUser: true, pingRoleId: "", text: "", embed: { color: "#c8aa6e", title: "Bienvenue sur la section LoL, {username} !", description: "Présente-toi et trouve des duos ici.", thumbnailUser: true, image: "", footer: "{server} · Section LoL", footerIcon: true } },
   };
 }
 
