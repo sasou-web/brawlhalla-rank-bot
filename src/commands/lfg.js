@@ -10,6 +10,9 @@ import {
   deletePost,
   saveLfg,
   canJoin,
+  canPublish,
+  modeFromRoleMentions,
+  noteFromMessage,
   joinPost,
   leavePost,
   closePost,
@@ -18,6 +21,7 @@ import {
   pingDecision,
   pingCooldownLeft,
   markPinged,
+  unmarkPinged,
   memberTier,
   memberRating,
   renderLfgCard,
@@ -35,7 +39,7 @@ export const JOIN_REFUSALS = {
   author: "C'est ton annonce : attends qu'on te rejoigne.",
   already: "Tu fais déjà partie de cette équipe.",
   full: "L'équipe est déjà complète.",
-  not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : le LFG vérifie le rank de chacun.",
+  not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : en 2v2 et 3v3, le LFG vérifie le rank de chacun. Le 1v1 entraînement est ouvert à tous.",
   tier_gap: "L'écart de rank avec l'auteur est trop grand pour cette annonce.",
 };
 
@@ -52,18 +56,15 @@ export async function handleLfg(interaction) {
   if (wait > 0) {
     return interaction.reply({ content: `⏳ Doucement ! Tu pourras republier dans **${Math.ceil(wait / 1000)}s**.`, flags: EPHEMERAL });
   }
-  const existing = findOpenPostByAuthor(guildId, userId);
-  if (existing) {
-    const where = existing.messageId ? ` : ${postUrl(guildId, existing)}` : ".";
-    return interaction.reply({ content: `Tu as déjà une annonce active${where}\nFerme-la avant d'en publier une autre.`, flags: EPHEMERAL });
-  }
-  const link = await getLink(userId);
-  if (cfg.requireLink && !link) {
-    return interaction.reply({ content: JOIN_REFUSALS.not_linked, flags: EPHEMERAL });
-  }
-
   const mode = interaction.options.getString("mode", true);
-  if (!LFG_MODES[mode]) return interaction.reply({ content: "Mode inconnu.", flags: EPHEMERAL });
+  const existing = findOpenPostByAuthor(guildId, userId, mode);
+  if (existing) return interaction.reply({ content: alreadyActive(guildId, existing), flags: EPHEMERAL });
+  const link = await getLink(userId);
+  const allowed = canPublish(mode, link, cfg);
+  if (!allowed.ok) {
+    const content = allowed.reason === "not_linked" ? JOIN_REFUSALS.not_linked : "Mode inconnu.";
+    return interaction.reply({ content, flags: EPHEMERAL });
+  }
   const region = interaction.options.getString("region") ?? link?.region ?? "";
   const text = (interaction.options.getString("message") ?? "").replace(/\s+/g, " ").trim().slice(0, LFG_TEXT_MAX);
   if (text) {
@@ -98,8 +99,9 @@ export async function handleLfg(interaction) {
     channelId: channel.id,
     ttlMinutes: cfg.ttlMinutes,
     pingRoleId: ping.roleId,
+    voice: interaction.options.getBoolean?.("vocal") ?? true,
   });
-  if (res.error) return interaction.editReply("Tu as déjà une annonce active. Ferme-la avant d'en publier une autre.");
+  if (res.error) return interaction.editReply(alreadyActive(guildId, res.post));
 
   const post = res.post;
   let message;
@@ -116,6 +118,11 @@ export async function handleLfg(interaction) {
   return interaction.editReply(`✅ Annonce publiée : ${message.url}\nElle expire dans ${cfg.ttlMinutes} min.${pingNote(ping, guildId, userId, pingCooldownMs)}`);
 }
 
+function alreadyActive(guildId, post) {
+  const where = post.messageId ? ` : ${postUrl(guildId, post)}` : ".";
+  return `Tu as déjà une annonce ${LFG_MODES[post.mode]?.label ?? post.mode} active${where}\nFerme-la avant d'en publier une autre.`;
+}
+
 function pingNote(ping, guildId, userId, pingCooldownMs) {
   if (ping.roleId) return `\n🔔 Le rôle <@&${ping.roleId}> a été pingé.`;
   if (ping.reason === "cooldown") {
@@ -124,6 +131,94 @@ function pingNote(ping, guildId, userId, pingCooldownMs) {
   }
   if (ping.reason) return "\n🔕 Le rôle de recherche n'a pas pu être pingé : préviens le staff.";
   return "";
+}
+
+// ---------- Annonce par ping du rôle de recherche ----------
+
+const REFUSAL_REPLY_MS = 60_000;
+
+// Réponse courte au message d'origine, retirée au bout de 20 s, au plus une par membre et par
+// minute : un membre qui spamme le ping ne fait pas spammer le bot à son tour.
+async function replyBriefly(message, content) {
+  if (!checkCooldown("lfg_ping_refusal", message.author.id, REFUSAL_REPLY_MS).ok) return;
+  const r = await message.reply({ content, allowedMentions: { repliedUser: true, parse: [] } }).catch(() => null);
+  if (r) setTimeout(() => r.delete().catch(() => {}), 20_000).unref?.();
+}
+
+/**
+ * Un membre pingue « 🔍 Recherche 1v1/2v2 » (ou le rôle 3v3) dans le salon LFG : la carte
+ * est créée en réponse à son message, avec les valeurs par défaut (vocal oui, durée du
+ * dashboard) et son texte comme note. Le rôle n'est pas repingé (il vient de l'être).
+ * Mêmes règles que /lfg (compte lié en 2v2/3v3, une annonce active par mode) et, en plus,
+ * le délai anti-spam du ping : un membre qui a pingé le rôle il y a moins de
+ * `pingCooldownMinutes` n'obtient pas de carte. Appelé après le filtre de mots (un message
+ * retiré ne crée rien) et seulement à la création du message (pas à l'édition).
+ */
+export async function handleLfgMention(message) {
+  const guildId = message.guild?.id;
+  if (!guildId || message.author?.bot || message.webhookId || message.system) return false;
+  // Un message qui pingue @everyone/@here (annonce du staff) n'est pas une recherche.
+  if (message.mentions?.everyone) return false;
+  const cfg = await getLfgConfig(guildId);
+  // Salon LFG uniquement : un fil a son propre identifiant de salon, il est donc ignoré.
+  if (!cfg.enabled || !cfg.channelId || message.channelId !== cfg.channelId) return false;
+  const mode = modeFromRoleMentions(cfg, [...(message.mentions?.roles?.keys?.() ?? [])]);
+  if (!mode) return false;
+
+  const userId = message.author.id;
+  const link = await getLink(userId);
+  const allowed = canPublish(mode, link, cfg);
+  if (!allowed.ok) {
+    await replyBriefly(message, JOIN_REFUSALS.not_linked);
+    return false;
+  }
+
+  // Vérifications et réservation sans `await` entre elles : deux messages envoyés en rafale
+  // (même mode ou deux modes différents) ne créent qu'une carte.
+  const existing = findOpenPostByAuthor(guildId, userId, mode);
+  if (existing) {
+    await replyBriefly(message, alreadyActive(guildId, existing));
+    return false;
+  }
+  const pingCooldownMs = cfg.pingCooldownMinutes * 60 * 1000;
+  const wait = pingCooldownLeft(guildId, userId, pingCooldownMs);
+  if (wait > 0) {
+    await replyBriefly(
+      message,
+      `⏳ Tu as déjà pingé un rôle de recherche il y a peu : pas de nouvelle annonce avant **${Math.ceil(wait / 60000)} min**. Évite de repinguer le rôle d'ici là.`,
+    );
+    return false;
+  }
+  const res = reservePost(guildId, {
+    authorId: userId,
+    mode,
+    region: link?.region ?? "",
+    text: noteFromMessage(message.content),
+    tier: memberTier(link, mode),
+    rating: memberRating(link, mode),
+    channelId: message.channelId,
+    ttlMinutes: cfg.ttlMinutes,
+  });
+  if (res.error) return false; // impossible ici (vérifié juste avant), gardé par sécurité
+  const post = res.post;
+  const previousPing = markPinged(guildId, userId);
+  try {
+    const card = await renderLfgCard(guildId, post);
+    // failIfNotExists : si le message a été supprimé entre-temps, l'envoi échoue et rien n'est créé.
+    const sent = await message.channel.send({
+      ...card,
+      reply: { messageReference: message.id, failIfNotExists: true },
+      allowedMentions: { parse: [], repliedUser: false },
+    });
+    post.messageId = sent.id;
+  } catch (err) {
+    unmarkPinged(guildId, userId, previousPing);
+    await deletePost(guildId, post.id);
+    console.warn("LFG : annonce par ping impossible :", err.message);
+    return false;
+  }
+  await saveLfg();
+  return true;
 }
 
 // ---------- Boutons lfg_join / lfg_leave / lfg_close ----------
