@@ -15,6 +15,9 @@ const GREETING_VARS = [
   ["{membercount}", "Nombre de membres"],
 ];
 
+// Arrivée et LoL seulement : le message de départ ne pingue personne.
+const GREETING_ROLE_VARS = [...GREETING_VARS, ["{role}", "Mention du rôle choisi"]];
+
 const MESSAGE_FORMATS = [
   { value: "embed", label: "Embed" },
   { value: "text", label: "Texte" },
@@ -511,8 +514,21 @@ function greetingFields(c, { textPlaceholder } = {}) {
       null,
       field("Format", bindSegmented(c, "mode", MESSAGE_FORMATS)),
       switchField("Mentionner le membre", c, "pingUser", { help: "Le membre reçoit une notification." }),
+      field("Rôle à mentionner", rolePicker(c, "pingRoleId"), {
+        optional: true,
+        help: "Ses membres reçoivent une notification. Place-le avec {role} dans le message, sinon il est ajouté automatiquement. Le bouton de test l'affiche sans le notifier.",
+      }),
+      showWhen(
+        callout("warn", "Active « Autoriser tout le monde à @mentionner ce rôle » dans ses réglages Discord, ou donne au bot la permission « Mentionner @everyone, @here et tous les rôles ».", {
+          title: "Ce rôle s'affichera sans notifier personne",
+        }),
+        () => {
+          const r = c.pingRoleId && (GUILD.roles || []).find((x) => x.id === c.pingRoleId);
+          return Boolean(r && r.mentionable === false && !GUILD.botCanMentionAll);
+        },
+      ),
     ),
-    showWhen(settingsGroup("Texte", null, field("Message", textArea(c, "text", { rows: 3, maxLength: 2000, placeholder: textPlaceholder })), varsHint(GREETING_VARS)), wantText),
+    showWhen(settingsGroup("Texte", null, field("Message", textArea(c, "text", { rows: 3, maxLength: 2000, placeholder: textPlaceholder })), varsHint(GREETING_ROLE_VARS)), wantText),
     showWhen(
       settingsGroup(
         "Embed",
@@ -524,7 +540,7 @@ function greetingFields(c, { textPlaceholder } = {}) {
         field("Image", urlInput(c.embed, "image"), { help: "Grande image en bas de l'embed.", optional: true }),
         field("Pied de page", textInput(c.embed, "footer", { maxLength: 2048 }), { optional: true }),
         switchField("Icône du serveur dans le pied de page", c.embed, "footerIcon"),
-        varsHint(GREETING_VARS),
+        varsHint(GREETING_ROLE_VARS),
       ),
       wantEmbed,
     ),

@@ -21,6 +21,7 @@ const DEFAULT_CONFIG = {
   channelId: "",
   mode: "embed", // "embed" | "text" | "both"
   pingUser: true,
+  pingRoleId: "",
   text: "Bienvenue {user} sur **{server}** ! Tu es notre {membercount}ᵉ membre 🎉",
   embed: {
     color: "#7c5cff",
@@ -81,11 +82,14 @@ export async function setWelcomeConfig(guildId, patch) {
 }
 
 // ----- Variables -----
-export function applyVars(str, member, guild) {
+// `opts.role` (id validé par pingRoleId, ou "") active {role} : messages d'accueil seulement.
+export function applyVars(str, member, guild, opts = {}) {
   if (!str) return str;
   const user = member.user || member;
   const name = member.displayName || user.globalName || user.username || "membre";
-  return String(str)
+  let out = String(str);
+  if (opts.role !== undefined) out = out.replaceAll("{role}", opts.role ? `<@&${opts.role}>` : "");
+  return out
     .replaceAll("{user}", `<@${user.id}>`)
     .replaceAll("{username}", name)
     .replaceAll("{user.name}", user.username || name)
@@ -100,18 +104,44 @@ function hexToInt(hex) {
   return m ? parseInt(m[1], 16) : 0x7c5cff;
 }
 
+/**
+ * Rôle pingé par {role} : un rôle existant du serveur, jamais @everyone (même id que le
+ * serveur). Renvoie l'id validé, ou "" (la variable est alors vidée et personne n'est pingé).
+ */
+export function pingRoleId(guild, roleId) {
+  const id = String(roleId || "");
+  if (!/^\d{17,20}$/.test(id) || id === guild.id) return "";
+  const cache = guild.roles?.cache;
+  if (cache && !cache.has(id)) return "";
+  return id;
+}
+
+/**
+ * Mentions autorisées d'un message d'accueil : le membre (si pingUser) et le rôle choisi,
+ * rien d'autre (ni @everyone/@here, ni un <@&id> collé à la main). `test` : le bouton
+ * « Envoyer un test » affiche le rôle sans notifier ses membres.
+ */
+export function greetingMentions(userId, cfg, roleId, { test = false } = {}) {
+  return { users: cfg.pingUser ? [userId] : [], roles: roleId && !test ? [roleId] : [] };
+}
+
 // ----- Payloads -----
-export function buildWelcomePayload(member, guild, cfg) {
+export function buildWelcomePayload(member, guild, cfg, { test = false } = {}) {
   const user = member.user || member;
   const mention = `<@${user.id}>`;
+  const roleId = pingRoleId(guild, cfg.pingRoleId);
+  const roleMention = roleId ? `<@&${roleId}>` : "";
+  const vars = (str) => applyVars(str, member, guild, { role: roleId });
+  const allowedMentions = greetingMentions(user.id, cfg, roleId, { test });
   const wantText = cfg.mode === "text" || cfg.mode === "both";
   const wantEmbed = cfg.mode === "embed" || cfg.mode === "both";
 
   // Mode texte seul : message classique (pas de Components V2).
   if (!wantEmbed) {
-    let content = applyVars(cfg.text, member, guild);
+    let content = vars(cfg.text);
+    if (roleMention && !content.includes(roleMention)) content = `${roleMention} ${content}`;
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
-    return { content: content.slice(0, 2000), allowedMentions: { users: cfg.pingUser ? [user.id] : [] } };
+    return { content: content.slice(0, 2000), allowedMentions };
   }
 
   // Mode embed / both : Components V2 (carte stylée, bordure de couleur, avatar à droite).
@@ -120,9 +150,9 @@ export function buildWelcomePayload(member, guild, cfg) {
   const container = new ContainerBuilder().setAccentColor(hexToInt(e.color));
 
   const head = [];
-  const title = e.title ? applyVars(e.title, member, guild) : `👋 Bienvenue ${member.displayName || user.username} !`;
+  const title = e.title ? vars(e.title) : `👋 Bienvenue ${member.displayName || user.username} !`;
   head.push(`## ${title}`.slice(0, 256));
-  if (e.description) head.push(applyVars(e.description, member, guild));
+  if (e.description) head.push(vars(e.description));
   const headText = head.join("\n").slice(0, 4000);
 
   if (e.thumbnailUser && avatar) {
@@ -142,16 +172,20 @@ export function buildWelcomePayload(member, guild, cfg) {
   // Pied : serveur + horodatage, en sous-texte discret. Le ping du membre est intégré ici
   // (un composant texte V2 dans le container notifie bien, grâce à allowedMentions).
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  const footerName = e.footer ? applyVars(e.footer, member, guild) : guild.name;
+  const footerName = e.footer ? vars(e.footer) : guild.name;
   const pingInside = cfg.pingUser && !wantText;
-  const footerLine = `-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>${pingInside ? ` • ${mention}` : ""}`;
+  // Rôle choisi sans {role} dans les textes : ajouté comme le ping du membre (texte, sinon pied).
+  const roleMissing = roleMention && !headText.includes(roleMention) && !footerName.includes(roleMention);
+  const roleInside = roleMissing && !wantText;
+  const footerLine = `-# ${footerName} • <t:${Math.floor(Date.now() / 1000)}:f>${pingInside ? ` • ${mention}` : ""}${roleInside ? ` • ${roleMention}` : ""}`;
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footerLine));
 
   // Le texte (mode « both ») reste un composant au-dessus de la carte. Le ping seul (mode
   // embed) est désormais intégré dans la carte (voir pingInside ci-dessus).
   const components = [];
   if (wantText) {
-    let content = applyVars(cfg.text, member, guild);
+    let content = vars(cfg.text);
+    if (roleMissing && !content.includes(roleMention)) content = `${roleMention} ${content}`;
     if (cfg.pingUser && !content.includes(mention)) content = `${mention} ${content}`;
     components.push(new TextDisplayBuilder().setContent(content.slice(0, 2000)));
   }
@@ -160,7 +194,7 @@ export function buildWelcomePayload(member, guild, cfg) {
   return {
     components,
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { users: cfg.pingUser ? [user.id] : [] },
+    allowedMentions,
   };
 }
 

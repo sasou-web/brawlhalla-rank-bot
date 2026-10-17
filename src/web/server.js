@@ -432,7 +432,7 @@ export function startWebServer(client, ctx = null) {
       const roles = [...guild.roles.cache.values()]
         .filter((r) => r.id !== guild.id)
         .sort((a, b) => b.position - a.position)
-        .map((r) => ({ id: r.id, name: r.name, color: r.hexColor }));
+        .map((r) => ({ id: r.id, name: r.name, color: r.hexColor, mentionable: r.mentionable }));
       const emojis = [...guild.emojis.cache.values()].map((e) => ({
         id: e.id,
         name: e.name,
@@ -490,6 +490,8 @@ export function startWebServer(client, ctx = null) {
           thread: [...threads.values()].sort((a, b) => a.parentName.localeCompare(b.parentName) || a.name.localeCompare(b.name)),
         },
         roles,
+        // Sans cette permission, seul un rôle « mentionnable » peut être pingé (accueil : {role}).
+        botCanMentionAll: guild.members.me?.permissions.has(PermissionFlagsBits.MentionEveryone) ?? false,
         emojis,
       });
     } catch (err) {
@@ -553,7 +555,7 @@ export function startWebServer(client, ctx = null) {
       const guild = await client.guilds.fetch(config.guildId);
       const member = await guild.members.fetch(req.session.id);
       const ch = await guild.channels.fetch(cfg.channelId);
-      await ch.send(buildWelcomePayload(member, guild, cfg));
+      await ch.send(buildWelcomePayload(member, guild, cfg, { test: true }));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -570,7 +572,7 @@ export function startWebServer(client, ctx = null) {
       const member = await guild.members.fetch(req.session.id);
       const ch = await guild.channels.fetch(cfg.channelId).catch(() => null);
       if (!ch?.isTextBased?.()) return res.status(400).json({ error: "Salon introuvable ou non textuel." });
-      await ch.send(buildLolWelcomePayload(member, guild, cfg));
+      await ch.send(buildLolWelcomePayload(member, guild, cfg, { test: true }));
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
