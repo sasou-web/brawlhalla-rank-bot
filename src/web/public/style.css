@@ -3336,6 +3336,13 @@ body.has-savebar .toasts {
   font-weight: 500;
 }
 
+.dc-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .dc-select {
   display: flex;
   align-items: center;
