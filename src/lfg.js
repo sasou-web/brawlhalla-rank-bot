@@ -132,16 +132,20 @@ export function getPost(guildId, id) {
   return getState(guildId).posts[id] ?? null;
 }
 
-export function findOpenPostByAuthor(guildId, userId) {
-  return Object.values(getState(guildId).posts).find((p) => p.status === "open" && p.authorId === userId) ?? null;
+/** Annonce encore ouverte de `userId` dans ce mode (tous modes si `mode` est omis), ou null. */
+export function findOpenPostByAuthor(guildId, userId, mode = null) {
+  return (
+    Object.values(getState(guildId).posts).find((p) => p.status === "open" && p.authorId === userId && (!mode || p.mode === mode)) ?? null
+  );
 }
 
 /**
- * Réserve une annonce (synchrone : la vérification « une annonce active par membre » et
- * l'insertion ne sont séparées par aucun `await`, deux /lfg simultanés ne passent pas).
+ * Réserve une annonce (synchrone : la vérification « une annonce active par membre et par
+ * mode » et l'insertion ne sont séparées par aucun `await`, deux demandes simultanées ne
+ * passent pas).
  */
 export function reservePost(guildId, { authorId, mode, region, text, tier, rating, channelId, ttlMinutes, pingRoleId, voice = true }, now = Date.now()) {
-  const existing = findOpenPostByAuthor(guildId, authorId);
+  const existing = findOpenPostByAuthor(guildId, authorId, mode);
   if (existing) return { error: "already", post: existing };
   const id = `${now.toString(36)}${randomBytes(2).toString("hex")}`;
   const post = {
@@ -171,9 +175,19 @@ export function pingCooldownLeft(guildId, userId, cooldownMs, now = Date.now()) 
   return Math.max(0, cooldownMs - (now - last));
 }
 
-/** Note le ping (persisté avec le prochain `saveLfg`). */
+/** Note le ping (persisté avec le prochain `saveLfg`). Renvoie l'horodatage précédent, pour `unmarkPinged`. */
 export function markPinged(guildId, userId, now = Date.now()) {
-  getState(guildId).pingedAt[userId] = now;
+  const pingedAt = getState(guildId).pingedAt;
+  const previous = pingedAt[userId] ?? 0;
+  pingedAt[userId] = now;
+  return previous;
+}
+
+/** Annule un `markPinged` (annonce finalement pas publiée). */
+export function unmarkPinged(guildId, userId, previous = 0) {
+  const pingedAt = getState(guildId).pingedAt;
+  if (previous) pingedAt[userId] = previous;
+  else delete pingedAt[userId];
 }
 
 export async function deletePost(guildId, id) {

@@ -184,16 +184,20 @@ test("buildLfgCard : expirée → sans boutons", () => {
   assert.deepEqual(buttonIds(payload), []);
 });
 
-test("reservePost : une seule annonce active par membre", () => {
+test("reservePost : une seule annonce active par membre et par mode", () => {
   const G = "g_lfg_reserve";
   const first = reservePost(G, { authorId: "u1", mode: "2v2", channelId: "c", ttlMinutes: 60 }, 1000);
   assert.ok(first.post);
   assert.equal(first.post.expiresAt, 1000 + 60 * 60 * 1000);
-  const second = reservePost(G, { authorId: "u1", mode: "3v3", channelId: "c", ttlMinutes: 60 }, 2000);
+  const second = reservePost(G, { authorId: "u1", mode: "2v2", channelId: "c", ttlMinutes: 60 }, 2000);
   assert.equal(second.error, "already");
-  assert.equal(findOpenPostByAuthor(G, "u1").id, first.post.id);
+  assert.equal(second.post.id, first.post.id);
+  const other = reservePost(G, { authorId: "u1", mode: "3v3", channelId: "c", ttlMinutes: 60 }, 2500);
+  assert.ok(other.post, "un autre mode reste possible");
+  assert.equal(findOpenPostByAuthor(G, "u1", "2v2").id, first.post.id);
+  assert.equal(findOpenPostByAuthor(G, "u1", "3v3").id, other.post.id);
   closePost(first.post);
-  assert.ok(reservePost(G, { authorId: "u1", mode: "3v3", channelId: "c", ttlMinutes: 60 }, 3000).post);
+  assert.ok(reservePost(G, { authorId: "u1", mode: "2v2", channelId: "c", ttlMinutes: 60 }, 3000).post);
 });
 
 test("setLfgConfig : bornes et validation", async () => {

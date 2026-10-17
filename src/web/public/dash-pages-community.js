@@ -365,7 +365,7 @@ function renderLfg(ctx) {
         field("Rôle 2v2", rolePicker(c, "pingRole2v2"), { optional: true }),
         field("Rôle 3v3", rolePicker(c, "pingRole3v3"), { optional: true }),
         field("Délai entre deux pings d'un membre", numberInput(c, "pingCooldownMinutes", { min: 0, max: 1440, suffix: "min" }), {
-          help: "Anti-spam : pendant ce délai, ses annonces sont publiées sans ping. 0 : ping à chaque annonce. Le rôle doit être mentionnable, ou le bot doit avoir « Mentionner @everyone, @here et tous les rôles » dans le salon LFG.",
+          help: "Anti-spam : pendant ce délai, ses annonces /lfg sont publiées sans ping, et pinger le rôle ne crée pas d'annonce (le bot le lui dit). 0 : pas de délai. Le rôle doit être mentionnable, ou le bot doit avoir « Mentionner @everyone, @here et tous les rôles » dans le salon LFG.",
         }),
       ),
       settingsGroup(
