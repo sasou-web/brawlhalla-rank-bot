@@ -14,8 +14,14 @@ import { getWelcomeConfig, pingRoleId } from "./welcome.js";
  *  - le rôle n'est notifié qu'une fois par délai (staffPingCooldownMin) ;
  *  - seul ce rôle peut être notifié (allowedMentions), jamais les nouveaux membres.
  *
- * Le bouton « 👋 J'y vais » affiche qui s'en occupe. La liste est relue dans le message
- * lui-même : le bouton marche encore après un redémarrage du bot.
+ *  - un membre déjà signalé dans les REPEAT_WINDOW_MS précédentes (départ puis retour)
+ *    ne crée pas de nouvelle alerte.
+ *
+ * Les liens sont des boutons (« 💬 Dire bienvenue ») : un lien masqué dans le texte
+ * peut s'afficher en markdown brut. « 👋 J'y vais » note qui s'en occupe puis lui répond
+ * en privé avec ces mêmes boutons (un bouton ne peut pas ouvrir un salon à lui seul).
+ * La liste « En route » est relue dans le message : le bouton marche encore après un
+ * redémarrage du bot.
  *
  * État en mémoire uniquement (alerte ouverte, dernier ping) : un redémarrage repart de zéro.
  */
@@ -23,7 +29,10 @@ import { getWelcomeConfig, pingRoleId } from "./welcome.js";
 export const STAFF_GO_ID = "wstaff_go";
 export const FLUSH_DELAY_MS = 6000;
 export const GROUP_WINDOW_MS = 5 * 60 * 1000;
+export const REPEAT_WINDOW_MS = 30 * 60 * 1000;
 export const MAX_LISTED = 10;
+// 5 rangées de 5 boutons au plus : 9 liens + « J'y vais ».
+const MAX_LINK_BUTTONS = 9;
 const MAX_COOLDOWN_MIN = 240;
 const HELPERS_PREFIX = "🙋 **En route :**";
 const HINT_LINE = "-# Clique sur **👋 J'y vais** pour montrer que tu t'en occupes.";
@@ -43,8 +52,29 @@ function helpersLine(helpers) {
 }
 
 function memberLine(m) {
-  if (m.left) return `➜ ~~<@${m.id}>~~ est déjà reparti 💨`;
-  return m.url ? `➜ <@${m.id}> · [**Dire bienvenue** 💬](${m.url})` : `➜ <@${m.id}> · dis-lui **bienvenue** dans le chat 💬`;
+  return m.left ? `➜ ~~<@${m.id}>~~ est déjà reparti 💨` : `➜ <@${m.id}>`;
+}
+
+function buttonLabel(text) {
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+/** Boutons lien vers le message de bienvenue de chaque membre encore présent. */
+export function welcomeLinkButtons(members) {
+  const linked = members.filter((m) => !m.left && /^https:\/\/\S+$/.test(m.url || ""));
+  return linked.slice(0, MAX_LINK_BUTTONS).map((m) =>
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setURL(m.url)
+      .setEmoji("💬")
+      .setLabel(buttonLabel(linked.length > 1 ? `Bienvenue ${m.name || "membre"}` : "Dire bienvenue")),
+  );
+}
+
+function rows(buttons) {
+  const out = [];
+  for (let i = 0; i < buttons.length; i += 5) out.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  return out;
 }
 
 /**
@@ -61,12 +91,10 @@ export function buildStaffAlertPayload(alert, { notifyRole = false, test = false
   for (const m of members.slice(0, MAX_LISTED)) lines.push(memberLine(m));
   if (n > MAX_LISTED) lines.push(`-# … et **${n - MAX_LISTED}** de plus`);
   lines.push(helpersLine(helpers));
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(STAFF_GO_ID).setStyle(ButtonStyle.Primary).setEmoji("👋").setLabel("J'y vais"),
-  );
+  const go = new ButtonBuilder().setCustomId(STAFF_GO_ID).setStyle(ButtonStyle.Primary).setEmoji("👋").setLabel("J'y vais");
   return {
     content: lines.join("\n").slice(0, 2000),
-    components: [row],
+    components: rows([...welcomeLinkButtons(members), go]),
     allowedMentions: { parse: [], roles: notifyRole && roleId && !test ? [roleId] : [] },
   };
 }
@@ -124,7 +152,8 @@ const states = new Map();
 function stateFor(guildId) {
   let st = states.get(guildId);
   if (!st) {
-    st = { pending: [], timer: null, open: null, lastPingAt: 0, chain: Promise.resolve() };
+    // alerted : { [memberId]: date de la dernière alerte } (anti départ/retour en boucle).
+    st = { pending: [], timer: null, open: null, lastPingAt: 0, alerted: new Map(), chain: Promise.resolve() };
     states.set(guildId, st);
   }
   return st;
@@ -150,7 +179,7 @@ export async function queueStaffAlert(member, { welcomeUrl = "", delayMs = FLUSH
   if (!cfg.staffEnabled || !cfg.staffChannelId) return;
   const st = stateFor(member.guild.id);
   st.pending = st.pending.filter((p) => p.id !== member.id);
-  st.pending.push({ id: member.id, welcomeUrl });
+  st.pending.push({ id: member.id, name: member.displayName || member.user?.globalName || member.user?.username || "", welcomeUrl });
   if (st.timer) return;
   st.timer = setTimeout(() => {
     st.timer = null;
@@ -163,15 +192,19 @@ export async function queueStaffAlert(member, { welcomeUrl = "", delayMs = FLUSH
 export function flushStaffAlerts(guild, { now = Date.now() } = {}) {
   const st = stateFor(guild.id);
   return run(st, async () => {
-    const items = st.pending.splice(0);
+    const open = st.open;
+    const openUsable = open && now - open.createdAt < GROUP_WINDOW_MS;
+    for (const [id, at] of st.alerted) if (now - at >= REPEAT_WINDOW_MS) st.alerted.delete(id);
+    // Déjà signalé récemment ailleurs que dans l'alerte en cours : pas de nouvelle alerte.
+    const items = st.pending.splice(0).filter((it) => !st.alerted.has(it.id) || (openUsable && open.members.some((m) => m.id === it.id)));
     if (!items.length) return null;
     const cfg = await getWelcomeConfig(guild.id);
     if (!cfg.staffEnabled || !cfg.staffChannelId) return null;
     await resolveLinks(guild, cfg, items);
+    for (const it of items) st.alerted.set(it.id, now);
 
-    let members = items.map((it) => ({ id: it.id, url: it.url, left: false }));
-    const open = st.open;
-    if (open && open.channelId === cfg.staffChannelId && now - open.createdAt < GROUP_WINDOW_MS) {
+    let members = items.map((it) => ({ id: it.id, name: it.name, url: it.url, left: false }));
+    if (openUsable && open.channelId === cfg.staffChannelId) {
       for (const m of members) {
         const known = open.members.find((x) => x.id === m.id);
         if (known) Object.assign(known, m);
@@ -218,23 +251,49 @@ export async function handleStaffAlertButton(interaction) {
   const st = stateFor(interaction.guildId);
   // Pas d'erreur vers le gestionnaire global : après deferUpdate, il remplacerait le texte
   // de l'alerte par le message d'erreur.
-  await run(st, () => toggleOnAlert(st, interaction)).catch((err) => {
+  const result = await run(st, () => toggleOnAlert(st, interaction)).catch((err) => {
     console.warn("Alerte staff (bouton) :", err.message);
-    return interaction.followUp({ content: "Impossible de mettre à jour l'alerte, réessaie.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    return null;
   });
+  await interaction.followUp({ ...goReply(result), flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
+/** Réponse privée au clic : les liens pour aller dire bienvenue, ou l'annulation. */
+export function goReply(result) {
+  if (!result) return { content: "Impossible de mettre à jour l'alerte, réessaie." };
+  if (!result.joined) return { content: "↩️ Tu n'es plus marqué **en route**." };
+  const links = result.links.slice(0, MAX_LINK_BUTTONS);
+  if (!links.length) return { content: "👋 **C'est noté, tu es en route !** Va lui dire **bienvenue** dans le chat 💬" };
+  return {
+    content: `👋 **C'est noté, tu es en route !** Clique pour ouvrir ${links.length > 1 ? "leurs messages" : "son message"} de bienvenue 👇`,
+    components: rows(links),
+  };
+}
+
+// Boutons lien d'une alerte déjà publiée (alerte hors mémoire).
+function linkButtonsOf(message) {
+  const out = [];
+  for (const row of message.components || []) {
+    for (const c of row.components || []) {
+      if (c.url) out.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(c.url).setEmoji("💬").setLabel(buttonLabel(c.label || "Dire bienvenue")));
+    }
+  }
+  return out;
 }
 
 async function toggleOnAlert(st, interaction) {
+  const userId = interaction.user.id;
   const open = st.open?.message?.id === interaction.message.id ? st.open : null;
   if (open) {
-    const helpers = toggleHelper(open.helpers, interaction.user.id);
+    const helpers = toggleHelper(open.helpers, userId);
     const edited = await interaction.editReply(buildStaffAlertPayload({ ...open, helpers }));
     open.helpers = helpers;
     if (edited) open.message = edited;
-    return;
+    return { joined: helpers.includes(userId), links: welcomeLinkButtons(open.members) };
   }
   // Alerte plus ancienne (ou bot redémarré) : la liste est relue dans le message à jour.
   const msg = await interaction.message.fetch().catch(() => interaction.message);
-  const helpers = toggleHelper(parseHelpers(msg.content), interaction.user.id);
+  const helpers = toggleHelper(parseHelpers(msg.content), userId);
   await interaction.editReply({ content: withHelpers(msg.content, helpers), allowedMentions: { parse: [] } });
+  return { joined: helpers.includes(userId), links: linkButtonsOf(msg) };
 }

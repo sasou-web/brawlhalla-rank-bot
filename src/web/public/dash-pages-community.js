@@ -523,11 +523,19 @@ function staffAlertPreview(c) {
   const role = c.staffRoleId && (GUILD.roles || []).find((r) => r.id === c.staffRoleId);
   const lines = [
     `${role ? "{role} " : ""}🚨 **Nouveau membre !** Allez lui dire **bienvenue** 👋`,
-    "➜ {user} · [**Dire bienvenue** 💬](https://discord.com)",
+    "➜ {user}",
     "-# Clique sur **👋 J'y vais** pour montrer que tu t'en occupes.",
   ];
   const mentions = role ? { ...defaultMentions(), "{role}": "@" + role.name } : defaultMentions();
-  return discordMessage(dcText(lines.join("\n"), { mentions }), el("span", { class: "dc-btn" }, el("span", { "aria-hidden": "true" }, "👋"), "J'y vais"));
+  return discordMessage(
+    dcText(lines.join("\n"), { mentions }),
+    el(
+      "div",
+      { class: "dc-btn-row" },
+      el("span", { class: "dc-btn link" }, el("span", { "aria-hidden": "true" }, "💬"), "Dire bienvenue", icon("external", 14)),
+      el("span", { class: "dc-btn" }, el("span", { "aria-hidden": "true" }, "👋"), "J'y vais"),
+    ),
+  );
 }
 
 function staffAlertTab(c) {
@@ -537,7 +545,7 @@ function staffAlertTab(c) {
       groups(
         settingsGroup(
           "Alerte staff",
-          "Prévient l'équipe à chaque arrivée, avec un lien vers le message de bienvenue de Discord du nouveau membre, pour aller lui dire bonjour dans le chat.",
+          "Prévient l'équipe à chaque arrivée, avec un bouton qui ouvre le message de bienvenue de Discord du nouveau membre dans le chat. « J'y vais » montre qui s'en occupe et lui renvoie ce bouton en privé.",
           switchField("Prévenir le staff à chaque arrivée", c, "staffEnabled"),
           field("Salon staff", channelPicker(c, "staffChannelId", "text"), { help: "Salon où l'alerte est publiée. Les nouveaux membres n'y sont jamais notifiés." }),
           field("Rôle à mentionner", rolePicker(c, "staffRoleId"), { optional: true, help: "Ex. Helpeur. Seul ce rôle est notifié." }),
