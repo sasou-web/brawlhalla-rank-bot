@@ -353,9 +353,19 @@ function renderLfg(ctx) {
       settingsGroup(
         "Rank vérifié",
         "Le rank affiché vient du compte lié (/lier), pas d'une déclaration du joueur.",
-        switchField("Exiger un compte lié", c, "requireLink", { help: "Désactivé : un membre non lié peut publier ou rejoindre, affiché « compte non lié »." }),
+        switchField("Exiger un compte lié", c, "requireLink", { help: "Pour publier, et pour rejoindre une annonce 2v2 ou 3v3. Les annonces 1v1 entraînement restent ouvertes à tous. Désactivé : un membre non lié est affiché « compte non lié »." }),
         field("Écart de rank maximal", numberInput(c, "maxTierGap", { min: 0, max: 6, suffix: "paliers" }), {
-          help: "Écart entre le rank de l'auteur et celui de qui rejoint (Tin, Bronze, Silver, Gold, Platinum, Diamond, Valhallan). 6 : aucune limite.",
+          help: "2v2 et 3v3 uniquement : écart entre le rank de l'auteur et celui de qui rejoint (Tin, Bronze, Silver, Gold, Platinum, Diamond, Valhallan). Un joueur non classé dans le mode rejoint librement. 6 : aucune limite.",
+        }),
+      ),
+      settingsGroup(
+        "Ping du rôle de recherche",
+        "À la publication, l'annonce pingue le rôle du mode choisi, comme les membres le faisaient à la main. Vide : pas de ping pour ce mode.",
+        field("Rôle 1v1", rolePicker(c, "pingRole1v1"), { optional: true }),
+        field("Rôle 2v2", rolePicker(c, "pingRole2v2"), { optional: true }),
+        field("Rôle 3v3", rolePicker(c, "pingRole3v3"), { optional: true }),
+        field("Délai entre deux pings d'un membre", numberInput(c, "pingCooldownMinutes", { min: 0, max: 1440, suffix: "min" }), {
+          help: "Anti-spam : pendant ce délai, ses annonces sont publiées sans ping. 0 : ping à chaque annonce. Le rôle doit être mentionnable, ou le bot doit avoir « Mentionner @everyone, @here et tous les rôles » dans le salon LFG.",
         }),
       ),
       settingsGroup(

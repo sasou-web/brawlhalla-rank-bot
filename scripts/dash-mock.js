@@ -149,7 +149,7 @@ function baseConfig() {
     clips: { enabled: true, channelIds: [byName(text, "clips")], reactions: ["🔥", "👍", "<:xk:1>"], requireVideo: true, deleteNonVideo: false, ignoreBots: true, ignoreReplies: true, pinThreshold: 10, extraDomains: ["catbox.moe"] },
     guessrank: { enabled: false, channelIds: [], reactions: [], ignoreBots: true, ignoreReplies: true, requireVideo: true, deleteNonVideo: false, extraDomains: [], singleVote: true, scoringEnabled: false, revealDelayHours: 24, pointsExact: 3, pointsNear: 1, truthMode: "1v1" },
     guild: { brawlhallaGuildId: scenario === "empty" ? "" : "48213", roleId: scenario === "empty" ? "" : roleId("Staff"), announceChannelId: byName(text, "annonces"), announceJoins: true },
-    lfg: { enabled: scenario !== "empty", channelId: scenario === "empty" ? "" : byName(text, "annonces"), ttlMinutes: 60, requireLink: true, maxTierGap: 2, createVoice: false, voiceCategoryId: "" },
+    lfg: { enabled: scenario !== "empty", channelId: scenario === "empty" ? "" : byName(text, "annonces"), ttlMinutes: 60, requireLink: true, maxTierGap: 2, createVoice: false, voiceCategoryId: "", pingRole1v1: "", pingRole2v2: "", pingRole3v3: "", pingCooldownMinutes: 15 },
     ladder: {
       enabled: scenario !== "empty",
       channelId: scenario === "empty" ? "" : byName(text, "ladder"),

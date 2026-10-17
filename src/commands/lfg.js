@@ -14,11 +14,15 @@ import {
   leavePost,
   closePost,
   lfgCapacity,
+  pingRoleFor,
+  pingDecision,
+  pingCooldownLeft,
+  markPinged,
   memberTier,
   memberRating,
-  buildLfgCard,
+  renderLfgCard,
 } from "../lfg.js";
-import { getLink, getAllLinks } from "../store.js";
+import { getLink } from "../store.js";
 import { getWordFilterConfig, checkWordFilterText } from "../wordfilter.js";
 import { createTempChannelFor } from "../voiceManager.js";
 import { checkCooldown, peekCooldown } from "./cooldowns.js";
@@ -32,7 +36,6 @@ export const JOIN_REFUSALS = {
   already: "Tu fais déjà partie de cette équipe.",
   full: "L'équipe est déjà complète.",
   not_linked: "Lie d'abord ton compte Brawlhalla avec `/lier` : le LFG vérifie le rank de chacun.",
-  unranked: "Tu n'as pas de rank dans ce mode cette saison : l'écart de rank ne peut pas être vérifié.",
   tier_gap: "L'écart de rank avec l'auteur est trop grand pour cette annonce.",
 };
 
@@ -74,6 +77,17 @@ export async function handleLfg(interaction) {
   const channel = await interaction.guild.channels.fetch(cfg.channelId).catch(() => null);
   if (!channel?.isTextBased?.()) return interaction.editReply("Le salon LFG est introuvable : préviens le staff.");
 
+  const pingCooldownMs = cfg.pingCooldownMinutes * 60 * 1000;
+  const pingRoleId = pingRoleFor(cfg, mode);
+  const ping = pingDecision(pingRoleId, {
+    role: pingRoleId ? interaction.guild.roles.cache.get(pingRoleId) ?? null : null,
+    botCanMentionAll: channel.permissionsFor?.(interaction.guild.members.me)?.has(PermissionFlagsBits.MentionEveryone) ?? false,
+    cooldownLeftMs: pingCooldownLeft(guildId, userId, pingCooldownMs),
+  });
+  if (ping.reason === "missing" || ping.reason === "not_mentionable") {
+    console.warn(`LFG : rôle de recherche ${pingRoleId} (${mode}) ${ping.reason === "missing" ? "introuvable" : "non mentionnable par le bot"}, annonce publiée sans ping.`);
+  }
+
   const res = reservePost(guildId, {
     authorId: userId,
     mode,
@@ -83,21 +97,33 @@ export async function handleLfg(interaction) {
     rating: memberRating(link, mode),
     channelId: channel.id,
     ttlMinutes: cfg.ttlMinutes,
+    pingRoleId: ping.roleId,
   });
   if (res.error) return interaction.editReply("Tu as déjà une annonce active. Ferme-la avant d'en publier une autre.");
 
   const post = res.post;
   let message;
   try {
-    message = await channel.send(buildLfgCard(post, await getAllLinks()));
+    message = await channel.send(await renderLfgCard(guildId, post, { ping: true }));
   } catch (err) {
     await deletePost(guildId, post.id);
     return interaction.editReply(`Impossible de publier dans <#${channel.id}> (${err.message}). Préviens le staff.`);
   }
   post.messageId = message.id;
+  if (ping.roleId) markPinged(guildId, userId);
   await saveLfg();
   checkCooldown("lfg", userId, LFG_COOLDOWN_MS);
-  return interaction.editReply(`✅ Annonce publiée : ${message.url}\nElle expire dans ${cfg.ttlMinutes} min.`);
+  return interaction.editReply(`✅ Annonce publiée : ${message.url}\nElle expire dans ${cfg.ttlMinutes} min.${pingNote(ping, guildId, userId, pingCooldownMs)}`);
+}
+
+function pingNote(ping, guildId, userId, pingCooldownMs) {
+  if (ping.roleId) return `\n🔔 Le rôle <@&${ping.roleId}> a été pingé.`;
+  if (ping.reason === "cooldown") {
+    const min = Math.ceil(pingCooldownLeft(guildId, userId, pingCooldownMs) / 60000);
+    return `\n🔕 Pas de ping cette fois : tu as déjà pingé le rôle récemment (prochain ping possible dans ${min} min).`;
+  }
+  if (ping.reason) return "\n🔕 Le rôle de recherche n'a pas pu être pingé : préviens le staff.";
+  return "";
 }
 
 // ---------- Boutons lfg_join / lfg_leave / lfg_close ----------
@@ -116,7 +142,7 @@ export async function handleLfgButton(interaction) {
     if (!check.ok) return interaction.reply({ content: JOIN_REFUSALS[check.reason], flags: EPHEMERAL });
     joinPost(post, userId);
     await saveLfg();
-    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    await interaction.update(await renderLfgCard(guildId, post));
     if (post.status === "full") await onTeamFull(interaction, post, cfg);
     return;
   }
@@ -126,7 +152,7 @@ export async function handleLfgButton(interaction) {
     if (userId === post.authorId) return interaction.reply({ content: "Tu es l'auteur : utilise « Fermer » pour retirer l'annonce.", flags: EPHEMERAL });
     if (!leavePost(post, userId)) return interaction.reply({ content: "Tu ne fais pas partie de cette équipe.", flags: EPHEMERAL });
     await saveLfg();
-    return interaction.update(buildLfgCard(post, await getAllLinks()));
+    return interaction.update(await renderLfgCard(guildId, post));
   }
 
   if (action === "lfg_close") {
@@ -136,7 +162,7 @@ export async function handleLfgButton(interaction) {
     }
     if (!closePost(post, "closed")) return interaction.reply({ content: "Cette annonce est déjà terminée.", flags: EPHEMERAL });
     await saveLfg();
-    await interaction.update(buildLfgCard(post, await getAllLinks()));
+    await interaction.update(await renderLfgCard(guildId, post));
     if (userId !== post.authorId) await logAudit(interaction.guild, `🔒 <@${userId}> a fermé l'annonce LFG de <@${post.authorId}>.`);
   }
 }
@@ -156,7 +182,7 @@ async function onTeamFull(interaction, post, cfg) {
       });
       post.voiceChannelId = voice.id;
       await saveLfg();
-      await interaction.editReply(buildLfgCard(post, await getAllLinks())).catch(() => {});
+      await interaction.editReply(await renderLfgCard(interaction.guildId, post)).catch(() => {});
     } catch (err) {
       console.warn("LFG : création du vocal d'équipe échouée :", err.message);
     }
