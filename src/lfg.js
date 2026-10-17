@@ -169,6 +169,13 @@ export function reservePost(guildId, { authorId, mode, region, text, tier, ratin
   return { post };
 }
 
+/** Bascule vocal / sans vocal d'une annonce ouverte. Renvoie false si elle est terminée. */
+export function toggleVoice(post) {
+  if (post.status !== "open") return false;
+  post.voice = post.voice === false;
+  return true;
+}
+
 /** Délai anti-spam restant (ms) avant que `userId` puisse de nouveau pinger le rôle de recherche. */
 export function pingCooldownLeft(guildId, userId, cooldownMs, now = Date.now()) {
   const last = getState(guildId).pingedAt[userId] ?? 0;
@@ -409,6 +416,10 @@ export function buildLfgCard(post, links = {}, { ping = false, ladder = {} } = {
         new ButtonBuilder().setCustomId(`lfg_join:${post.id}`).setLabel("Rejoindre").setEmoji("✋").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`lfg_leave:${post.id}`).setLabel("Quitter").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`lfg_close:${post.id}`).setLabel("Fermer").setStyle(ButtonStyle.Danger),
+        // Réservé à l'auteur ; le libellé dit ce que fait le clic, pas l'état (affiché plus haut).
+        post.voice === false
+          ? new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Repasser en vocal").setEmoji("🎙️").setStyle(ButtonStyle.Secondary)
+          : new ButtonBuilder().setCustomId(`lfg_voice:${post.id}`).setLabel("Passer sans vocal").setEmoji("🔇").setStyle(ButtonStyle.Secondary),
       ),
     );
   }

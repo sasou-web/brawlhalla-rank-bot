@@ -8,9 +8,11 @@ import {
   noteFromMessage,
   markPinged,
   pingCooldownLeft,
+  reservePost,
+  closePost,
   DEFAULT_LFG_CONFIG,
 } from "../src/lfg.js";
-import { handleLfg, handleLfgMention } from "../src/commands/lfg.js";
+import { handleLfg, handleLfgMention, handleLfgButton } from "../src/commands/lfg.js";
 import { onMessageUpdate } from "../src/partialEvents.js";
 import { setLink } from "../src/store.js";
 
@@ -272,4 +274,45 @@ test("message supprimé avant la création de la carte : rien n'est créé, pas 
   assert.equal(await handleLfgMention(message), false);
   assert.equal(findOpenPostByAuthor(G, "u_deleted"), null);
   assert.equal(pingCooldownLeft(G, "u_deleted", 15 * MIN), 0);
+});
+
+// ---------- Bouton vocal ----------
+
+function fakeButton(userId, customId) {
+  const updates = [];
+  const replies = [];
+  const interaction = {
+    customId,
+    guildId: G,
+    user: { id: userId },
+    update: async (p) => updates.push(p),
+    reply: async (p) => replies.push(p),
+  };
+  return { interaction, updates, replies };
+}
+
+test("bouton vocal : l'auteur bascule sa carte, sans pinguer personne", async () => {
+  const { post } = reservePost(G, { authorId: "u_voice_author", mode: "1v1", channelId: CHANNEL, ttlMinutes: 60, pingRoleId: ROLE_1V1 });
+  const off = fakeButton("u_voice_author", `lfg_voice:${post.id}`);
+  await handleLfgButton(off.interaction);
+  assert.equal(post.voice, false);
+  assert.equal(off.updates.length, 1);
+  assert.deepEqual(off.updates[0].allowedMentions, { parse: [] }, "même avec un rôle de recherche, l'édition ne pingue pas");
+  const on = fakeButton("u_voice_author", `lfg_voice:${post.id}`);
+  await handleLfgButton(on.interaction);
+  assert.equal(post.voice, true);
+});
+
+test("bouton vocal : refusé à un autre membre et sur une annonce terminée", async () => {
+  const { post } = reservePost(G, { authorId: "u_voice_owner", mode: "1v1", channelId: CHANNEL, ttlMinutes: 60 });
+  const other = fakeButton("u_voice_other", `lfg_voice:${post.id}`);
+  await handleLfgButton(other.interaction);
+  assert.equal(post.voice, true);
+  assert.equal(other.updates.length, 0);
+  assert.match(other.replies[0].content, /Seul l'auteur/);
+  closePost(post, "closed");
+  const late = fakeButton("u_voice_owner", `lfg_voice:${post.id}`);
+  await handleLfgButton(late.interaction);
+  assert.equal(post.voice, true);
+  assert.equal(late.updates.length, 0);
 });
